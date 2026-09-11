@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import { dataUrlToBlob, downloadFile } from '@/lib/download';
+import { dataUrlToBlob, downloadFile, extensionForDataUrl } from '@/lib/download';
 import { PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import type { DesignType, SilhouetteContour } from '@/lib/pendant-geometry';
@@ -131,7 +131,7 @@ export function MockupPanel({
                   type="button"
                   onClick={async () =>
                     downloadFile(
-                      `mockup-${designLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${material.id}.png`,
+                      `mockup-${designLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${material.id}.${extensionForDataUrl(state.dataUrl)}`,
                       await dataUrlToBlob(state.dataUrl),
                     )
                   }

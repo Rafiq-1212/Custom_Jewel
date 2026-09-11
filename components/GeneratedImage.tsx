@@ -1,18 +1,13 @@
 'use client';
 
+import { extensionForDataUrl } from '@/lib/download';
 import { ImagePreview } from './ImagePreview';
-
-function extensionFor(dataUrl: string): string {
-  const match = /^data:image\/(\w+);/.exec(dataUrl);
-  const type = match?.[1] ?? 'png';
-  return type === 'jpeg' ? 'jpg' : type;
-}
 
 export function GeneratedImage({ image }: { image: string }) {
   const download = () => {
     const link = document.createElement('a');
     link.href = image;
-    link.download = `jewellery-engraving.${extensionFor(image)}`;
+    link.download = `jewellery-engraving.${extensionForDataUrl(image)}`;
     document.body.appendChild(link);
     link.click();
     link.remove();

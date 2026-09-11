@@ -65,7 +65,7 @@ have a red or blue enamel rim ("Heart with Color" / "Round with Color").
 | Output | Format | Made by | Use |
 |---|---|---|---|
 | Engraving sketch | PNG, transparent | Gemini + pixel clean-up | Reference artwork |
-| Product mockup | PNG / JPEG | Gemini, from a flat render of the exact design | E-commerce listing |
+| Product mockup | PNG or JPEG (whichever Gemini returns; the file is named to match) | Gemini, from a flat render of the exact design | E-commerce listing |
 | Manufacturing files | **3DM**, **DXF**, SVG | Vector tracing, no AI | Rhino / laser cutter |
 | Preview image | PNG, transparent | Browser canvas | Quick share |
 

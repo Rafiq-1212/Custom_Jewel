@@ -17,6 +17,16 @@ export function downloadFile(filename: string, content: string | Blob, mimeType?
   URL.revokeObjectURL(url);
 }
 
+/**
+ * File extension matching a `data:image/...` URL's actual type. Gemini picks
+ * its own output format (PNG or JPEG), so a hard-coded `.png` would mislabel
+ * some downloads.
+ */
+export function extensionForDataUrl(dataUrl: string): string {
+  const type = /^data:image\/(\w+)[;,]/.exec(dataUrl)?.[1] ?? 'png';
+  return type === 'jpeg' ? 'jpg' : type;
+}
+
 /** Decode a `data:` URL into a Blob without a network round-trip. */
 export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   const response = await fetch(dataUrl);
