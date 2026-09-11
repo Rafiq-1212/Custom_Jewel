@@ -1,12 +1,13 @@
 /**
- * Pendant material registry.
+ * Pendant material registry — the two metals the True Tribute catalogue
+ * actually sells every photo pendant in: Silver and Gold.
  *
- * Switching material only changes which gradient the canvas renderer fills
- * the pendant body with — it never touches `generatedSketch` and never calls
- * the AI. Add a new metal by adding an entry here.
+ * Switching material only changes which colours the canvas renderer paints
+ * with and which wording the AI mockup prompt uses — it never touches the
+ * master sketch and never regenerates it. Add a new metal by adding an entry.
  */
 
-export type MaterialId = 'silver' | 'gold' | 'black-white';
+export type MaterialId = 'silver' | 'gold';
 
 export interface PendantMaterial {
   id: MaterialId;
@@ -14,22 +15,17 @@ export interface PendantMaterial {
   /** Five-stop brushed-metal gradient: highlight/mid/highlight/mid/shadow. */
   gradient: [string, string, string, string, string];
   /**
-   * Standard Pendant's rim-stroke colour; also the flat tint colour Edge Cut
-   * recolours its artwork to when `tintArtwork` is true (see
-   * `getTintedInkMask` in components/PendantPreview.tsx).
+   * Shape Pendant's rim-stroke colour; also the flat colour Silhouette Cut
+   * recolours its artwork to (see `getTintedInkMask` in
+   * components/PendantPreview.tsx).
    */
   rim: string;
   /** Swatch shown in the material picker. */
   swatch: string;
-  /**
-   * Whether Edge Cut's flat artwork should be recoloured to `rim` (gold and
-   * silver need this — the sketch's native ink must become a metal tone) or
-   * drawn exactly as the sketch itself renders it (black & white: the
-   * sketch's own grayscale shading already *is* the desired look, and
-   * flattening it to solid black loses that shading — see
-   * `paintFlatArtwork` in components/PendantPreview.tsx).
-   */
-  tintArtwork: boolean;
+  /** Single flat plate colour for the composite handed to the AI mockup renderer (lib/mockup.ts). */
+  flat: string;
+  /** How the AI mockup prompt names this metal. */
+  mockupDescription: string;
 }
 
 export const PENDANT_MATERIALS: Record<MaterialId, PendantMaterial> = {
@@ -39,7 +35,8 @@ export const PENDANT_MATERIALS: Record<MaterialId, PendantMaterial> = {
     gradient: ['#f2f4f6', '#b9bec4', '#f2f4f6', '#b9bec4', '#6f7479'],
     rim: '#8d9298',
     swatch: '#c8ccd1',
-    tintArtwork: true,
+    flat: '#c9cdd2',
+    mockupDescription: 'polished 925 sterling silver',
   },
   gold: {
     id: 'gold',
@@ -47,26 +44,45 @@ export const PENDANT_MATERIALS: Record<MaterialId, PendantMaterial> = {
     gradient: ['#f7e3a1', '#d8ab3f', '#f7e3a1', '#d8ab3f', '#8a6414'],
     rim: '#a97f22',
     swatch: '#d4af37',
-    tintArtwork: true,
-  },
-  'black-white': {
-    id: 'black-white',
-    label: 'Black & White',
-    // A genuine white-to-black monochrome gradient for Standard Pendant's
-    // plate. `rim` (pure black) is still used for Standard Pendant's
-    // decorative rim stroke — but `tintArtwork: false` means Edge Cut leaves
-    // the artwork untouched instead of flattening it to `rim`, since the
-    // sketch's own grayscale shading is already the desired black & white
-    // look.
-    gradient: ['#ffffff', '#a8a8a8', '#ffffff', '#4d4d4d', '#000000'],
-    rim: '#000000',
-    swatch: '#808080',
-    tintArtwork: false,
+    flat: '#d8ab3f',
+    mockupDescription: 'polished 22k yellow gold',
   },
 };
 
 export const PENDANT_MATERIAL_LIST: PendantMaterial[] = Object.values(PENDANT_MATERIALS);
 
+export const DEFAULT_MATERIAL_ID: MaterialId = 'silver';
+
 export function isMaterialId(value: string): value is MaterialId {
   return value in PENDANT_MATERIALS;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Enamel rim — the catalogue's "Heart with Color" / "Round with Color".      */
+/* -------------------------------------------------------------------------- */
+
+export type RimColorId = 'none' | 'red' | 'blue';
+
+export interface RimColor {
+  id: RimColorId;
+  label: string;
+  /** `null` for no rim. */
+  hex: string | null;
+}
+
+export const RIM_COLORS: Record<RimColorId, RimColor> = {
+  none: { id: 'none', label: 'Plain metal', hex: null },
+  red: { id: 'red', label: 'Red enamel rim', hex: '#d62828' },
+  blue: { id: 'blue', label: 'Blue enamel rim', hex: '#1d4ed8' },
+};
+
+export const RIM_COLOR_LIST: RimColor[] = Object.values(RIM_COLORS);
+
+export const DEFAULT_RIM_COLOR_ID: RimColorId = 'none';
+
+/** Width of the enamel band, in the shared 100 x 116 viewBox units, measured inward from the plate edge. */
+export const RIM_BAND_WIDTH = 5;
+
+export function isRimColorId(value: string): value is RimColorId {
+  return value in RIM_COLORS;
 }

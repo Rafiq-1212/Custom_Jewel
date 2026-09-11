@@ -13,28 +13,21 @@
  * the persistence is an acceptable degradation, losing the app is not.
  */
 
-import { isMaterialId, type MaterialId } from './materials';
-import {
-  DEFAULT_DESIGN_TYPE,
-  DEFAULT_EDGE_CUT_STYLE,
-  isDesignType,
-  isEdgeCutStyle,
-  type DesignType,
-  type EdgeCutStyle,
-} from './pendant-geometry';
+import { DEFAULT_MATERIAL_ID, DEFAULT_RIM_COLOR_ID, isMaterialId, isRimColorId, type MaterialId, type RimColorId } from './materials';
+import { DEFAULT_DESIGN_TYPE, isDesignType, type DesignType } from './pendant-geometry';
 import { DEFAULT_CATEGORY_ID, isCategoryId, type CategoryId } from './pendant-categories';
-import { DEFAULT_TRANSFORM, isShapeId, type PendantTransform, type ShapeId } from './pendant-shapes';
+import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, isShapeId, type PendantTransform, type ShapeId } from './pendant-shapes';
 
 const SKETCH_KEY = 'pendant-designer:sketch';
 const PREFS_KEY = 'pendant-designer:prefs';
 
-interface StoredPrefs {
+export interface StoredPrefs {
   selectedCategory: CategoryId;
   selectedShape: ShapeId;
   selectedMaterial: MaterialId;
   transform: PendantTransform;
   designType: DesignType;
-  edgeCutStyle: EdgeCutStyle;
+  rimColor: RimColorId;
 }
 
 function getStorage(): Storage | null {
@@ -78,17 +71,29 @@ export function savePrefs(prefs: StoredPrefs): void {
   }
 }
 
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 5;
+
 function isPendantTransform(value: unknown): value is PendantTransform {
   if (!value || typeof value !== 'object') return false;
   const t = value as Record<string, unknown>;
   return (
     typeof t.zoom === 'number' &&
-    typeof t.x === 'number' &&
-    typeof t.y === 'number' &&
-    typeof t.rotation === 'number'
+    t.zoom >= MIN_ZOOM &&
+    t.zoom <= MAX_ZOOM &&
+    Number.isFinite(t.x) &&
+    Number.isFinite(t.y) &&
+    Number.isFinite(t.rotation)
   );
 }
 
+/**
+ * Every field falls back to its default individually rather than the whole
+ * record being discarded: the catalogue of shapes and metals has changed
+ * since this format first shipped (e.g. a persisted 'diamond' shape or
+ * 'black-white' metal no longer exists), and a stale pick in one field is no
+ * reason to lose the customer's otherwise-valid session.
+ */
 export function loadPrefs(): StoredPrefs | null {
   const storage = getStorage();
   if (!storage) return null;
@@ -96,38 +101,15 @@ export function loadPrefs(): StoredPrefs | null {
     const raw = storage.getItem(PREFS_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredPrefs>;
-    if (
-      typeof parsed.selectedShape !== 'string' ||
-      !isShapeId(parsed.selectedShape) ||
-      typeof parsed.selectedMaterial !== 'string' ||
-      !isMaterialId(parsed.selectedMaterial) ||
-      !isPendantTransform(parsed.transform)
-    ) {
-      return null;
-    }
-    // Category, designType and edgeCutStyle were each added after this
-    // storage format first shipped — fall back rather than discarding an
-    // otherwise-valid, already-persisted session just because it predates a
-    // field.
-    const selectedCategory =
-      typeof parsed.selectedCategory === 'string' && isCategoryId(parsed.selectedCategory)
-        ? parsed.selectedCategory
-        : DEFAULT_CATEGORY_ID;
-    const designType =
-      typeof parsed.designType === 'string' && isDesignType(parsed.designType)
-        ? parsed.designType
-        : DEFAULT_DESIGN_TYPE;
-    const edgeCutStyle =
-      typeof parsed.edgeCutStyle === 'string' && isEdgeCutStyle(parsed.edgeCutStyle)
-        ? parsed.edgeCutStyle
-        : DEFAULT_EDGE_CUT_STYLE;
+    const pick = <T extends string>(value: unknown, guard: (v: string) => v is T, fallback: T): T =>
+      typeof value === 'string' && guard(value) ? value : fallback;
     return {
-      selectedCategory,
-      selectedShape: parsed.selectedShape,
-      selectedMaterial: parsed.selectedMaterial,
-      transform: parsed.transform,
-      designType,
-      edgeCutStyle,
+      selectedCategory: pick(parsed.selectedCategory, isCategoryId, DEFAULT_CATEGORY_ID),
+      selectedShape: pick(parsed.selectedShape, isShapeId, DEFAULT_SHAPE_ID),
+      selectedMaterial: pick(parsed.selectedMaterial, isMaterialId, DEFAULT_MATERIAL_ID),
+      transform: isPendantTransform(parsed.transform) ? parsed.transform : DEFAULT_TRANSFORM,
+      designType: pick(parsed.designType, isDesignType, DEFAULT_DESIGN_TYPE),
+      rimColor: pick(parsed.rimColor, isRimColorId, DEFAULT_RIM_COLOR_ID),
     };
   } catch {
     return null;

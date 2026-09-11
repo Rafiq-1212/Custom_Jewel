@@ -103,5 +103,6 @@ export async function extractRemoveBgContour(masterSketch: string): Promise<Silh
     y: p.y * scale - naturalHeight / 2,
   }));
 
-  return { points, imageWidth: naturalWidth, imageHeight: naturalHeight };
+  // No ring/hole here: this parked path predates the integrated hanging ring.
+  return { points, holes: [], imageWidth: naturalWidth, imageHeight: naturalHeight };
 }

@@ -1,62 +1,52 @@
 'use client';
 
 /**
- * Custom Pendant Design workflow.
+ * Custom Pendant Design workflow — True Tribute's photo-pendant tool.
  *
- * Two completely separate operations, on purpose:
+ * The operator uploads a customer's photo, picks the pendant category, and
+ * gets everything the business needs from that one photo:
  *
- *   Operation 1 — AI generation (this file's `generateSketch`)
- *     originalImage -> POST /api/generate-image -> masterSketch
- *     Runs exactly once per click of "Generate Sketch" (or an explicit,
- *     deliberate "Regenerate" of the same photo). Nothing else in this file
- *     calls that endpoint. `/api/generate-image` itself also crops and
- *     removes the background before responding (lib/image-processing.ts) —
- *     deterministic pixel arithmetic, not a second AI call — so what lands in
- *     `masterSketch` already has no rectangular boundary to leak through any
- *     later transform.
+ *   Operation 1 — AI sketch generation (`generateSketch`)
+ *     photo -> POST /api/generate-image -> masterSketch. Runs exactly once
+ *     per click of "Generate Sketch" (or an explicit "Regenerate"). The
+ *     server also crops and clears the background (lib/image-processing.ts)
+ *     — deterministic pixel arithmetic, not a second AI call.
  *
  *   Operation 2 — product customisation (everything below `masterSketch`)
- *     category, shape, material, zoom/position/rotation are all plain React
- *     state. Their setters do nothing but set state — no fetch, no AI, ever.
- *     The <PendantPreview> canvas is what turns masterSketch + category +
- *     shape + material + transform into a picture, entirely on the client.
- *     /api/export-laser (SVG/DXF/PNG) is the same story: vectorization and
- *     rasterization of the existing masterSketch, never a new generation.
+ *     design type, shape, metal, enamel rim, zoom/position/rotation are all
+ *     plain React state. <PendantPreview> paints them on a canvas, entirely
+ *     client-side. /api/export-laser (SVG/DXF/3DM) is vectorization of the
+ *     existing sketch, never a new generation.
  *
- * The two are wired so that once `masterSketch !== null`, nothing in
- * Operation 2 can put it back to `null` or call Operation 1 again.
+ *   Operation 3 — product mockup (components/MockupPanel.tsx)
+ *     The one deliberate second AI call: the current design goes to
+ *     POST /api/render-mockup for a photorealistic listing photo. Only when
+ *     the operator clicks "Render", once per metal, never on a slider drag.
+ *
+ * Once `masterSketch !== null`, nothing in Operation 2 or 3 can put it back
+ * to `null` or call Operation 1 again.
  */
 
 import * as React from 'react';
 import { DownloadPanel } from '@/components/DownloadPanel';
-import { EdgeCutStylePicker } from '@/components/EdgeCutStylePicker';
 import { ExportPanel } from '@/components/ExportPanel';
 import { GeneratedImage } from '@/components/GeneratedImage';
 import { GenerationProgress } from '@/components/GenerationProgress';
 import { ImagePreview } from '@/components/ImagePreview';
 import { ImageUploader } from '@/components/ImageUploader';
 import { MaterialPicker } from '@/components/MaterialPicker';
+import { MockupPanel } from '@/components/MockupPanel';
 import { PendantCategoryPicker } from '@/components/PendantCategoryPicker';
 import { PendantControls } from '@/components/PendantControls';
 import { PendantDesignPicker } from '@/components/PendantDesignPicker';
 import { PendantPreview } from '@/components/PendantPreview';
 import { PendantShapePicker } from '@/components/PendantShapePicker';
-import { extractSketchSilhouettes, type SketchSilhouettes } from '@/lib/edge-cut-contour';
-import { PENDANT_MATERIAL_LIST, type MaterialId } from '@/lib/materials';
-import {
-  DEFAULT_DESIGN_TYPE,
-  DEFAULT_EDGE_CUT_STYLE,
-  type DesignType,
-  type EdgeCutStyle,
-  type SilhouetteContour,
-} from '@/lib/pendant-geometry';
-import {
-  DEFAULT_CATEGORY_ID,
-  GENERATION_CATEGORY_LIST,
-  PENDANT_CATEGORIES,
-  type CategoryId,
-} from '@/lib/pendant-categories';
-import { DEFAULT_TRANSFORM, PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
+import { RimColorPicker } from '@/components/RimColorPicker';
+import { extractSilhouetteContour } from '@/lib/edge-cut-contour';
+import { DEFAULT_MATERIAL_ID, DEFAULT_RIM_COLOR_ID, PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
+import { DEFAULT_DESIGN_TYPE, type DesignType, type SilhouetteContour } from '@/lib/pendant-geometry';
+import { DEFAULT_CATEGORY_ID, GENERATION_CATEGORY_LIST, PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
+import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
 import { clearPendantSession, loadPrefs, loadSketch, savePrefs, saveSketch } from '@/lib/pendant-storage';
 
 type Status = 'idle' | 'generating' | 'done' | 'error';
@@ -65,52 +55,35 @@ export default function Home() {
   const [file, setFile] = React.useState<File | null>(null);
   const [originalImage, setOriginalImage] = React.useState<string | null>(null);
 
-  // Deliberately *not* hydrated via a lazy initializer. sessionStorage does
-  // not exist during server rendering, so a lazy initializer would read it on
-  // the client's first render only — producing exactly the state the server
-  // could never have rendered, and a hydration mismatch on every reload where
-  // a sketch happens to already be persisted (i.e. this feature's main use
-  // case). Both server and client must render these SSR-safe defaults first;
-  // the effect below is what's allowed to differ, strictly after hydration.
+  // Deliberately *not* hydrated via a lazy initializer: sessionStorage does
+  // not exist during server rendering, so both server and client must render
+  // these SSR-safe defaults first; the effect below is what's allowed to
+  // differ, strictly after hydration.
   const [masterSketch, setMasterSketch] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<Status>('idle');
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
-  // Operation 2 state. Every setter here is plain React state — none of them
-  // is ever wired to the fetch call in `generateSketch` below. The raw
-  // uploaded photo is deliberately not persisted alongside these: it isn't
-  // the master asset, the sketch is, and re-encoding a multi-MB photo into
-  // sessionStorage on every upload isn't worth what it would buy.
-  // `null` until the customer actively picks one — generation is blocked
-  // until then (see `generateSketch`), since the category now also selects
-  // Gemini's framing prompt, not just a post-generation crop preset. Once a
-  // sketch exists this is guaranteed non-null (`activeCategoryId` below);
-  // there's no post-generation UI to unset it, so it never reverts to null
-  // except via `startOver`.
+  // Operation 2 state. Every setter here is plain React state — none is ever
+  // wired to the fetch call in `generateSketch`. `selectedCategory` is null
+  // until the operator picks one; generation is blocked until then, since
+  // the category also selects Gemini's framing prompt.
   const [selectedCategory, setSelectedCategory] = React.useState<CategoryId | null>(null);
-  const [selectedShape, setSelectedShape] = React.useState<ShapeId>('heart');
-  const [selectedMaterial, setSelectedMaterial] = React.useState<MaterialId>('silver');
+  const [selectedShape, setSelectedShape] = React.useState<ShapeId>(DEFAULT_SHAPE_ID);
+  const [selectedMaterial, setSelectedMaterial] = React.useState<MaterialId>(DEFAULT_MATERIAL_ID);
   const [transform, setTransform] = React.useState<PendantTransform>(DEFAULT_TRANSFORM);
   const [selectedDesignType, setSelectedDesignType] = React.useState<DesignType>(DEFAULT_DESIGN_TYPE);
-  const [selectedEdgeCutStyle, setSelectedEdgeCutStyle] = React.useState<EdgeCutStyle>(DEFAULT_EDGE_CUT_STYLE);
+  const [rimColor, setRimColor] = React.useState<RimColorId>(DEFAULT_RIM_COLOR_ID);
 
-  // A concrete, non-null category for every consumer downstream of
-  // generation (PendantPreview, ExportPanel, prefs). `hasSketch` can only be
-  // true once `generateSketch` has already required `selectedCategory` to be
-  // set, so the `DEFAULT_CATEGORY_ID` fallback here is defensive only and
-  // never actually observed.
+  // Non-null for every consumer downstream of generation; the fallback is
+  // defensive only, since `hasSketch` requires `selectedCategory` to be set.
   const activeCategoryId: CategoryId = selectedCategory ?? DEFAULT_CATEGORY_ID;
 
-  // The Edge Cut boundaries — one per style — traced from the SKETCH itself
-  // (lib/edge-cut-contour.ts), computed eagerly the moment a sketch exists
-  // (not only when Edge Cut is selected) so switching to any edge-cut style
-  // never has to wait. The sketch is the only valid source: Gemini
-  // re-composes the photo, so a boundary traced from the original photo
-  // describes a different picture than the one being cut (see the module
-  // comment in lib/edge-cut-contour.ts for the customer case that proved
-  // this). It's also the one asset that survives a reload.
-  const [sketchContours, setSketchContours] = React.useState<SketchSilhouettes | null>(null);
-  const [sketchContourError, setSketchContourError] = React.useState<string | null>(null);
+  // The Silhouette Cut boundary, traced from the SKETCH itself (lib/edge-cut-
+  // contour.ts) as soon as a sketch exists, so switching to Silhouette Cut
+  // never waits. The sketch is the only valid source — see that module's
+  // comment for the customer case that proved a photo-based trace can't work.
+  const [contour, setContour] = React.useState<SilhouetteContour | null>(null);
+  const [contourError, setContourError] = React.useState<string | null>(null);
 
   const requestIdRef = React.useRef(0);
   const hydratedRef = React.useRef(false);
@@ -126,26 +99,19 @@ export default function Home() {
     [],
   );
 
-  // Hydration must happen in an effect, not a lazy initializer: sessionStorage
-  // doesn't exist on the server, so this is the one place in this file where
-  // an effect calling setState is the correct tool rather than the antipattern
-  // the react-hooks/set-state-in-effect rule usually catches — there is no
-  // render-time computation that could produce this value on the server.
+  // Hydration from sessionStorage — the one place an effect calling setState
+  // is the correct tool: there is no render-time computation that could
+  // produce this value on the server.
   const [isHydrated, setIsHydrated] = React.useState(false);
-  /* eslint-disable react-hooks/set-state-in-effect --
-     Reading a browser-only store and syncing React state to it can only
-     happen after mount; both the loaded values and the isHydrated flag that
-     gates the save-effects below on it are unavoidably set here. */
+  /* eslint-disable react-hooks/set-state-in-effect -- browser-only store, read after mount */
   React.useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
-
     const storedSketch = loadSketch();
     if (storedSketch) {
       setMasterSketch(storedSketch);
       setStatus('done');
     }
-
     const prefs = loadPrefs();
     if (prefs) {
       setSelectedCategory(prefs.selectedCategory);
@@ -153,16 +119,14 @@ export default function Home() {
       setSelectedMaterial(prefs.selectedMaterial);
       setTransform(prefs.transform);
       setSelectedDesignType(prefs.designType);
-      setSelectedEdgeCutStyle(prefs.edgeCutStyle);
+      setRimColor(prefs.rimColor);
     }
-
     setIsHydrated(true);
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Gated on `isHydrated` so this can never fire on the same commit as the
-  // hydration effect above and write `null` back over a sketch that effect
-  // just read but hasn't finished applying to state yet.
+  // hydration effect and write `null` back over a sketch it just read.
   React.useEffect(() => {
     if (!isHydrated) return;
     saveSketch(masterSketch);
@@ -176,76 +140,36 @@ export default function Home() {
       selectedMaterial,
       transform,
       designType: selectedDesignType,
-      edgeCutStyle: selectedEdgeCutStyle,
+      rimColor,
     });
-  }, [
-    isHydrated,
-    masterSketch,
-    activeCategoryId,
-    selectedShape,
-    selectedMaterial,
-    transform,
-    selectedDesignType,
-    selectedEdgeCutStyle,
-  ]);
+  }, [isHydrated, masterSketch, activeCategoryId, selectedShape, selectedMaterial, transform, selectedDesignType, rimColor]);
 
-  // The traced boundaries are stale the moment `masterSketch` itself changes
-  // (a fresh generation, a different stored sketch loading in, or it being
-  // cleared) — reset synchronously during render rather than in an effect
-  // body, the same "compare against state" pattern ExportPanel uses for its
-  // own prepared vector assets.
-  const [contoursForSketch, setContoursForSketch] = React.useState<string | null>(null);
-  if (masterSketch !== contoursForSketch) {
-    setContoursForSketch(masterSketch);
-    if (sketchContours) setSketchContours(null);
-    if (sketchContourError) setSketchContourError(null);
+  // The traced boundary is stale the moment `masterSketch` changes — reset
+  // synchronously during render (the "compare against state" pattern).
+  const [contourForSketch, setContourForSketch] = React.useState<string | null>(null);
+  if (masterSketch !== contourForSketch) {
+    setContourForSketch(masterSketch);
+    if (contour) setContour(null);
+    if (contourError) setContourError(null);
   }
 
   // Recomputes only when `masterSketch` changes — never on a shape/design/
-  // style/transform change. Never a second AI call: this is deterministic
-  // client-side pixel geometry on the exact sketch Gemini already produced
-  // (lib/edge-cut-contour.ts).
+  // transform change, and never a second AI call.
   React.useEffect(() => {
     if (!masterSketch) return;
     let cancelled = false;
-    extractSketchSilhouettes(masterSketch)
+    extractSilhouetteContour(masterSketch)
       .then((result) => {
-        if (!cancelled) setSketchContours(result);
+        if (!cancelled) setContour(result);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setSketchContourError(
-          error instanceof Error ? error.message : 'Could not trace an edge-cut boundary from this sketch.',
-        );
+        setContourError(error instanceof Error ? error.message : 'Could not trace the silhouette outline from this sketch.');
       });
     return () => {
       cancelled = true;
     };
   }, [masterSketch]);
-
-  // remove.bg (lib/remove-bg-contour.ts, /api/edge-cut/remove-background) is
-  // deliberately NOT wired in here. It was, briefly — but its result arrives
-  // several seconds after the instant local tracer above has already
-  // painted and been seen, and verified directly (reload -> local boundary
-  // shown at ~1.3s -> remove.bg response at ~5.3s -> canvas silently
-  // repaints with a different boundary) that this is exactly the "the image
-  // changes after a few seconds" the customer reported and explicitly did
-  // not want: they want whatever boundary displays first to stay final. The
-  // library/route are left in place, complete and working, for a future
-  // revisit — ideally behind a real loading state that withholds the local
-  // result until remove.bg either resolves or a timeout elapses, so nothing
-  // already on screen ever has to change.
-
-  /** Which traced boundary backs the customer's currently-selected edge-cut style. */
-  const activeContour: SilhouetteContour | null = (() => {
-    if (!sketchContours) return null;
-    if (selectedEdgeCutStyle === 'bust') return sketchContours.bust;
-    if (selectedEdgeCutStyle === 'band') return sketchContours.band;
-    return sketchContours.full; // 'free' and 'heart' both use the plain silhouette
-  })();
-
-  const edgeCutReady = sketchContours !== null;
-  const edgeCutDisabledStyles: EdgeCutStyle[] = edgeCutReady ? [] : ['free', 'heart', 'bust', 'band'];
 
   const handleFileSelected = (selected: File) => {
     if (originalImage) URL.revokeObjectURL(originalImage);
@@ -253,24 +177,14 @@ export default function Home() {
     setOriginalImage(URL.createObjectURL(selected));
     setErrorMessage(null);
     setStatus('idle');
-    // A new photo means any previous sketch no longer corresponds to what's
-    // shown as "Original Photo" — clear it so the two can't drift apart.
+    // A new photo means any previous sketch no longer corresponds to it.
     setMasterSketch(null);
-  };
-
-  const handleValidationError = (message: string) => {
-    setErrorMessage(message);
   };
 
   /**
    * Operation 1. The only function in this file that calls the AI, and the
    * only place `masterSketch` is ever set from a network response. Guarded
-   * three times: `status === 'generating'` blocks a double-click, a missing
-   * `selectedCategory` blocks generation before the customer has picked a
-   * category (the category now selects Gemini's framing prompt server-side —
-   * see `/api/generate-image`), and every response is stamped with a request
-   * id so a slow, superseded response can never land after a newer one
-   * already has.
+   * against double-clicks, a missing category, and superseded responses.
    */
   const generateSketch = async () => {
     if (!file || status === 'generating') return;
@@ -278,37 +192,25 @@ export default function Home() {
       setErrorMessage('Please select a pendant category before generating your design.');
       return;
     }
-
     const requestId = ++requestIdRef.current;
     setStatus('generating');
     setErrorMessage(null);
     setMasterSketch(null);
-
     try {
       const formData = new FormData();
       formData.set('file', file);
       formData.set('category', selectedCategory);
-
       const response = await fetch('/api/generate-image', { method: 'POST', body: formData });
       const body = (await response.json().catch(() => null)) as
         | { success: true; image: string }
         | { success: false; error: string }
         | null;
-
       if (requestId !== requestIdRef.current) return; // superseded by a newer request
-
-      if (!body) {
-        setErrorMessage('Unable to generate the image. Please try again.');
+      if (!body || !response.ok || !body.success) {
+        setErrorMessage(body && !body.success ? body.error : 'Unable to generate the image. Please try again.');
         setStatus('error');
         return;
       }
-
-      if (!response.ok || !body.success) {
-        setErrorMessage(body.success ? 'Unable to generate the image. Please try again.' : body.error);
-        setStatus('error');
-        return;
-      }
-
       setMasterSketch(body.image);
       setStatus('done');
     } catch {
@@ -326,25 +228,43 @@ export default function Home() {
     setErrorMessage(null);
     setStatus('idle');
     setSelectedCategory(null);
-    setSelectedShape('heart');
-    setSelectedMaterial('silver');
+    setSelectedShape(DEFAULT_SHAPE_ID);
+    setSelectedMaterial(DEFAULT_MATERIAL_ID);
     setTransform(DEFAULT_TRANSFORM);
     setSelectedDesignType(DEFAULT_DESIGN_TYPE);
-    setSelectedEdgeCutStyle(DEFAULT_EDGE_CUT_STYLE);
-    setSketchContours(null);
-    setSketchContourError(null);
+    setRimColor(DEFAULT_RIM_COLOR_ID);
+    setContour(null);
+    setContourError(null);
     clearPendantSession();
   };
 
   const isGenerating = status === 'generating';
   const hasSketch = masterSketch !== null;
+  const activeContour = selectedDesignType === 'edge-cut' ? contour : null;
+  const shapeSupportsRim = selectedDesignType === 'standard' && PENDANT_SHAPES[selectedShape].supportsRim;
+  const effectiveRim: RimColorId = shapeSupportsRim ? rimColor : 'none';
+  const designLabel =
+    selectedDesignType === 'edge-cut'
+      ? `${PENDANT_CATEGORIES[activeCategoryId].label} · Silhouette Cut`
+      : `${PENDANT_SHAPES[selectedShape].label} pendant`;
+
+  const previewProps = {
+    sketch: masterSketch,
+    shape: selectedShape,
+    category: activeCategoryId,
+    designType: selectedDesignType,
+    contour: activeContour,
+    rimColor: effectiveRim,
+    transform,
+  };
 
   return (
     <main className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-10 px-4 py-12 sm:px-6">
       <header className="flex flex-col gap-2 text-center">
         <h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">Custom Pendant Design</h1>
         <p className="text-sm text-slate-500">
-          Upload a photo once — try every category, shape and metal instantly, with no extra AI calls.
+          Upload a customer&apos;s photo once — preview every pendant and metal instantly, then render the product photo
+          and download the production files.
         </p>
       </header>
 
@@ -354,14 +274,11 @@ export default function Home() {
         </div>
       )}
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 1. UPLOAD PHOTO                                                   */}
-      {/* ---------------------------------------------------------------- */}
       <Section step={1} title="Upload Photo">
         {!hasSketch ? (
           <div className="flex flex-col gap-6">
             {!originalImage ? (
-              <ImageUploader onFileSelected={handleFileSelected} onValidationError={handleValidationError} />
+              <ImageUploader onFileSelected={handleFileSelected} onValidationError={setErrorMessage} />
             ) : (
               <>
                 <div className="mx-auto w-full max-w-xs">
@@ -394,23 +311,15 @@ export default function Home() {
         )}
       </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 2. CHOOSE PENDANT CATEGORY (before generation — controls the      */}
-      {/*    Gemini prompt) + GENERATE                                      */}
-      {/* ---------------------------------------------------------------- */}
       {!hasSketch && originalImage && (
         <Section step={2} title="Choose Pendant Category">
           <div className="flex flex-col gap-4">
-            <PendantCategoryPicker
-              value={selectedCategory}
-              onChange={setSelectedCategory}
-              categories={GENERATION_CATEGORY_LIST}
-            />
+            <PendantCategoryPicker value={selectedCategory} onChange={setSelectedCategory} categories={GENERATION_CATEGORY_LIST} />
             <p className="text-xs text-slate-400">
-              This controls how much of your photo the AI includes in the sketch — the exact pendant shape (Heart,
-              Edge Cut, ...) is chosen after generation.
+              This controls how much of the photo the AI includes in the sketch — the pendant type and shape are chosen after
+              generation.
             </p>
-            <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+            <div className="flex flex-col items-center gap-3">
               <button
                 type="button"
                 onClick={generateSketch}
@@ -419,196 +328,107 @@ export default function Home() {
               >
                 Generate Sketch
               </button>
+              {!selectedCategory && (
+                <p className="text-center text-xs text-amber-600">Please select a pendant category before generating your design.</p>
+              )}
             </div>
-            {!selectedCategory && (
-              <p className="text-center text-xs text-amber-600">
-                Please select a pendant category before generating your design.
-              </p>
-            )}
             {isGenerating && <GenerationProgress />}
           </div>
         </Section>
       )}
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 3. MASTER SKETCH                                                  */}
-      {/* ---------------------------------------------------------------- */}
       {hasSketch && (
-        <Section step={3} title="Master Sketch">
-          <div className="flex flex-col gap-4">
-            <div className="mx-auto w-full max-w-xs">
-              <GeneratedImage image={masterSketch} />
+        <>
+          <Section step={3} title="Master Sketch">
+            <div className="flex flex-col gap-4">
+              <div className="mx-auto w-full max-w-xs">
+                <GeneratedImage image={masterSketch} />
+              </div>
+              <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700">
+                <span aria-hidden>✓</span> Sketch generated as a {PENDANT_CATEGORIES[activeCategoryId].label} — reused for every
+                pendant and metal below.
+              </p>
+              {file && (
+                <button
+                  type="button"
+                  onClick={generateSketch}
+                  disabled={isGenerating}
+                  className="mx-auto text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Not quite right? Regenerate from the same photo (calls the AI again)
+                </button>
+              )}
             </div>
-            <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700">
-              <span aria-hidden>✓</span> Sketch generated as a {PENDANT_CATEGORIES[activeCategoryId].label} — this
-              exact image is reused for every shape and metal below. Generating it again requires an explicit
-              click.
-            </p>
-            {file && (
-              <button
-                type="button"
-                onClick={generateSketch}
-                disabled={isGenerating}
-                className="mx-auto text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Not quite right? Regenerate from the same photo (calls the AI again)
-              </button>
-            )}
-          </div>
-        </Section>
-      )}
+          </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 4. CHOOSE PENDANT DESIGN                                          */}
-      {/* ---------------------------------------------------------------- */}
-      {hasSketch && (
-        <Section step={4} title="Choose Pendant Design">
-          <PendantDesignPicker value={selectedDesignType} onChange={setSelectedDesignType} />
-        </Section>
-      )}
-
-      {/* ---------------------------------------------------------------- */}
-      {/* 5. CHOOSE PENDANT SHAPE / EDGE CUT STYLE                          */}
-      {/* ---------------------------------------------------------------- */}
-      {hasSketch && (
-        <Section step={5} title={selectedDesignType === 'standard' ? 'Choose Pendant Shape' : 'Edge Cut Style'}>
-          {selectedDesignType === 'standard' ? (
-            <PendantShapePicker value={selectedShape} onChange={setSelectedShape} />
-          ) : (
-            <div className="flex flex-col gap-2">
-              <EdgeCutStylePicker
-                value={selectedEdgeCutStyle}
-                onChange={setSelectedEdgeCutStyle}
-                disabledStyles={edgeCutDisabledStyles}
-              />
-              {sketchContourError && (
+          <Section step={4} title="Choose Pendant Type">
+            <div className="flex flex-col gap-4">
+              <PendantDesignPicker value={selectedDesignType} onChange={setSelectedDesignType} />
+              {selectedDesignType === 'edge-cut' && contourError && (
                 <p role="alert" className="text-xs text-red-600">
-                  {sketchContourError} Standard shapes are still fully available.
+                  {contourError} Shape pendants are still fully available.
                 </p>
               )}
-              {!edgeCutReady && !sketchContourError && (
-                <p className="text-xs text-slate-400">Tracing the edge-cut boundary from the sketch…</p>
+              {selectedDesignType === 'edge-cut' && !contour && !contourError && (
+                <p className="text-xs text-slate-400">Tracing the cut outline from the sketch…</p>
+              )}
+              {selectedDesignType === 'standard' && (
+                <>
+                  <PendantShapePicker value={selectedShape} onChange={setSelectedShape} />
+                  {shapeSupportsRim && <RimColorPicker value={rimColor} onChange={setRimColor} />}
+                </>
               )}
             </div>
-          )}
-        </Section>
-      )}
+          </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 6. CHOOSE MATERIAL                                                */}
-      {/* ---------------------------------------------------------------- */}
-      {hasSketch && (
-        <Section step={6} title="Choose Material">
-          <MaterialPicker value={selectedMaterial} onChange={setSelectedMaterial} />
-        </Section>
-      )}
+          <Section step={5} title="Choose Metal">
+            <MaterialPicker value={selectedMaterial} onChange={setSelectedMaterial} />
+          </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 7. PENDANT PREVIEW                                                */}
-      {/* ---------------------------------------------------------------- */}
-      {hasSketch && (
-        <Section step={7} title="Pendant Preview">
-          <div className="flex flex-col items-center gap-8">
-            <PendantPreview
-              sketch={masterSketch}
-              shape={selectedShape}
-              material={selectedMaterial}
-              category={activeCategoryId}
-              designType={selectedDesignType}
-              edgeCutStyle={selectedEdgeCutStyle}
-              contour={activeContour}
-              transform={transform}
-              size={280}
-            />
-
-            <div className="flex w-full flex-col gap-3 border-t border-slate-100 pt-6">
-              <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">
-                Compare finishes — {PENDANT_CATEGORIES[activeCategoryId].label} ·{' '}
-                {selectedDesignType === 'standard' ? PENDANT_SHAPES[selectedShape].label : 'Edge Cut'}
-              </p>
-              <div className="flex items-start justify-center gap-8">
-                {PENDANT_MATERIAL_LIST.map((material) => (
-                  <div key={material.id} className="flex flex-col items-center gap-2">
-                    <PendantPreview
-                      sketch={masterSketch}
-                      shape={selectedShape}
-                      material={material.id}
-                      category={activeCategoryId}
-                      designType={selectedDesignType}
-                      edgeCutStyle={selectedEdgeCutStyle}
-                      contour={activeContour}
-                      transform={transform}
-                      size={120}
-                      className={
-                        material.id === selectedMaterial ? 'rounded-lg ring-2 ring-slate-900 ring-offset-2' : ''
-                      }
-                    />
-                    <span className="text-xs font-medium text-slate-500">{material.label}</span>
-                  </div>
-                ))}
+          <Section step={6} title="Pendant Preview">
+            <div className="flex flex-col items-center gap-8">
+              <PendantPreview {...previewProps} material={selectedMaterial} size={280} />
+              <div className="flex w-full flex-col gap-3 border-t border-slate-100 pt-6">
+                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Compare metals — {designLabel}</p>
+                <div className="flex items-start justify-center gap-8">
+                  {PENDANT_MATERIAL_LIST.map((material) => (
+                    <div key={material.id} className="flex flex-col items-center gap-2">
+                      <PendantPreview
+                        {...previewProps}
+                        material={material.id}
+                        size={120}
+                        className={material.id === selectedMaterial ? 'rounded-lg ring-2 ring-slate-900 ring-offset-2' : ''}
+                      />
+                      <span className="text-xs font-medium text-slate-500">{material.label}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        </Section>
-      )}
+          </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 8. CUSTOMIZE IMAGE                                                */}
-      {/* ---------------------------------------------------------------- */}
-      {hasSketch && (
-        <Section step={8} title="Customize Image">
-          <PendantControls transform={transform} onChange={setTransform} />
-        </Section>
-      )}
+          <Section step={7} title="Customize Image">
+            <PendantControls transform={transform} onChange={setTransform} />
+          </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 9. EXPORT FOR LASER CUTTING                                       */}
-      {/* ---------------------------------------------------------------- */}
-      {hasSketch && (
-        <Section step={9} title="Export for Laser Cutting">
-          <ExportPanel
-            sketch={masterSketch}
-            shape={selectedShape}
-            material={selectedMaterial}
-            category={activeCategoryId}
-            designType={selectedDesignType}
-            edgeCutStyle={selectedEdgeCutStyle}
-            contour={activeContour}
-            transform={transform}
-          />
-        </Section>
-      )}
+          <Section step={8} title="Product Mockup">
+            <MockupPanel {...previewProps} sketch={masterSketch} />
+          </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* 10. DOWNLOAD — pick one PNG output, save it                       */}
-      {/* ---------------------------------------------------------------- */}
-      {hasSketch && (
-        <Section step={10} title="Download">
-          <DownloadPanel
-            sketch={masterSketch}
-            shape={selectedShape}
-            material={selectedMaterial}
-            category={activeCategoryId}
-            designType={selectedDesignType}
-            edgeCutStyle={selectedEdgeCutStyle}
-            contour={activeContour}
-            transform={transform}
-          />
-        </Section>
+          <Section step={9} title="Manufacturing Files">
+            <ExportPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} />
+          </Section>
+
+          <Section step={10} title="Download Preview Image">
+            <DownloadPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} />
+          </Section>
+        </>
       )}
     </main>
   );
 }
 
-function Section({
-  step,
-  title,
-  children,
-}: {
-  step: number;
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ step, title, children }: { step: number; title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-4 border-t border-slate-200 pt-8 first:border-t-0 first:pt-0">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -619,13 +439,7 @@ function Section({
   );
 }
 
-function SummaryRow({
-  label,
-  action,
-}: {
-  label: string;
-  action: { label: string; onClick: () => void };
-}) {
+function SummaryRow({ label, action }: { label: string; action: { label: string; onClick: () => void } }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
       <span className="flex items-center gap-1.5 text-sm text-slate-600">
@@ -634,11 +448,7 @@ function SummaryRow({
         </span>
         {label}
       </span>
-      <button
-        type="button"
-        onClick={action.onClick}
-        className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline"
-      >
+      <button type="button" onClick={action.onClick} className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline">
         {action.label}
       </button>
     </div>

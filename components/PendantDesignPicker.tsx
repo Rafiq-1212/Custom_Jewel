@@ -1,17 +1,26 @@
 'use client';
 
 /**
- * Design-type selector: Standard (a catalogue shape, lib/pendant-shapes.ts)
- * vs Edge Cut (the pendant's outer boundary follows the artwork's own
- * silhouette — lib/edge-cut-contour.ts). Purely a `setSelectedDesignType`
- * call, same as every other picker in this app — never touches the AI.
+ * Design-type selector: Silhouette Cut (the metal follows the artwork's own
+ * outline — the catalogue's Face / Half Size / Couple / Family / Pet
+ * pendants) vs Shape Pendant (a catalogue plate, lib/pendant-shapes.ts).
+ * Purely a `setSelectedDesignType` call, same as every other picker in this
+ * app — never touches the AI.
  */
 
 import type { DesignType } from '@/lib/pendant-geometry';
 
 const OPTIONS: { id: DesignType; label: string; description: string }[] = [
-  { id: 'standard', label: 'Standard Pendant', description: 'A catalogue shape — heart, diamond, hexagon and more.' },
-  { id: 'edge-cut', label: 'Edge Cut', description: "The metal follows the artwork's own silhouette." },
+  {
+    id: 'edge-cut',
+    label: 'Silhouette Cut',
+    description: "The metal is cut along the artwork's own outline, with its hanging ring — Face, Half Size, Couple, Family, Pet.",
+  },
+  {
+    id: 'standard',
+    label: 'Shape Pendant',
+    description: 'A catalogue plate — Round, Oval, Heart, Bar, Tag or Octagonal.',
+  },
 ];
 
 export function PendantDesignPicker({

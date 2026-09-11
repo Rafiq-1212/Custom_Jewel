@@ -1,11 +1,10 @@
 'use client';
 
 /**
- * Traces the Edge Cut boundaries — Free, Bust with Base, Silhouette Band —
- * out of the existing `masterSketch`. Never a second AI call, and never the
- * raw photo. Runs once per generated sketch and is cached from then on;
- * nothing about switching design/shape/style or dragging the
- * zoom/position/rotation sliders ever calls this again.
+ * Traces the Silhouette Cut boundary out of the existing `masterSketch`.
+ * Never a second AI call, and never the raw photo. Runs once per generated
+ * sketch and is cached from then on; nothing about switching design/shape
+ * or dragging the zoom/position/rotation sliders ever calls this again.
  *
  * WHY THE SKETCH AND NOT THE PHOTO. An earlier version traced the boundary
  * from the original uploaded photo, reasoning that a photographic
@@ -41,20 +40,21 @@
  *      boundary sits back on the ink's own edge, leaving ~1px so the outline
  *      stroke itself is never shaved by the clip
  *   -> keep the largest connected component only (one pendant, one piece)
- *   -> per style: 'bust' splices a rounded base below the shoulder line;
- *      'band' dilates outward by a deliberately wide margin — that offset is
- *      the whole point of the style. 'full' adds nothing: the cut boundary is
- *      the subject's own contour, with no extra stroke, halo, rim or padding
+ *   -> dilate by the CUT MARGIN: the client's production files (see the
+ *      reference DXFs) cut a smooth border a few percent outside the ink,
+ *      never flush with it — that margin is the visible metal edge
+ *   -> stamp the HANGING RING onto the top centre: a disc that overlaps the
+ *      outline so the traced boundary flows around it as one piece, plus
+ *      its round hole returned separately (`holes`), the way the reference
+ *      files draw two concentric red circles at the top
  *   -> trace, simplify, smooth -> map back into the sketch image's own local
  *      space, centred on the image's centre (the `drawImage(img, -w/2,
  *      -h/2)` convention), so `transformPoints` in lib/pendant-geometry.ts
- *      carries it through whatever zoom/pan/rotation the customer applies.
- *
- * All three styles come out of one decode and one fill, so switching between
- * them in the UI is instant.
+ *      carries outline and hole through whatever zoom/pan/rotation the
+ *      customer applies.
  */
 
-import type { SilhouetteContour } from './pendant-geometry';
+import type { Point, SilhouetteContour } from './pendant-geometry';
 import {
   boundingBoxOf,
   dilate,
@@ -62,82 +62,55 @@ import {
   fillHoles,
   largestComponentMask,
   maskToSmoothContour,
-  rowExtent,
   sealBorderGaps,
 } from './silhouette-geometry';
 
 const MAX_ANALYSIS_DIM = 450;
 const ALPHA_THRESHOLD = 24;
+/** Cut margin outside the ink, as a fraction of the sketch's larger dimension — matches the client's reference files. */
+const CUT_MARGIN_FRACTION = 0.035;
+/** Hanging ring: outer radius as a fraction of the larger dimension, hole as a fraction of that, and how deep the ring sinks into the outline. */
+const RING_OUTER_FRACTION = 0.07;
+const RING_HOLE_RATIO = 0.5;
+const RING_OVERLAP_RATIO = 0.55;
+const RING_HOLE_SEGMENTS = 48;
 
-/**
- * 'bust': replaces everything below a computed shoulder line with a solid,
- * bottom-rounded rectangular base spanning the silhouette's width at that
- * line — the "bust with base" mount look, built by reshaping the raster
- * mask directly (simplest robust way to splice a straight-edged, precisely
- * rounded base onto an organic traced silhouette).
- */
-function applyBustBase(mask: Uint8Array, width: number, height: number): Uint8Array {
-  const box = boundingBoxOf(mask, width, height);
-  if (!box) return mask;
-
-  const boundingHeight = box.maxY - box.minY;
-  let shoulderY = box.minY + Math.round(boundingHeight * 0.5);
-
-  // The chosen row might land in a gap; search outward for the nearest row
-  // that actually has foreground to measure a width from.
-  let shoulderExtent = rowExtent(mask, width, shoulderY);
-  if (!shoulderExtent) {
-    for (let offset = 1; offset <= boundingHeight; offset++) {
-      const belowY = shoulderY + offset;
-      const below = belowY < height ? rowExtent(mask, width, belowY) : null;
-      if (below) {
-        shoulderY = belowY;
-        shoulderExtent = below;
-        break;
-      }
-      const aboveY = shoulderY - offset;
-      const above = aboveY >= 0 ? rowExtent(mask, width, aboveY) : null;
-      if (above) {
-        shoulderY = aboveY;
-        shoulderExtent = above;
-        break;
-      }
-    }
-  }
-  if (!shoulderExtent) return mask;
-
-  const out = mask.slice();
-  const { minX, maxX } = shoulderExtent;
-  const baseWidth = maxX - minX + 1;
-  const cornerRadius = Math.min(Math.round(baseWidth * 0.18), Math.round((box.maxY - shoulderY) * 0.6));
-
-  for (let y = shoulderY; y <= box.maxY; y++) {
-    const rowOffset = y * width;
+/** Paints a filled disc into `mask` (in place). */
+function stampDisc(mask: Uint8Array, width: number, height: number, cx: number, cy: number, r: number): void {
+  const r2 = r * r;
+  const minY = Math.max(0, Math.floor(cy - r));
+  const maxY = Math.min(height - 1, Math.ceil(cy + r));
+  const minX = Math.max(0, Math.floor(cx - r));
+  const maxX = Math.min(width - 1, Math.ceil(cx + r));
+  for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
-      // Round only the two bottom corners, near the base's own bottom edge.
-      const distFromBottom = box.maxY - y;
-      let inside = true;
-      if (cornerRadius > 0 && distFromBottom < cornerRadius) {
-        const nearLeft = x - minX < cornerRadius;
-        const nearRight = maxX - x < cornerRadius;
-        if (nearLeft || nearRight) {
-          const cx = nearLeft ? minX + cornerRadius : maxX - cornerRadius;
-          const cy = box.maxY - cornerRadius;
-          const dx = x - cx;
-          const dy = y - cy;
-          inside = dx * dx + dy * dy <= cornerRadius * cornerRadius;
-        }
-      }
-      if (inside) out[rowOffset + x] = 1;
+      const dx = x + 0.5 - cx;
+      const dy = y + 0.5 - cy;
+      if (dx * dx + dy * dy <= r2) mask[y * width + x] = 1;
     }
   }
-  return out;
 }
 
-export interface SketchSilhouettes {
-  full: SilhouetteContour;
-  bust: SilhouetteContour;
-  band: SilhouetteContour;
+function circlePoints(cx: number, cy: number, r: number, segments: number): Point[] {
+  const points: Point[] = [];
+  for (let i = 0; i < segments; i++) {
+    const theta = (i / segments) * Math.PI * 2;
+    points.push({ x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) });
+  }
+  return points;
+}
+
+/**
+ * Grows the analysis canvas by `pad` on every side so the cut margin and the
+ * ring have room above/around a sketch that is trimmed tight to its ink.
+ */
+function padMask(mask: Uint8Array, width: number, height: number, pad: number): Uint8Array {
+  const paddedWidth = width + pad * 2;
+  const out = new Uint8Array(paddedWidth * (height + pad * 2));
+  for (let y = 0; y < height; y++) {
+    out.set(mask.subarray(y * width, y * width + width), (y + pad) * paddedWidth + pad);
+  }
+  return out;
 }
 
 function decodeImage(src: string): Promise<HTMLImageElement> {
@@ -149,7 +122,7 @@ function decodeImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export async function extractSketchSilhouettes(sketchDataUrl: string): Promise<SketchSilhouettes> {
+export async function extractSilhouetteContour(sketchDataUrl: string): Promise<SilhouetteContour> {
   const image = await decodeImage(sketchDataUrl);
   const naturalWidth = image.naturalWidth;
   const naturalHeight = image.naturalHeight;
@@ -174,8 +147,7 @@ export async function extractSketchSilhouettes(sketchDataUrl: string): Promise<S
     mask[p] = data[i + 3] >= ALPHA_THRESHOLD ? 1 : 0;
   }
 
-  const largerDim = Math.max(analysisWidth, analysisHeight);
-  const bridgeRadius = Math.max(3, Math.round(largerDim * 0.015));
+  const bridgeRadius = Math.max(3, Math.round(Math.max(analysisWidth, analysisHeight) * 0.015));
 
   mask = dilate(mask, analysisWidth, analysisHeight, bridgeRadius);
   mask = sealBorderGaps(mask, analysisWidth, analysisHeight, bridgeRadius);
@@ -183,26 +155,43 @@ export async function extractSketchSilhouettes(sketchDataUrl: string): Promise<S
   mask = erode(mask, analysisWidth, analysisHeight, Math.max(0, bridgeRadius - 1));
   mask = largestComponentMask(mask, analysisWidth, analysisHeight);
 
-  const bustMask = largestComponentMask(
-    applyBustBase(mask, analysisWidth, analysisHeight),
-    analysisWidth,
-    analysisHeight,
-  );
-  const bandMask = dilate(mask, analysisWidth, analysisHeight, Math.max(2, Math.round(largerDim * 0.03)));
+  // From here on the mask needs room outside the sketch's own frame: the cut
+  // margin grows past every edge and the ring sits above the top. Pad the
+  // canvas and keep track of the offset so points still map back into the
+  // sketch's own local space below.
+  const largerDim = Math.max(analysisWidth, analysisHeight);
+  const marginRadius = Math.max(3, Math.round(largerDim * CUT_MARGIN_FRACTION));
+  const ringOuter = Math.max(6, Math.round(largerDim * RING_OUTER_FRACTION));
+  const pad = marginRadius + ringOuter * 2;
+  const paddedWidth = analysisWidth + pad * 2;
+  const paddedHeight = analysisHeight + pad * 2;
+  mask = padMask(mask, analysisWidth, analysisHeight, pad);
+
+  mask = dilate(mask, paddedWidth, paddedHeight, marginRadius);
+
+  const box = boundingBoxOf(mask, paddedWidth, paddedHeight);
+  if (!box) {
+    throw new Error('This sketch has no visible artwork to trace a silhouette from.');
+  }
+  const ringCx = (box.minX + box.maxX + 1) / 2;
+  const ringCy = box.minY - ringOuter * (1 - RING_OVERLAP_RATIO);
+  stampDisc(mask, paddedWidth, paddedHeight, ringCx, ringCy, ringOuter);
+  mask = largestComponentMask(mask, paddedWidth, paddedHeight);
+
+  const smoothed = maskToSmoothContour(mask, paddedWidth, paddedHeight);
+  if (!smoothed) {
+    throw new Error('This sketch has no visible artwork to trace a silhouette from.');
+  }
 
   const scaleX = naturalWidth / analysisWidth;
   const scaleY = naturalHeight / analysisHeight;
-  const toContour = (styled: Uint8Array): SilhouetteContour => {
-    const smoothed = maskToSmoothContour(styled, analysisWidth, analysisHeight);
-    if (!smoothed) {
-      throw new Error('This sketch has no visible artwork to trace an edge-cut boundary from.');
-    }
-    const points = smoothed.map((p) => ({
-      x: p.x * scaleX - naturalWidth / 2,
-      y: p.y * scaleY - naturalHeight / 2,
-    }));
-    return { points, imageWidth: naturalWidth, imageHeight: naturalHeight };
-  };
+  const toLocal = (p: Point): Point => ({
+    x: (p.x - pad) * scaleX - naturalWidth / 2,
+    y: (p.y - pad) * scaleY - naturalHeight / 2,
+  });
 
-  return { full: toContour(mask), bust: toContour(bustMask), band: toContour(bandMask) };
+  const points = smoothed.map(toLocal);
+  const hole = circlePoints(ringCx, ringCy, ringOuter * RING_HOLE_RATIO, RING_HOLE_SEGMENTS).map(toLocal);
+
+  return { points, holes: [hole], imageWidth: naturalWidth, imageHeight: naturalHeight };
 }

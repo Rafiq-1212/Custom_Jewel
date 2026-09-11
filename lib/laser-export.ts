@@ -1,19 +1,17 @@
 /**
- * Laser-cutting export assets: SVG, DXF and a transparent PNG.
+ * Manufacturing export assets: SVG, DXF, Rhino 3DM and a transparent PNG.
  *
  * This is Operation 2 territory — deterministic geometry and raster
  * processing on the existing `masterSketch`, never a new AI call. It runs
- * once per "Download" click, on demand, using exactly the shape + transform
- * the customer is currently looking at in the live preview.
+ * once per "Prepare files" click, on demand, using exactly the shape +
+ * transform the customer is currently looking at in the live preview.
  *
- * On the 3DM request: a Rhino .3dm is a 3D-modeling interchange format, and
- * no laser cutter or engraver reads it directly — the formats that matter for
- * that job are exactly the three this module produces. A .3dm containing
- * nothing but these same 2D curves, with no true relief/depth data (which
- * would require real jewellery-CAD modelling this app has no way to invent
- * credibly from a 2D sketch), would be strictly less useful than the SVG
- * already is. It was left out for that reason rather than by oversight — see
- * the README for the full explanation.
+ * DXF and 3DM carry the same content — the CUT perimeter and the ENGRAVE
+ * artwork as closed polylines in millimetres, Y-up — because that is what
+ * the client's two downstream tools consume: the laser controller reads the
+ * DXF, and their jewellery CAD (Rhino) takes the .3dm curves to extrude and
+ * finish. Neither carries relief/depth: a 2D sketch has no credible depth to
+ * invent, and that modelling is the CAD operator's step (lib/rhino-export.ts).
  *
  * PIPELINE
  * ========
@@ -39,6 +37,7 @@
  *        v
  *   flatten every curve to polylines, scale to real-world millimeters,
  *   write LWPOLYLINE / CIRCLE entities                                (deliverable 2: DXF)
+ *   the same polylines as Rhino PolylineCurves on CUT/ENGRAVE layers (deliverable 4: 3DM)
  */
 
 import sharp from 'sharp';
@@ -46,22 +45,22 @@ import { trace as potraceTrace, type PotraceOptions } from 'potrace';
 import { buildDxf, type DxfCircleSpec, type DxfPolylineSpec } from './dxf-writer';
 import { PENDANT_MATERIALS, type MaterialId } from './materials';
 import {
-  coverFit,
+  placeArtwork,
   resolvePendantGeometry,
   type DesignType,
-  type EdgeCutStyle,
   type PendantGeometry,
   type SilhouetteContour,
 } from './pendant-geometry';
 import { PENDANT_VIEWBOX, type PendantTransform, type ShapeId } from './pendant-shapes';
+import { buildRhino3dm, type RhinoPolylineSpec } from './rhino-export';
 import { flattenPath, type Point } from './svg-path-flatten';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/laser-export.ts was imported into a browser bundle. This module is server-only.');
 }
 
-/** Raster pixels per viewBox unit when rendering for tracing and PNG export. */
-const RASTER_SCALE = 10;
+/** Raster pixels per viewBox unit when rendering for tracing, PNG export and the mockup composite. */
+export const RASTER_SCALE = 10;
 /** Default physical width of the exported pendant, in millimeters. */
 const DEFAULT_WIDTH_MM = 25;
 
@@ -91,7 +90,7 @@ function escapeAttr(value: string): string {
  */
 async function rasterizeShapeMask(shapePath: string, width: number, height: number): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${PENDANT_VIEWBOX.width} ${PENDANT_VIEWBOX.height}">
-  <path d="${escapeAttr(shapePath)}" fill="#ffffff"/>
+  <path d="${escapeAttr(shapePath)}" fill="#ffffff" fill-rule="evenodd"/>
 </svg>`;
   return sharp(Buffer.from(svg)).resize(width, height).toColourspace('b-w').raw().toBuffer();
 }
@@ -115,7 +114,7 @@ async function rasterizeShapeMask(shapePath: string, width: number, height: numb
  * — sidesteps the whole question. SVG is used only for the mask below, a
  * plain vector fill with no embedded raster, which never exhibited the bug.
  */
-async function renderTransformedArtwork(
+export async function renderTransformedArtwork(
   sketchDataUrl: string,
   geometry: PendantGeometry,
   transform: PendantTransform,
@@ -128,13 +127,13 @@ async function renderTransformedArtwork(
     throw new Error('Could not read the master sketch dimensions.');
   }
 
-  const { cx, cy, scale } = coverFit(imageWidth, imageHeight, geometry.engravingArea, transform);
+  const { cx, cy, scale } = placeArtwork(geometry, imageWidth, imageHeight, transform);
 
   const canvasWidth = Math.round(PENDANT_VIEWBOX.width * RASTER_SCALE);
   const canvasHeight = Math.round(PENDANT_VIEWBOX.height * RASTER_SCALE);
 
-  // Resize to the exact target pixel size implied by the cover-fit scale,
-  // in canvas (raster) pixels.
+  // Resize to the exact target pixel size implied by the fit scale, in
+  // canvas (raster) pixels.
   const targetWidth = Math.max(1, Math.round(imageWidth * scale * RASTER_SCALE));
   const targetHeight = Math.max(1, Math.round(imageHeight * scale * RASTER_SCALE));
 
@@ -197,22 +196,12 @@ async function renderTransformedArtwork(
     .toBuffer({ resolveWithObject: true });
 
   // Multiply alpha by the shape mask: this is the actual clip. Nothing here
-  // depends on SVG image embedding, so the bug above cannot recur. For Edge
-  // Cut inside Heart, `artworkClipPath` is a second mask (the traced
-  // silhouette, already transformed into this same viewBox) multiplied in
-  // as well — matching the two-clip `ctx.clip()` stack `paintPendant` uses
-  // for the exact same case, so the artwork is confined to both the heart
-  // and its own silhouette here too.
+  // depends on SVG image embedding, so the bug above cannot recur.
   const mask = await rasterizeShapeMask(geometry.outerPath, canvasWidth, canvasHeight);
-  const clipMask = geometry.artworkClipPath
-    ? await rasterizeShapeMask(geometry.artworkClipPath, canvasWidth, canvasHeight)
-    : null;
   const pixels = placed.data;
   const channels = placed.info.channels;
   for (let i = 0, m = 0; i < pixels.length; i += channels, m++) {
-    let coverage = mask[m];
-    if (clipMask) coverage = Math.round((coverage * clipMask[m]) / 255);
-    pixels[i + 3] = Math.round((pixels[i + 3] * coverage) / 255);
+    pixels[i + 3] = Math.round((pixels[i + 3] * mask[m]) / 255);
   }
 
   const png = await sharp(pixels, { raw: { width: canvasWidth, height: canvasHeight, channels } })
@@ -250,7 +239,6 @@ export interface LaserExportInput {
   /** The category's or shape's own engraving box — same value the client used to build its preview. */
   engravingArea: { x: number; y: number; width: number; height: number };
   designType: DesignType;
-  edgeCutStyle: EdgeCutStyle;
   /** The traced silhouette, computed once client-side — required when `designType` is 'edge-cut'. */
   contour: SilhouetteContour | null;
   /** Physical width of the exported pendant outline, in millimeters. */
@@ -260,6 +248,8 @@ export interface LaserExportInput {
 export interface LaserExportResult {
   svg: string;
   dxf: string;
+  /** Rhino .3dm file (binary), base64-encoded. */
+  threeDmBase64: string;
   /** Transparent PNG of the same transformed, shape-clipped artwork, as a data URL. */
   pngDataUrl: string;
   widthMm: number;
@@ -270,7 +260,6 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
   const geometry = resolvePendantGeometry({
     designType: input.designType,
     shape: input.shape,
-    edgeCutStyle: input.edgeCutStyle,
     engravingArea: input.engravingArea,
     contour: input.contour,
     transform: input.transform,
@@ -302,7 +291,7 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
      your laser software. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="${widthMm}mm" height="${heightMm.toFixed(3)}mm" viewBox="0 0 ${PENDANT_VIEWBOX.width} ${PENDANT_VIEWBOX.height}">
   <g id="cut" fill="none" stroke="#ff0000" stroke-width="0.3">
-    <path d="${escapeAttr(geometry.outerPath)}"/>
+    <path d="${escapeAttr(geometry.outerPath)}" fill-rule="evenodd"/>
   </g>
   <g id="engrave" fill="#000000" stroke="none" transform="scale(${unitsPerRasterPx})">
     <path d="${tracedD}"/>
@@ -336,5 +325,15 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
 
   const dxf = buildDxf(dxfPolylines, dxfCircles);
 
-  return { svg, dxf, pngDataUrl, widthMm, heightMm };
+  // 3DM: the exact same millimetre, Y-up polylines as the DXF, so the two
+  // files can never disagree about the part.
+  const rhinoPolylines: RhinoPolylineSpec[] = dxfPolylines.map((p) => ({
+    points: p.points,
+    layer: p.layer,
+    closed: p.closed,
+  }));
+  const threeDm = await buildRhino3dm(rhinoPolylines);
+  const threeDmBase64 = Buffer.from(threeDm).toString('base64');
+
+  return { svg, dxf, threeDmBase64, pngDataUrl, widthMm, heightMm };
 }

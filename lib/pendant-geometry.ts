@@ -1,23 +1,21 @@
 /**
- * Shared, isomorphic pendant geometry — the one place both the live canvas
- * preview (components/PendantPreview.tsx) and the server-side laser export
- * (lib/laser-export.ts) get their shape math from.
+ * Shared, isomorphic pendant geometry — the one place the live canvas
+ * preview (components/PendantPreview.tsx), the server-side laser export
+ * (lib/laser-export.ts) and the AI mockup composite (lib/mockup.ts) all get
+ * their shape math from.
  *
  * This module has no DOM or Node dependency (same discipline as
- * lib/svg-path-flatten.ts) specifically so it can be imported by both
- * without either side re-deriving the other's formulas by hand. Before this
- * file existed, the cover-fit placement formula lived twice — once inlined
- * in `paintPendant`, once in `laser-export.ts`'s `computeArtworkTransform` —
- * kept in sync only by a comment asking whoever changed one to change the
- * other. `coverFit` below is now the only copy.
+ * lib/svg-path-flatten.ts) specifically so it can be imported by all of them
+ * without any side re-deriving another's formulas by hand. `fitArtwork` below
+ * is the only copy of the artwork placement formula.
  *
- * It also carries the Edge Cut geometry model: a traced silhouette
+ * It also carries the Silhouette Cut geometry model: a traced silhouette
  * (`SilhouetteContour`, produced once by lib/edge-cut-contour.ts) is just a
  * set of points in the sketch image's own local space, and `transformPoints`
- * applies the *exact* same rotate+scale+translate `coverFit` implies to
- * those points — so a traced silhouette boundary always tracks the artwork
- * in lockstep as the customer zooms, pans or rotates it, on both the canvas
- * and in the exported SVG/DXF, with nothing computed twice.
+ * applies the *exact* same rotate+scale+translate `fitArtwork` implies to
+ * those points — so the traced cut boundary always tracks the artwork in
+ * lockstep as the customer zooms, pans or rotates it, on the canvas, in the
+ * mockup and in the exported SVG/DXF/3DM, with nothing computed twice.
  */
 
 import { PENDANT_SHAPES, type PendantTransform, type ShapeId } from './pendant-shapes';
@@ -43,72 +41,86 @@ export interface Rect {
  * `transformPoints` cover-fits it into the engraving area with the very same
  * maths the renderers use to place the master sketch, and the master sketch
  * is trimmed tight to its ink. `extractSilhouetteContour` (lib/edge-cut-
- * contour.ts) satisfies this trivially — its frame *is* the sketch.
- * `extractPhotoSilhouette` (lib/photo-silhouette.ts) traces the raw photo,
- * whose full frame has margins the sketch doesn't, so it returns the
- * subject's bounding box as the frame instead. Never recomputed on
- * shape/design switches or transform changes.
+ * contour.ts) satisfies this trivially — it traces the sketch itself, so its
+ * frame *is* the sketch. Never recomputed on shape/design switches or
+ * transform changes.
  */
 export interface SilhouetteContour {
+  /** The outer cut boundary — the artwork's outline offset by the cut margin, with the hanging ring merged in. */
   points: Point[];
+  /**
+   * Closed inner contours in the same local space that are cut OUT of the
+   * plate — in practice the round hole of the hanging ring. Rendered with an
+   * even-odd fill rule everywhere (canvas, SVG, sharp mask, DXF/3DM as their
+   * own closed polylines on the CUT layer).
+   */
+  holes: Point[][];
   imageWidth: number;
   imageHeight: number;
 }
 
-export type DesignType = 'standard' | 'edge-cut';
 /**
- * 'free'  — the traced silhouette itself is the pendant's outer boundary.
- * 'heart' — the heart stays the outer boundary; the silhouette clips the
- *           artwork inside it instead.
- * 'bust'  — like 'free', but the silhouette is truncated below the
- *           shoulders into a rounded-rectangle base (a bust/plaque mount).
- * 'band'  — like 'free', but offset outward by a visibly larger margin, for
- *           a thicker border band around the subject.
- * All four consume whatever `contour` they're given the same way — 'bust'
- * and 'band' differ only in *which* contour was computed for them (see
- * lib/photo-silhouette.ts's `PhotoSilhouetteStyle`), not in how
- * `resolvePendantGeometry` treats the result.
+ * 'standard'  — a catalogue plate (Round, Oval, Heart, Bar, Tag, Octagonal)
+ *               with the artwork engraved on it.
+ * 'edge-cut'  — the catalogue's Face / Half Size / Couple / Family / Pet
+ *               pendants: the metal is cut along the artwork's own outline.
  */
-export type EdgeCutStyle = 'free' | 'heart' | 'bust' | 'band';
+export type DesignType = 'standard' | 'edge-cut';
 
-export const DEFAULT_DESIGN_TYPE: DesignType = 'standard';
-export const DEFAULT_EDGE_CUT_STYLE: EdgeCutStyle = 'free';
-
-const EDGE_CUT_STYLES: readonly EdgeCutStyle[] = ['free', 'heart', 'bust', 'band'];
+/** Silhouette Cut is the catalogue's primary photo pendant (Face / Couple / Family / ...), so it's the default. */
+export const DEFAULT_DESIGN_TYPE: DesignType = 'edge-cut';
 
 export function isDesignType(value: string): value is DesignType {
   return value === 'standard' || value === 'edge-cut';
 }
 
-export function isEdgeCutStyle(value: string): value is EdgeCutStyle {
-  return (EDGE_CUT_STYLES as readonly string[]).includes(value);
-}
+/**
+ * 'cover'   — scale so the image fully covers `area` (the larger of the two
+ *             fits): it overflows rather than letterboxes, and the plate's
+ *             clip is what crops the overflow. Right for a Shape Pendant.
+ * 'contain' — scale so the image fits entirely inside `area` (the smaller
+ *             fit). Right for a Silhouette Cut, where nothing crops the
+ *             artwork — the cut follows it — so a wide couple sketch
+ *             cover-fit into a tall box would simply become a pendant wider
+ *             than the canvas (verified: a DXF spanning -7…32 mm on a 25 mm
+ *             canvas).
+ */
+export type FitMode = 'cover' | 'contain';
 
 /**
- * "Cover" fit: scale `imageWidth x imageHeight` so it fully covers `area`
- * (the smaller of the two possible fits, so the image overflows rather than
- * letterboxes), then offset by the customer's own pan. The shape clip is
- * what's expected to crop the resulting overflow — this function only ever
- * decides *how big and where*, never *what gets cut off*.
+ * Where and how big the artwork goes: scale `imageWidth x imageHeight` into
+ * `area` per `mode`, then offset by the customer's own pan and zoom. This
+ * function only ever decides *how big and where*, never *what gets cut off*.
  */
-export function coverFit(
+export function fitArtwork(
   imageWidth: number,
   imageHeight: number,
   area: Rect,
   transform: PendantTransform,
+  mode: FitMode,
 ): { cx: number; cy: number; scale: number } {
-  const imageAspect = imageWidth / imageHeight;
-  const boxAspect = area.width / area.height;
-  const coverScale = imageAspect > boxAspect ? area.height / imageHeight : area.width / imageWidth;
+  const byHeight = area.height / imageHeight;
+  const byWidth = area.width / imageWidth;
+  const fitScale = mode === 'cover' ? Math.max(byHeight, byWidth) : Math.min(byHeight, byWidth);
   return {
     cx: area.x + area.width / 2 + transform.x,
     cy: area.y + area.height / 2 + transform.y,
-    scale: coverScale * transform.zoom,
+    scale: fitScale * transform.zoom,
   };
 }
 
+/** `fitArtwork` for a resolved geometry — the call every renderer makes, so none can pick a different mode. */
+export function placeArtwork(
+  geometry: PendantGeometry,
+  imageWidth: number,
+  imageHeight: number,
+  transform: PendantTransform,
+): { cx: number; cy: number; scale: number } {
+  return fitArtwork(imageWidth, imageHeight, geometry.engravingArea, transform, geometry.fitMode);
+}
+
 /**
- * Applies the same rotate+scale+translate `coverFit` implies to arbitrary
+ * Applies the same rotate+scale+translate `fitArtwork` implies to arbitrary
  * local points instead of an image. Rotation is applied before the (uniform)
  * scale below, but since scaling is isotropic the two commute — this matches
  * the canvas's own translate/rotate/scale stack exactly regardless of which
@@ -120,8 +132,9 @@ export function transformPoints(
   imageHeight: number,
   area: Rect,
   transform: PendantTransform,
+  mode: FitMode,
 ): Point[] {
-  const { cx, cy, scale } = coverFit(imageWidth, imageHeight, area, transform);
+  const { cx, cy, scale } = fitArtwork(imageWidth, imageHeight, area, transform, mode);
   const theta = (transform.rotation * Math.PI) / 180;
   const cos = Math.cos(theta);
   const sin = Math.sin(theta);
@@ -145,12 +158,11 @@ function round(value: number): number {
 }
 
 /**
- * The region other shapes' own content occupies in the shared 100 x 116
- * viewBox (see lib/pendant-shapes.ts) — the top ~21 units are left clear for
- * the bail. Free Edge Cut has no catalogue shape to borrow a box from, so it
- * uses this as its own default cover-fit target, which is what keeps a
- * free-edge pendant's default size and bail clearance consistent with every
- * other shape.
+ * The region the catalogue shapes occupy in the shared 100 x 116 viewBox
+ * (see lib/pendant-shapes.ts) — the top ~21 units are left clear for the
+ * bail. A Silhouette Cut has no catalogue shape to borrow a box from, so it
+ * uses this as its own cover-fit target, which keeps a silhouette pendant's
+ * default size and bail clearance consistent with every other shape.
  */
 export const EDGE_CUT_AREA: Rect = { x: 9, y: 21, width: 82, height: 90 };
 
@@ -163,60 +175,33 @@ function placeholderPath(area: Rect): string {
 }
 
 export interface PendantGeometry {
-  /** The metal boundary: fill/sheen/rim/bail are all drawn against this path. */
-  outerPath: string;
-  /** Cover-fit target box the artwork is placed into. */
-  engravingArea: Rect;
   /**
-   * An *additional* clip the artwork (not the metal boundary) must also
-   * satisfy, already transformed into the same space as `outerPath`. Only
-   * ever set for Edge Cut inside Heart, where the metal stays heart-shaped
-   * but the engraving is further clipped to the traced silhouette.
+   * The metal boundary: fill/sheen/rim are all drawn against this path.
+   * May contain several subpaths (a Silhouette Cut's outline plus its ring
+   * hole) — always fill and clip it with the EVEN-ODD rule so inner
+   * subpaths read as holes. Catalogue shapes are a single subpath, for
+   * which even-odd and nonzero agree.
    */
-  artworkClipPath?: string;
+  outerPath: string;
+  /** Target box the artwork is fit into, per `fitMode`. */
+  engravingArea: Rect;
+  /** How the artwork is fit into `engravingArea` — see `FitMode`. */
+  fitMode: FitMode;
   /**
    * Whether `paintPendant` should stroke a separate decorative rim along
-   * `outerPath`. True for a catalogue shape (Standard, and Edge Cut inside
-   * Heart — both real, closed jewellery outlines where a rim reads as the
-   * plate's edge). False for a traced silhouette (Free Edge Cut / Bust with
-   * Base / Silhouette Band): on an organic, irregular contour that same
-   * stroke doesn't read as a metal edge, it reads as exactly the artificial
-   * outline/halo/border the customer explicitly does not want — the traced
-   * boundary itself must be the cutting boundary, with nothing drawn around
-   * it. See components/PendantPreview.tsx's `paintPendant`.
+   * `outerPath`. True for a catalogue plate, where a rim reads as the
+   * plate's edge. False for a traced silhouette: on an organic contour that
+   * same stroke reads as exactly the artificial outline/halo the product
+   * doesn't have — the traced boundary itself is the cutting boundary.
    */
   hasDecorativeRim: boolean;
-  /**
-   * True for every Edge Cut style (free/heart/bust/band), false for
-   * Standard. `paintPendant` uses this to switch its entire rendering path:
-   * Standard renders a dimensional metal plate (gradient fill, sheen,
-   * emboss, bail with its own highlight); Edge Cut renders flat,
-   * material-tinted line art only — no plate, no gradient, no shadow, no
-   * dimensional bail — matching a customer-supplied reference of the
-   * expected result (a clean cutout of the artwork itself, not a rendered
-   * piece of jewellery). "Choose Material" for Edge Cut recolors the ink
-   * itself rather than rendering metal underneath it.
-   */
-  isFlatArtwork: boolean;
-  /**
-   * Flat-artwork styles whose boundary deliberately extends *beyond* the
-   * ink — Bust with Base (a solid base below the shoulders) and Silhouette
-   * Band (a solid border around the subject). Clipping the artwork alone
-   * would render those regions as nothing at all, so the preview couldn't
-   * tell them apart from Free Edge Cut; `paintFlatArtwork` fills the
-   * boundary with a light flat metal tone for these two so the base/band
-   * is visible as the piece of metal it is. False for Free and Heart, which
-   * stay artwork-only.
-   */
-  fillsBoundary: boolean;
   label: string;
 }
 
 export interface ResolvePendantGeometryInput {
   designType: DesignType;
   shape: ShapeId;
-  edgeCutStyle: EdgeCutStyle;
-  /** The shape's or category's own engraving box — unused for Free Edge Cut, which supplies its own. */
+  /** The shape's or category's own engraving box — unused for Silhouette Cut, which supplies its own. */
   engravingArea: Rect;
   contour: SilhouetteContour | null;
   transform: PendantTransform;
@@ -224,60 +209,39 @@ export interface ResolvePendantGeometryInput {
 
 /**
  * The single place that turns "what the customer picked" into "what to draw
- * and clip against". Both `paintPendant` (client canvas) and
- * `renderTransformedArtwork` (server raster/SVG export) call this and then
- * differ only in *how* they rasterize the same paths — never in what the
- * paths are.
+ * and clip against". The canvas, the laser export and the mockup composite
+ * all call this and then differ only in *how* they rasterize the same paths
+ * — never in what the paths are.
  */
 export function resolvePendantGeometry(input: ResolvePendantGeometryInput): PendantGeometry {
-  const { designType, shape, edgeCutStyle, engravingArea, contour, transform } = input;
+  const { designType, shape, engravingArea, contour, transform } = input;
 
   if (designType === 'standard') {
     const shapeDef = PENDANT_SHAPES[shape];
     return {
       outerPath: shapeDef.path,
       engravingArea,
+      fitMode: 'cover',
       hasDecorativeRim: true,
-      isFlatArtwork: false,
-      fillsBoundary: false,
       label: shapeDef.label,
     };
   }
 
-  if (edgeCutStyle === 'heart') {
-    const heart = PENDANT_SHAPES.heart;
-    const artworkClipPath = contour
-      ? pointsToPath(
-          transformPoints(contour.points, contour.imageWidth, contour.imageHeight, engravingArea, transform),
-        )
-      : undefined;
-    return {
-      outerPath: heart.path,
-      engravingArea,
-      artworkClipPath,
-      hasDecorativeRim: true,
-      isFlatArtwork: true,
-      fillsBoundary: false,
-      label: 'Edge Cut Heart',
-    };
+  // Silhouette Cut: the traced outline (artwork + cut margin + ring) is the
+  // outer boundary, and the ring's hole rides along as a second subpath —
+  // both carried through the exact same transform as the artwork.
+  let outerPath = placeholderPath(EDGE_CUT_AREA);
+  if (contour) {
+    const { imageWidth, imageHeight } = contour;
+    const place = (points: Point[]) =>
+      pointsToPath(transformPoints(points, imageWidth, imageHeight, EDGE_CUT_AREA, transform, 'contain'));
+    outerPath = [place(contour.points), ...contour.holes.map(place)].join(' ');
   }
-
-  // 'free' | 'bust' | 'band': the traced silhouette itself is the outer
-  // boundary, so it needs no separate artwork clip — the metal edge already
-  // is the clip. The three differ only in which `contour` the caller
-  // supplies (see lib/photo-silhouette.ts's `PhotoSilhouetteStyle`).
-  const outerPath = contour
-    ? pointsToPath(
-        transformPoints(contour.points, contour.imageWidth, contour.imageHeight, EDGE_CUT_AREA, transform),
-      )
-    : placeholderPath(EDGE_CUT_AREA);
-  const label = edgeCutStyle === 'bust' ? 'Bust with Base' : edgeCutStyle === 'band' ? 'Silhouette Band' : 'Edge Cut';
   return {
     outerPath,
     engravingArea: EDGE_CUT_AREA,
+    fitMode: 'contain',
     hasDecorativeRim: false,
-    isFlatArtwork: true,
-    fillsBoundary: edgeCutStyle !== 'free',
-    label,
+    label: 'Silhouette Cut',
   };
 }

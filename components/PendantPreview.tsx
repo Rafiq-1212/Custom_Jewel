@@ -32,13 +32,19 @@
  */
 
 import * as React from 'react';
-import { PENDANT_MATERIALS, type MaterialId, type PendantMaterial } from '@/lib/materials';
+import {
+  PENDANT_MATERIALS,
+  RIM_BAND_WIDTH,
+  RIM_COLORS,
+  type MaterialId,
+  type PendantMaterial,
+  type RimColorId,
+} from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import {
-  coverFit,
+  placeArtwork,
   resolvePendantGeometry,
   type DesignType,
-  type EdgeCutStyle,
   type PendantGeometry,
   type SilhouetteContour,
 } from '@/lib/pendant-geometry';
@@ -93,17 +99,19 @@ function getTintedInkMask(sketchImage: HTMLImageElement, color: string): HTMLCan
 }
 
 /**
- * Standard Pendant's look: a dimensional metal plate — gradient fill,
- * studio sheen, an embossed/engraved-groove artwork pass, a soft edge
- * bevel, and an optional decorative rim. This is the original `paintPendant`
- * body, just given its own name once a second, genuinely different
- * rendering path (`paintFlatArtwork` below) needed to exist alongside it.
+ * The pendant as a dimensional metal plate — gradient fill, studio sheen, an
+ * embossed/engraved-groove artwork pass, a soft edge bevel, and (for
+ * catalogue shapes) a decorative rim. Used for BOTH design types: a
+ * Silhouette Cut is the same sheet of metal, just cut along the artwork's
+ * offset outline with its own ring — every fill/clip here uses the even-odd
+ * rule so that ring's hole is a real hole (see `PendantGeometry.outerPath`).
  */
 function paintDimensionalPendant(
   ctx: CanvasRenderingContext2D,
   sketchImage: HTMLImageElement,
   geometry: PendantGeometry,
   material: MaterialId,
+  rimColor: RimColorId,
   transform: PendantTransform,
 ): void {
   const materialDef = PENDANT_MATERIALS[material];
@@ -116,12 +124,12 @@ function paintDimensionalPendant(
   ctx.shadowBlur = 3;
   ctx.shadowOffsetY = 1.5;
   ctx.fillStyle = metalGradient;
-  ctx.fill(shapePath);
+  ctx.fill(shapePath, 'evenodd');
   ctx.restore();
 
   // Studio sheen.
   ctx.save();
-  ctx.clip(shapePath);
+  ctx.clip(shapePath, 'evenodd');
   const sheen = ctx.createRadialGradient(35, 45, 2, 35, 45, 55);
   sheen.addColorStop(0, 'rgba(255,255,255,0.55)');
   sheen.addColorStop(1, 'rgba(255,255,255,0)');
@@ -133,27 +141,21 @@ function paintDimensionalPendant(
   // change" against the metal, black linework stays dark — the classic
   // etched-into-metal look.
   //
-  // Clipped to the outer shape, plus — for Edge Cut inside Heart — a second,
-  // additional clip to the traced silhouette (`ctx.clip()` intersects with
-  // whatever clip region is already active, so both apply at once). Never
-  // clipped to an inner rectangle: that was a real, previously-fixed bug
-  // (see git history) — a hard rectangular cutoff independent of the image's
-  // own content, visible at some zoom/pan combinations even though the
-  // sketch itself has no visible background.
+  // Clipped to the outer shape only. Never clipped to an inner rectangle:
+  // that was a real, previously-fixed bug (see git history) — a hard
+  // rectangular cutoff independent of the image's own content, visible at
+  // some zoom/pan combinations even though the sketch itself has no visible
+  // background.
   //
-  // `engravingArea` is only ever a *target box* for the cover-fit maths below
-  // — where and how big to draw by default — never a clip boundary.
-  const area = geometry.engravingArea;
+  // `engravingArea` is only ever a *target box* for the fit maths below —
+  // where and how big to draw by default — never a clip boundary.
   ctx.save();
-  ctx.clip(shapePath);
-  if (geometry.artworkClipPath) {
-    ctx.clip(new Path2D(geometry.artworkClipPath));
-  }
+  ctx.clip(shapePath, 'evenodd');
 
-  const { cx, cy, scale: finalScale } = coverFit(
+  const { cx, cy, scale: finalScale } = placeArtwork(
+    geometry,
     sketchImage.naturalWidth,
     sketchImage.naturalHeight,
-    area,
     transform,
   );
   const rotationRad = (transform.rotation * Math.PI) / 180;
@@ -187,6 +189,21 @@ function paintDimensionalPendant(
   ctx.drawImage(sketchImage, -sketchImage.naturalWidth / 2, -sketchImage.naturalHeight / 2);
   ctx.restore();
 
+  // Enamel rim ("Heart with Color" / "Round with Color"): a band of colour
+  // flush with the plate's edge. Stroked centred on the outline and clipped
+  // to the plate, so exactly the inner half — RIM_BAND_WIDTH wide — shows.
+  // Drawn over the artwork (enamel sits on top of the metal) and under the
+  // bevel shading below, so the edge still reads as a rounded metal edge.
+  const rimHex = RIM_COLORS[rimColor].hex;
+  if (rimHex) {
+    ctx.save();
+    ctx.clip(shapePath, 'evenodd');
+    ctx.strokeStyle = rimHex;
+    ctx.lineWidth = RIM_BAND_WIDTH * 2;
+    ctx.stroke(shapePath);
+    ctx.restore();
+  }
+
   // Edge bevel: a soft inner shadow all around the boundary, plus a
   // directional highlight on the side facing the same light as the sheen —
   // so the boundary itself reads as a rounded, slightly-domed edge rather
@@ -195,7 +212,7 @@ function paintDimensionalPendant(
   // *inside* of `shapePath`, so nothing is ever drawn outside it — this is
   // shading on the existing edge, never an added outline/halo/border.
   ctx.save();
-  ctx.clip(shapePath);
+  ctx.clip(shapePath, 'evenodd');
   for (const [width, alpha] of [
     [4.5, 0.1],
     [3, 0.1],
@@ -233,66 +250,6 @@ function paintDimensionalPendant(
 }
 
 /**
- * Edge Cut's look (every style: Free, Heart, Bust with Base, Silhouette
- * Band): the flat artwork itself, tinted to the chosen material, clipped to
- * the cut boundary — no metal plate, no gradient, no sheen, no shadow, no
- * embossed groove, no decorative rim. This exists because a customer showed
- * a reference of exactly this look (a clean cutout of the sketch, not a
- * rendered piece of jewellery) and explicitly rejected the dimensional
- * rendering for Edge Cut; Standard Pendant is unaffected and keeps
- * `paintDimensionalPendant` above.
- */
-function paintFlatArtwork(
-  ctx: CanvasRenderingContext2D,
-  sketchImage: HTMLImageElement,
-  geometry: PendantGeometry,
-  material: MaterialId,
-  transform: PendantTransform,
-): void {
-  const materialDef = PENDANT_MATERIALS[material];
-  const shapePath = new Path2D(geometry.outerPath);
-
-  // Clipped to the cut boundary — nothing outside it, and nothing drawn
-  // *along* it either (no rim/stroke/halo): the artwork's own edge, wherever
-  // the clip cuts it off, is the entire visual boundary.
-  ctx.save();
-  ctx.clip(shapePath);
-  if (geometry.artworkClipPath) {
-    ctx.clip(new Path2D(geometry.artworkClipPath));
-  }
-
-  // Bust with Base / Silhouette Band: the boundary extends past the ink on
-  // purpose (a solid base, a solid border), so those regions need *some*
-  // pixels or the style is invisible. A single light, flat metal tone — no
-  // gradient, sheen, shadow or rim — reads as the cut piece of metal the
-  // base/band physically is, while the artwork stays flat on top of it.
-  if (geometry.fillsBoundary) {
-    ctx.save();
-    ctx.globalAlpha = 0.45;
-    ctx.fillStyle = materialDef.gradient[1];
-    ctx.fill(shapePath);
-    ctx.restore();
-  }
-
-  const area = geometry.engravingArea;
-  const { cx, cy, scale: finalScale } = coverFit(
-    sketchImage.naturalWidth,
-    sketchImage.naturalHeight,
-    area,
-    transform,
-  );
-
-  ctx.translate(cx, cy);
-  ctx.rotate((transform.rotation * Math.PI) / 180);
-  ctx.scale(finalScale, finalScale);
-  const artwork = materialDef.tintArtwork
-    ? getTintedInkMask(sketchImage, materialDef.rim)
-    : sketchImage;
-  ctx.drawImage(artwork, -sketchImage.naturalWidth / 2, -sketchImage.naturalHeight / 2);
-  ctx.restore();
-}
-
-/**
  * The single source of truth for turning a sketch + geometry + material +
  * transform into pixels. The on-screen `<PendantPreview>` calls this every
  * paint; `renderPendantPngBlob` below calls the exact same function at export
@@ -315,6 +272,7 @@ export function paintPendant(
   sketchImage: HTMLImageElement,
   geometry: PendantGeometry,
   material: MaterialId,
+  rimColor: RimColorId,
   transform: PendantTransform,
   size: number,
   /**
@@ -343,11 +301,7 @@ export function paintPendant(
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.clearRect(0, 0, PENDANT_VIEWBOX.width, PENDANT_VIEWBOX.height);
 
-  if (geometry.isFlatArtwork) {
-    paintFlatArtwork(ctx, sketchImage, geometry, material, transform);
-  } else {
-    paintDimensionalPendant(ctx, sketchImage, geometry, material, transform);
-  }
+  paintDimensionalPendant(ctx, sketchImage, geometry, material, rimColor, transform);
 }
 
 function decodeImage(src: string): Promise<HTMLImageElement> {
@@ -369,8 +323,8 @@ export interface RenderPendantPngOptions {
   transform: PendantTransform;
   category?: CategoryId;
   designType?: DesignType;
-  edgeCutStyle?: EdgeCutStyle;
   contour?: SilhouetteContour | null;
+  rimColor?: RimColorId;
   /** Output width in pixels. Defaults to print/laser-reference quality. */
   size?: number;
 }
@@ -393,7 +347,6 @@ export async function renderPendantPngBlob(options: RenderPendantPngOptions): Pr
   const geometry = resolvePendantGeometry({
     designType: options.designType ?? 'standard',
     shape: options.shape,
-    edgeCutStyle: options.edgeCutStyle ?? 'free',
     engravingArea,
     contour: options.contour ?? null,
     transform: options.transform,
@@ -404,7 +357,16 @@ export async function renderPendantPngBlob(options: RenderPendantPngOptions): Pr
   // `pixelRatio: 1` because `size` here already *is* the target pixel width;
   // the live preview's own screen density has nothing to do with a file
   // being downloaded.
-  paintPendant(canvas, image, geometry, options.material, options.transform, options.size ?? EXPORT_SIZE, 1);
+  paintPendant(
+    canvas,
+    image,
+    geometry,
+    options.material,
+    options.rimColor ?? 'none',
+    options.transform,
+    options.size ?? EXPORT_SIZE,
+    1,
+  );
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -427,12 +389,12 @@ export interface PendantPreviewProps {
    * omitted, so this prop is optional for callers that don't use categories.
    */
   category?: CategoryId;
-  /** Standard (catalogue shape) or Edge Cut. Defaults to Standard. */
+  /** Shape Pendant (catalogue plate) or Silhouette Cut. Defaults to Shape Pendant. */
   designType?: DesignType;
-  /** Free silhouette boundary, or silhouette clipped inside a heart. Only used when `designType` is 'edge-cut'. */
-  edgeCutStyle?: EdgeCutStyle;
-  /** The traced silhouette for the current sketch — computed once by lib/edge-cut-contour.ts and cached by the caller, `null` while unavailable. Ignored for Standard pendants. */
+  /** The traced silhouette for the current sketch — computed once by lib/edge-cut-contour.ts and cached by the caller, `null` while unavailable. Ignored for Shape Pendants. */
   contour?: SilhouetteContour | null;
+  /** Enamel rim colour for Shape Pendants whose shape supports one. Ignored otherwise. */
+  rimColor?: RimColorId;
   /** Display width in CSS pixels; height follows the fixed pendant viewBox. */
   size?: number;
   className?: string;
@@ -445,8 +407,8 @@ export function PendantPreview({
   transform,
   category,
   designType = 'standard',
-  edgeCutStyle = 'free',
   contour = null,
+  rimColor = 'none',
   size = 300,
   className,
 }: PendantPreviewProps) {
@@ -460,8 +422,8 @@ export function PendantPreview({
 
   const geometry = React.useMemo(() => {
     const engravingArea = category ? PENDANT_CATEGORIES[category].engravingArea : PENDANT_SHAPES[shape].engravingArea;
-    return resolvePendantGeometry({ designType, shape, edgeCutStyle, engravingArea, contour, transform });
-  }, [category, shape, designType, edgeCutStyle, contour, transform]);
+    return resolvePendantGeometry({ designType, shape, engravingArea, contour, transform });
+  }, [category, shape, designType, contour, transform]);
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -473,7 +435,7 @@ export function PendantPreview({
       // Coalesce rapid slider drags into one paint per frame.
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       frameRef.current = requestAnimationFrame(() => {
-        paintPendant(canvas, sketchImage, geometry, material, transform, size);
+        paintPendant(canvas, sketchImage, geometry, material, rimColor, transform, size);
       });
     };
 
@@ -493,7 +455,7 @@ export function PendantPreview({
       cancelled = true;
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     };
-  }, [sketch, geometry, material, transform, size]);
+  }, [sketch, geometry, material, rimColor, transform, size]);
 
   if (!sketch) return null;
 

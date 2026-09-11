@@ -28,7 +28,7 @@ export function PendantShapePicker({
     <div
       role="radiogroup"
       aria-label="Pendant shape"
-      className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-7"
+      className="grid grid-cols-3 gap-2.5 sm:grid-cols-6"
     >
       {PENDANT_SHAPE_LIST.map((shape) => {
         const selected = shape.id === value;

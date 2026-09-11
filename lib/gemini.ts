@@ -28,12 +28,21 @@ in the reference image.
 
 Do not change the identity or facial structure of the people.`;
 
-const LINE_ART_PROMPT_TAIL = `Convert the photograph into clean monochrome line art suitable for
-laser engraving or fine jewellery engraving.
+const LINE_ART_PROMPT_TAIL = `Convert the photograph into bold, clean, high-contrast black-and-white
+vector-style line art for laser engraving on a small metal pendant
+(about 25 mm wide).
 
-Use precise black outlines, controlled hatching, subtle
-cross-hatching, clean facial contours, detailed hair strokes,
-and high contrast.
+Style rules, all mandatory:
+- Thick, uniform, confident black outlines for every contour.
+- Solid black fills for hair, beard, moustache, eyebrows, pupils and
+  the deepest shadows — like an ink drawing or a vinyl-cut sticker.
+- Everything else stays pure white. NO fine hatching, cross-hatching,
+  stippling, dot shading, halftone or grey tones anywhere: every mark
+  must be either pure black or pure white.
+- Every line must be thick enough to survive engraving at that small
+  size — no hairlines, no tiny isolated marks.
+- Simplify clothing patterns into a few bold shapes rather than
+  detailed texture.
 
 Remove the original background and replace it with a clean white
 background.
@@ -41,9 +50,9 @@ background.
 Simplify unnecessary photographic details while preserving important
 facial and clothing characteristics.
 
-The final result should look like professional hand-drawn jewellery
-engraving artwork rather than a cartoon, anime image, painting,
-3D render, or generic AI portrait.
+The final result should look like a professional bold ink portrait
+prepared for laser cutting and engraving, rather than a cartoon, anime
+image, painting, 3D render, pencil sketch or generic AI portrait.
 
 Do not duplicate faces.
 Do not distort facial features.
@@ -55,8 +64,10 @@ Do not add a watermark.
 The final artwork should be centered, clean, high contrast,
 monochrome black line artwork on a white background.
 
-The artwork must be suitable for placing inside a custom
-jewellery pendant.`;
+Draw ONLY the people themselves. Do not draw any pendant, plate,
+medallion, disc, frame, border, circle, oval, heart or any other
+background shape or outline around them — the pendant shape is added
+separately later. Nothing but the subjects on plain white.`;
 
 /**
  * Category-specific subject-selection/framing instructions — what the base
@@ -211,9 +222,30 @@ export interface GenerateLineArtResult {
 export async function generateLineArt(
   input: GenerateLineArtInput,
 ): Promise<GenerateLineArtResult> {
+  return generateImageFromImage({
+    prompt: buildLineArtPrompt(input.category),
+    imageBytes: input.imageBytes,
+    mimeType: input.mimeType,
+  });
+}
+
+export interface GenerateImageFromImageInput {
+  prompt: string;
+  imageBytes: Uint8Array;
+  mimeType: string;
+}
+
+/**
+ * One image in, one image out. The shared core of both Gemini uses in this
+ * app — the photo -> engraving sketch (`generateLineArt`, above) and the flat
+ * composite -> photorealistic product mockup (lib/mockup.ts). Same model,
+ * same request shape, same typed error classification.
+ */
+export async function generateImageFromImage(
+  input: GenerateImageFromImageInput,
+): Promise<GenerateLineArtResult> {
   const ai = getClient();
   const base64Data = Buffer.from(input.imageBytes).toString('base64');
-  const prompt = buildLineArtPrompt(input.category);
 
   let response;
   try {
@@ -222,7 +254,7 @@ export async function generateLineArt(
       contents: [
         {
           role: 'user',
-          parts: [{ text: prompt }, { inlineData: { mimeType: input.mimeType, data: base64Data } }],
+          parts: [{ text: input.prompt }, { inlineData: { mimeType: input.mimeType, data: base64Data } }],
         },
       ],
       config: {
