@@ -312,7 +312,15 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
   // DXF: everything reduced to polylines/circles, in millimeters. This is
   // the one deliverable that must be flattened — DXF's LWPOLYLINE has no
   // curve primitive of its own.
-  const scalePoint = (p: Point): Point => ({ x: p.x * mmPerUnit, y: p.y * mmPerUnit });
+  //
+  // The viewBox (like every SVG) is Y-down; DXF, like every CAD format, is
+  // Y-up. Flipping Y about the viewBox height here is what keeps the DXF the
+  // same way up as the SVG and PNG from the same click — without it the cut
+  // part comes out vertically mirrored (a heart with its point at the top).
+  const scalePoint = (p: Point): Point => ({
+    x: p.x * mmPerUnit,
+    y: (PENDANT_VIEWBOX.height - p.y) * mmPerUnit,
+  });
 
   const outlinePolylines = flattenPath(geometry.outerPath).map((line) => line.map(scalePoint));
   const engravingRasterUnits = flattenPath(tracedD);

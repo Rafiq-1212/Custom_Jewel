@@ -35,11 +35,19 @@ export interface Rect {
 }
 
 /**
- * A traced silhouette, in the sketch image's own local space: `(0,0)` is the
- * image's center, matching the convention `drawImage(img, -w/2, -h/2)`
- * already uses to draw the image itself. Produced once per `masterSketch`
- * by `extractSilhouetteContour` (lib/edge-cut-contour.ts) and never
- * recomputed on shape/design switches or transform changes.
+ * A traced silhouette in a local space whose frame is `imageWidth x
+ * imageHeight` with `(0,0)` at the frame's centre — the convention
+ * `drawImage(img, -w/2, -h/2)` already uses to draw the sketch itself.
+ *
+ * CONTRACT: the frame must mean "tight around the subject", because
+ * `transformPoints` cover-fits it into the engraving area with the very same
+ * maths the renderers use to place the master sketch, and the master sketch
+ * is trimmed tight to its ink. `extractSilhouetteContour` (lib/edge-cut-
+ * contour.ts) satisfies this trivially — its frame *is* the sketch.
+ * `extractPhotoSilhouette` (lib/photo-silhouette.ts) traces the raw photo,
+ * whose full frame has margins the sketch doesn't, so it returns the
+ * subject's bounding box as the frame instead. Never recomputed on
+ * shape/design switches or transform changes.
  */
 export interface SilhouetteContour {
   points: Point[];

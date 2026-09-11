@@ -31,10 +31,12 @@
  *   deliberately wide margin, the whole point of that style — 'full' and
  *   'bust' add no such margin, the cut boundary is the subject's own contour
  *   with no extra stroke, halo, frame, rim, or padding around it -> trace,
- *   simplify, smooth (lib/silhouette-geometry.ts) -> map back into the
- *   photo's own local coordinate space, centered on the photo's own center,
- *   matching the same convention `extractSilhouetteContour` and
- *   `paintPendant` already use.
+ *   simplify, smooth (lib/silhouette-geometry.ts) -> map into a local
+ *   coordinate space centred on the SUBJECT's bounding box (not the photo's
+ *   full frame — see the comment at the end of `extractPhotoSilhouette` for
+ *   why that distinction is what makes the boundary line up with the
+ *   trimmed sketch), the same "(0,0) = frame centre" convention
+ *   `extractSilhouetteContour` and `paintPendant` already use.
  */
 
 import type { SilhouetteContour } from './pendant-geometry';
@@ -271,7 +273,12 @@ export async function extractPhotoSilhouette(
 
   mask = closeToSingleComponent(mask, analysisWidth, analysisHeight);
 
-  if (mask.every((v) => v === 0)) {
+  // The subject's own bounding box, measured on the plain 'full' mask BEFORE
+  // any style-specific edit — this is the frame every style's points are
+  // expressed against below, so 'bust'/'band' keep their intended extra
+  // extent relative to the subject rather than being re-normalised to it.
+  const subjectBox = boundingBoxOf(mask, analysisWidth, analysisHeight);
+  if (!subjectBox) {
     throw new Error('Could not separate a subject from the background in this photo.');
   }
 
@@ -294,11 +301,31 @@ export async function extractPhotoSilhouette(
     throw new Error('Could not trace a silhouette boundary from this photo.');
   }
 
-  const scale = naturalWidth / analysisWidth;
+  // Coordinate frame: NOT the photo's full frame. Consumers (lib/pendant-
+  // geometry.ts's `transformPoints`) cover-fit `imageWidth x imageHeight`
+  // into the engraving area with the exact same maths the renderers use to
+  // place the sketch — so the two only line up if both frames mean the same
+  // thing. The master sketch is trimmed tight to its ink (lib/image-
+  // processing.ts), i.e. its frame *is* the subject's bounding box; the raw
+  // photo's frame has margins around the subject that the sketch no longer
+  // has. Returning the photo's dimensions here made the silhouette land
+  // materially smaller than the artwork it was meant to bound. So: the frame
+  // is the subject's bounding box, centred on its centre, and the points are
+  // relative to that. 'band'/'bust' points legitimately fall outside ±w/2,
+  // ±h/2 — that overhang is exactly their intended extra extent.
+  //
+  // Per-axis scale: `analysisWidth`/`analysisHeight` are rounded
+  // independently, so one shared factor stretched Y by up to ~0.1%.
+  const scaleX = naturalWidth / analysisWidth;
+  const scaleY = naturalHeight / analysisHeight;
+  const frameWidth = (subjectBox.maxX - subjectBox.minX + 1) * scaleX;
+  const frameHeight = (subjectBox.maxY - subjectBox.minY + 1) * scaleY;
+  const frameCx = ((subjectBox.minX + subjectBox.maxX + 1) / 2) * scaleX;
+  const frameCy = ((subjectBox.minY + subjectBox.maxY + 1) / 2) * scaleY;
   const points = smoothed.map((p) => ({
-    x: p.x * scale - naturalWidth / 2,
-    y: p.y * scale - naturalHeight / 2,
+    x: p.x * scaleX - frameCx,
+    y: p.y * scaleY - frameCy,
   }));
 
-  return { points, imageWidth: naturalWidth, imageHeight: naturalHeight };
+  return { points, imageWidth: frameWidth, imageHeight: frameHeight };
 }

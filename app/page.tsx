@@ -28,6 +28,7 @@
  */
 
 import * as React from 'react';
+import { DownloadPanel } from '@/components/DownloadPanel';
 import { EdgeCutStylePicker } from '@/components/EdgeCutStylePicker';
 import { ExportPanel } from '@/components/ExportPanel';
 import { GeneratedImage } from '@/components/GeneratedImage';
@@ -650,6 +651,24 @@ export default function Home() {
       {hasSketch && (
         <Section step={9} title="Export for Laser Cutting">
           <ExportPanel
+            sketch={masterSketch}
+            shape={selectedShape}
+            material={selectedMaterial}
+            category={activeCategoryId}
+            designType={selectedDesignType}
+            edgeCutStyle={selectedEdgeCutStyle}
+            contour={activeContour}
+            transform={transform}
+          />
+        </Section>
+      )}
+
+      {/* ---------------------------------------------------------------- */}
+      {/* 10. DOWNLOAD — pick one PNG output, save it                       */}
+      {/* ---------------------------------------------------------------- */}
+      {hasSketch && (
+        <Section step={10} title="Download">
+          <DownloadPanel
             sketch={masterSketch}
             shape={selectedShape}
             material={selectedMaterial}

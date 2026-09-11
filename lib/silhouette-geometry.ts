@@ -18,7 +18,14 @@
 
 import type { Point } from './pendant-geometry';
 
-/** Sliding-window maximum over `input` with a window radius of `radius` — O(n), not O(n*radius). */
+/**
+ * Sliding-window maximum over `input` with a window radius of `radius` —
+ * O(n), not O(n*radius). `output[t]` covers the *centred* window
+ * `[t - radius, t + radius]`: at step `i` the target is `t = i - radius`, so
+ * the window's left edge is `i - 2 * radius`. (An earlier version evicted at
+ * `i - radius`, which made the window `[t, t + radius]` — one-sided — and
+ * shifted every dilated/eroded mask up-and-left by `radius` pixels.)
+ */
 function slidingMax(input: Uint8Array, n: number, radius: number): Uint8Array {
   const output = new Uint8Array(n);
   const deque = new Int32Array(n + radius);
@@ -29,7 +36,7 @@ function slidingMax(input: Uint8Array, n: number, radius: number): Uint8Array {
       while (tail > head && input[deque[tail - 1]] <= input[i]) tail--;
       deque[tail++] = i;
     }
-    while (deque[head] < i - radius) head++;
+    while (deque[head] < i - 2 * radius) head++;
     const target = i - radius;
     if (target >= 0) output[target] = input[deque[head]];
   }
@@ -47,7 +54,7 @@ function slidingMin(input: Uint8Array, n: number, radius: number): Uint8Array {
       while (tail > head && input[deque[tail - 1]] >= input[i]) tail--;
       deque[tail++] = i;
     }
-    while (deque[head] < i - radius) head++;
+    while (deque[head] < i - 2 * radius) head++;
     const target = i - radius;
     if (target >= 0) output[target] = input[deque[head]];
   }

@@ -1,38 +1,24 @@
 'use client';
 
 /**
- * Export section: a PNG that's pixel-identical to the live preview, plus
- * vector files for an actual laser cutter.
+ * Laser-cutting export: SVG and DXF vector files for an actual cutter's cut
+ * and engrave toolpaths. A laser doesn't care what "gold" looks like, so
+ * these are built from the bare artwork (traced via potrace), not a picture
+ * of a metal pendant — which genuinely needs the server (vectorization). See
+ * lib/laser-export.ts. PNG downloads of the rendered pendant live in
+ * components/DownloadPanel.tsx instead.
  *
- * These are two genuinely different kinds of file, built two different ways,
- * on purpose:
- *
- *   PNG   — the full pendant exactly as shown on screen (metal, bail,
- *           engraving), transparent outside the shape. Rendered by calling
- *           `renderPendantPngBlob`, which runs the *same* `paintPendant`
- *           function the on-screen canvas uses — not a second
- *           implementation, so it cannot show a different shape, crop, scale
- *           or position than the preview. Entirely client-side; no network
- *           call, no AI.
- *
- *   SVG/DXF — real vector files for a laser cutter's cut and engrave
- *           toolpaths. A laser doesn't care what "gold" looks like, so these
- *           are built from the bare artwork (traced via potrace), not a
- *           picture of a metal pendant — genuinely different content,
- *           genuinely needing the server (vectorization). See
- *           lib/laser-export.ts.
- *
- * Both paths — client PNG and server SVG/DXF — resolve the *same* geometry
- * (lib/pendant-geometry.ts's `resolvePendantGeometry`) from the same
- * `designType`/`shape`/`edgeCutStyle`/`contour` this component is handed, so
- * an Edge Cut export can never show a different boundary than the preview.
- * For Edge Cut, `contour` (traced once, client-side, by
- * lib/edge-cut-contour.ts) is sent to the server as plain data rather than
- * recomputed there — see the comment on `/api/export-laser` for why.
+ * The server resolves the *same* geometry (lib/pendant-geometry.ts's
+ * `resolvePendantGeometry`) from the same `designType`/`shape`/
+ * `edgeCutStyle`/`contour` this component is handed, so an Edge Cut export
+ * can never show a different boundary than the preview. For Edge Cut,
+ * `contour` (traced once, client-side, by lib/edge-cut-contour.ts) is sent
+ * to the server as plain data rather than recomputed there — see the comment
+ * on `/api/export-laser` for why.
  */
 
 import * as React from 'react';
-import { renderPendantPngBlob } from '@/components/PendantPreview';
+import { downloadFile } from '@/lib/download';
 import type { CategoryId } from '@/lib/pendant-categories';
 import { PENDANT_CATEGORIES } from '@/lib/pendant-categories';
 import type { MaterialId } from '@/lib/materials';
@@ -44,18 +30,6 @@ interface VectorAssets {
   dxf: string;
   widthMm: number;
   heightMm: number;
-}
-
-function download(filename: string, content: string | Blob, mimeType?: string): void {
-  const blob = typeof content === 'string' ? new Blob([content], { type: mimeType }) : content;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }
 
 export function ExportPanel({
@@ -78,31 +52,6 @@ export function ExportPanel({
   transform: PendantTransform;
 }) {
   const engravingArea = category ? PENDANT_CATEGORIES[category].engravingArea : PENDANT_SHAPES[shape].engravingArea;
-
-  const [pngStatus, setPngStatus] = React.useState<'idle' | 'loading' | 'error'>('idle');
-  const [pngError, setPngError] = React.useState<string | null>(null);
-
-  const downloadPng = React.useCallback(async () => {
-    setPngStatus('loading');
-    setPngError(null);
-    try {
-      const blob = await renderPendantPngBlob({
-        sketch,
-        shape,
-        material,
-        category,
-        designType,
-        edgeCutStyle,
-        contour,
-        transform,
-      });
-      download(`pendant-${shape}-${material}.png`, blob);
-      setPngStatus('idle');
-    } catch {
-      setPngError('Unable to render the pendant image. Please try again.');
-      setPngStatus('error');
-    }
-  }, [sketch, shape, material, category, designType, edgeCutStyle, contour, transform]);
 
   const [vectorStatus, setVectorStatus] = React.useState<'idle' | 'loading' | 'error'>('idle');
   const [vectorError, setVectorError] = React.useState<string | null>(null);
@@ -171,25 +120,6 @@ export function ExportPanel({
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <p className="text-xs text-slate-500">
-          The exact pendant shown above — same shape, metal, crop and adjustments — as a transparent PNG.
-        </p>
-        {pngError && (
-          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-            {pngError}
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={downloadPng}
-          disabled={pngStatus === 'loading' || edgeCutPending}
-          className="inline-flex items-center justify-center gap-2 self-start rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {pngStatus === 'loading' ? 'Rendering…' : 'Download PNG (transparent)'}
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-5">
-        <p className="text-xs text-slate-500">
           Vector files for an actual laser cutter — the engraving traced to real curves, generated once from
           the current design, metal and adjustments. No additional AI calls.
         </p>
@@ -211,14 +141,14 @@ export function ExportPanel({
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => download(`pendant-${shape}.svg`, assets.svg, 'image/svg+xml')}
+              onClick={() => downloadFile(`pendant-${shape}.svg`, assets.svg, 'image/svg+xml')}
               className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
             >
               Download SVG (vector)
             </button>
             <button
               type="button"
-              onClick={() => download(`pendant-${shape}.dxf`, assets.dxf, 'application/dxf')}
+              onClick={() => downloadFile(`pendant-${shape}.dxf`, assets.dxf, 'application/dxf')}
               className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
             >
               Download DXF (laser cutter)
