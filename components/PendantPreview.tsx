@@ -261,6 +261,19 @@ function paintFlatArtwork(
     ctx.clip(new Path2D(geometry.artworkClipPath));
   }
 
+  // Bust with Base / Silhouette Band: the boundary extends past the ink on
+  // purpose (a solid base, a solid border), so those regions need *some*
+  // pixels or the style is invisible. A single light, flat metal tone — no
+  // gradient, sheen, shadow or rim — reads as the cut piece of metal the
+  // base/band physically is, while the artwork stays flat on top of it.
+  if (geometry.fillsBoundary) {
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.fillStyle = materialDef.gradient[1];
+    ctx.fill(shapePath);
+    ctx.restore();
+  }
+
   const area = geometry.engravingArea;
   const { cx, cy, scale: finalScale } = coverFit(
     sketchImage.naturalWidth,

@@ -41,8 +41,7 @@ import { PendantControls } from '@/components/PendantControls';
 import { PendantDesignPicker } from '@/components/PendantDesignPicker';
 import { PendantPreview } from '@/components/PendantPreview';
 import { PendantShapePicker } from '@/components/PendantShapePicker';
-import { extractSilhouetteContour } from '@/lib/edge-cut-contour';
-import { extractPhotoSilhouette } from '@/lib/photo-silhouette';
+import { extractSketchSilhouettes, type SketchSilhouettes } from '@/lib/edge-cut-contour';
 import { PENDANT_MATERIAL_LIST, type MaterialId } from '@/lib/materials';
 import {
   DEFAULT_DESIGN_TYPE,
@@ -102,32 +101,16 @@ export default function Home() {
   // never actually observed.
   const activeCategoryId: CategoryId = selectedCategory ?? DEFAULT_CATEGORY_ID;
 
-  // Two independent silhouette sources, both computed eagerly (not only when
-  // Edge Cut is selected) so switching to any edge-cut style never has to
-  // wait:
-  //
-  //   inkContour    — traced from the sketch's own ink (lib/edge-cut-
-  //                   contour.ts). Always attempted; works even after a
-  //                   reload, since masterSketch is the one thing persisted.
-  //                   Backs 'free'/'heart'.
-  //
-  //   photoContours — traced from the ORIGINAL photo (lib/photo-
-  //                   silhouette.ts), a materially more accurate subject
-  //                   outline. Only attempted while `originalImage` is still
-  //                   in memory this session (never persisted — see
-  //                   pendant-storage.ts). Preferred over inkContour for
-  //                   'free'/'heart' whenever available; required for
-  //                   'bust'/'band', which have no sensible ink-based
-  //                   fallback (truncating or band-offsetting a sparse ink
-  //                   trace just amplifies its inaccuracy).
-  const [inkContour, setInkContour] = React.useState<SilhouetteContour | null>(null);
-  const [inkContourError, setInkContourError] = React.useState<string | null>(null);
-  const [photoContours, setPhotoContours] = React.useState<{
-    full: SilhouetteContour;
-    bust: SilhouetteContour;
-    band: SilhouetteContour;
-  } | null>(null);
-  const [photoContourError, setPhotoContourError] = React.useState<string | null>(null);
+  // The Edge Cut boundaries — one per style — traced from the SKETCH itself
+  // (lib/edge-cut-contour.ts), computed eagerly the moment a sketch exists
+  // (not only when Edge Cut is selected) so switching to any edge-cut style
+  // never has to wait. The sketch is the only valid source: Gemini
+  // re-composes the photo, so a boundary traced from the original photo
+  // describes a different picture than the one being cut (see the module
+  // comment in lib/edge-cut-contour.ts for the customer case that proved
+  // this). It's also the one asset that survives a reload.
+  const [sketchContours, setSketchContours] = React.useState<SketchSilhouettes | null>(null);
+  const [sketchContourError, setSketchContourError] = React.useState<string | null>(null);
 
   const requestIdRef = React.useRef(0);
   const hydratedRef = React.useRef(false);
@@ -206,16 +189,16 @@ export default function Home() {
     selectedEdgeCutStyle,
   ]);
 
-  // The ink-traced silhouette is stale the moment `masterSketch` itself
-  // changes (a fresh generation, a different stored sketch loading in, or it
-  // being cleared) — reset synchronously during render rather than in an
-  // effect body, the same "compare against state" pattern ExportPanel uses
-  // for its own prepared vector assets.
-  const [inkContourForSketch, setInkContourForSketch] = React.useState<string | null>(null);
-  if (masterSketch !== inkContourForSketch) {
-    setInkContourForSketch(masterSketch);
-    if (inkContour) setInkContour(null);
-    if (inkContourError) setInkContourError(null);
+  // The traced boundaries are stale the moment `masterSketch` itself changes
+  // (a fresh generation, a different stored sketch loading in, or it being
+  // cleared) — reset synchronously during render rather than in an effect
+  // body, the same "compare against state" pattern ExportPanel uses for its
+  // own prepared vector assets.
+  const [contoursForSketch, setContoursForSketch] = React.useState<string | null>(null);
+  if (masterSketch !== contoursForSketch) {
+    setContoursForSketch(masterSketch);
+    if (sketchContours) setSketchContours(null);
+    if (sketchContourError) setSketchContourError(null);
   }
 
   // Recomputes only when `masterSketch` changes — never on a shape/design/
@@ -225,13 +208,13 @@ export default function Home() {
   React.useEffect(() => {
     if (!masterSketch) return;
     let cancelled = false;
-    extractSilhouetteContour(masterSketch)
+    extractSketchSilhouettes(masterSketch)
       .then((result) => {
-        if (!cancelled) setInkContour(result);
+        if (!cancelled) setSketchContours(result);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setInkContourError(
+        setSketchContourError(
           error instanceof Error ? error.message : 'Could not trace an edge-cut boundary from this sketch.',
         );
       });
@@ -240,78 +223,29 @@ export default function Home() {
     };
   }, [masterSketch]);
 
-  // The photo-traced silhouettes are stale the moment `originalImage`
-  // changes (a new upload, or it being cleared — e.g. after a reload, since
-  // it's never persisted) — same synchronous, render-time reset pattern.
-  const [photoContoursForImage, setPhotoContoursForImage] = React.useState<string | null>(null);
-  if (originalImage !== photoContoursForImage) {
-    setPhotoContoursForImage(originalImage);
-    if (photoContours) setPhotoContours(null);
-    if (photoContourError) setPhotoContourError(null);
-  }
-
-  // Recomputes only when `originalImage` changes — never on a shape/design/
-  // style/transform change, and never on "Regenerate from the same photo"
-  // either (masterSketch changes, but originalImage doesn't). Never a
-  // second AI call: classical background-removal heuristics on the photo
-  // the customer already uploaded (lib/photo-silhouette.ts).
-  React.useEffect(() => {
-    if (!originalImage) return;
-    let cancelled = false;
-    Promise.all([
-      extractPhotoSilhouette(originalImage, 'full'),
-      extractPhotoSilhouette(originalImage, 'bust'),
-      extractPhotoSilhouette(originalImage, 'band'),
-    ])
-      .then(([full, bust, band]) => {
-        if (!cancelled) setPhotoContours({ full, bust, band });
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setPhotoContourError(
-          error instanceof Error ? error.message : 'Could not trace a silhouette from this photo.',
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [originalImage]);
-
   // remove.bg (lib/remove-bg-contour.ts, /api/edge-cut/remove-background) is
   // deliberately NOT wired in here. It was, briefly — but its result arrives
-  // several seconds after the instant local fallback below has already
-  // painted and been seen, and verified directly (reload -> fallback shown
-  // at ~1.3s -> remove.bg response at ~5.3s -> canvas silently repaints with
-  // a different boundary) that this is exactly the "the image changes after
-  // a few seconds" the customer reported and explicitly did not want: they
-  // want whatever boundary displays first to stay final. The library/route
-  // are left in place, complete and working, for a future revisit — ideally
-  // behind a real loading state that withholds the fallback until remove.bg
-  // either resolves or a timeout elapses, so nothing already on screen ever
-  // has to change.
+  // several seconds after the instant local tracer above has already
+  // painted and been seen, and verified directly (reload -> local boundary
+  // shown at ~1.3s -> remove.bg response at ~5.3s -> canvas silently
+  // repaints with a different boundary) that this is exactly the "the image
+  // changes after a few seconds" the customer reported and explicitly did
+  // not want: they want whatever boundary displays first to stay final. The
+  // library/route are left in place, complete and working, for a future
+  // revisit — ideally behind a real loading state that withholds the local
+  // result until remove.bg either resolves or a timeout elapses, so nothing
+  // already on screen ever has to change.
 
-  /** Which silhouette actually backs the customer's currently-selected edge-cut style. */
-  const resolveContourForStyle = React.useCallback(
-    (style: EdgeCutStyle): SilhouetteContour | null => {
-      if (style === 'bust') return photoContours?.bust ?? null;
-      if (style === 'band') return photoContours?.band ?? null;
-      // 'free' and 'heart': prefer the photo-based silhouette, fall back to
-      // the ink-based one so these two keep working even without a photo.
-      return photoContours?.full ?? inkContour;
-    },
-    [photoContours, inkContour],
-  );
+  /** Which traced boundary backs the customer's currently-selected edge-cut style. */
+  const activeContour: SilhouetteContour | null = (() => {
+    if (!sketchContours) return null;
+    if (selectedEdgeCutStyle === 'bust') return sketchContours.bust;
+    if (selectedEdgeCutStyle === 'band') return sketchContours.band;
+    return sketchContours.full; // 'free' and 'heart' both use the plain silhouette
+  })();
 
-  const activeContour = resolveContourForStyle(selectedEdgeCutStyle);
-  const freeHeartReady = !!(photoContours?.full ?? inkContour);
-  const edgeCutDisabledStyles: EdgeCutStyle[] = [
-    ...(freeHeartReady ? [] : (['free', 'heart'] as EdgeCutStyle[])),
-    ...(photoContours ? [] : (['bust', 'band'] as EdgeCutStyle[])),
-  ];
-  // Only surfaced as a blocking error when free/heart have nothing to fall
-  // back on either — if the photo-based silhouette failed but the ink-based
-  // one succeeded, free/heart are still fully usable and this stays silent.
-  const edgeCutBlockingError = freeHeartReady ? null : (photoContourError ?? inkContourError);
+  const edgeCutReady = sketchContours !== null;
+  const edgeCutDisabledStyles: EdgeCutStyle[] = edgeCutReady ? [] : ['free', 'heart', 'bust', 'band'];
 
   const handleFileSelected = (selected: File) => {
     if (originalImage) URL.revokeObjectURL(originalImage);
@@ -397,10 +331,8 @@ export default function Home() {
     setTransform(DEFAULT_TRANSFORM);
     setSelectedDesignType(DEFAULT_DESIGN_TYPE);
     setSelectedEdgeCutStyle(DEFAULT_EDGE_CUT_STYLE);
-    setInkContour(null);
-    setInkContourError(null);
-    setPhotoContours(null);
-    setPhotoContourError(null);
+    setSketchContours(null);
+    setSketchContourError(null);
     clearPendantSession();
   };
 
@@ -548,30 +480,14 @@ export default function Home() {
                 value={selectedEdgeCutStyle}
                 onChange={setSelectedEdgeCutStyle}
                 disabledStyles={edgeCutDisabledStyles}
-                disabledReason={
-                  freeHeartReady
-                    ? 'Needs the original photo from this upload, which is not available right now.'
-                    : undefined
-                }
               />
-              {edgeCutBlockingError && (
+              {sketchContourError && (
                 <p role="alert" className="text-xs text-red-600">
-                  {edgeCutBlockingError} Standard shapes are still fully available.
+                  {sketchContourError} Standard shapes are still fully available.
                 </p>
               )}
-              {!freeHeartReady && !edgeCutBlockingError && (
-                <p className="text-xs text-slate-400">Analyzing the photo for an edge-cut boundary…</p>
-              )}
-              {freeHeartReady && !photoContours && !photoContourError && (
-                <p className="text-xs text-slate-400">
-                  Analyzing the original photo for Bust with Base and Silhouette Band…
-                </p>
-              )}
-              {freeHeartReady && photoContourError && (
-                <p className="text-xs text-slate-400">
-                  Bust with Base and Silhouette Band aren&apos;t available for this photo ({photoContourError}) — Free
-                  Edge Cut and Edge Cut inside Heart are unaffected.
-                </p>
+              {!edgeCutReady && !sketchContourError && (
+                <p className="text-xs text-slate-400">Tracing the edge-cut boundary from the sketch…</p>
               )}
             </div>
           )}

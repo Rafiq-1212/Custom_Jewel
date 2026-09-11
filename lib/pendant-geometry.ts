@@ -198,6 +198,17 @@ export interface PendantGeometry {
    * itself rather than rendering metal underneath it.
    */
   isFlatArtwork: boolean;
+  /**
+   * Flat-artwork styles whose boundary deliberately extends *beyond* the
+   * ink — Bust with Base (a solid base below the shoulders) and Silhouette
+   * Band (a solid border around the subject). Clipping the artwork alone
+   * would render those regions as nothing at all, so the preview couldn't
+   * tell them apart from Free Edge Cut; `paintFlatArtwork` fills the
+   * boundary with a light flat metal tone for these two so the base/band
+   * is visible as the piece of metal it is. False for Free and Heart, which
+   * stay artwork-only.
+   */
+  fillsBoundary: boolean;
   label: string;
 }
 
@@ -228,6 +239,7 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
       engravingArea,
       hasDecorativeRim: true,
       isFlatArtwork: false,
+      fillsBoundary: false,
       label: shapeDef.label,
     };
   }
@@ -245,6 +257,7 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
       artworkClipPath,
       hasDecorativeRim: true,
       isFlatArtwork: true,
+      fillsBoundary: false,
       label: 'Edge Cut Heart',
     };
   }
@@ -259,5 +272,12 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
       )
     : placeholderPath(EDGE_CUT_AREA);
   const label = edgeCutStyle === 'bust' ? 'Bust with Base' : edgeCutStyle === 'band' ? 'Silhouette Band' : 'Edge Cut';
-  return { outerPath, engravingArea: EDGE_CUT_AREA, hasDecorativeRim: false, isFlatArtwork: true, label };
+  return {
+    outerPath,
+    engravingArea: EDGE_CUT_AREA,
+    hasDecorativeRim: false,
+    isFlatArtwork: true,
+    fillsBoundary: edgeCutStyle !== 'free',
+    label,
+  };
 }

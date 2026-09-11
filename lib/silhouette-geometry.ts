@@ -164,6 +164,97 @@ export function largestComponentMask(mask: Uint8Array, width: number, height: nu
   return out;
 }
 
+/**
+ * Turns "background reachable from the image border" into the only
+ * background there is: every zero pixel NOT 4-connected to the border through
+ * other zero pixels becomes foreground. This is what converts sparse line
+ * art — an outline with white (transparent) skin, shirt and paper inside it —
+ * into one solid filled silhouette, without growing the outer boundary at
+ * all (unlike a dilate large enough to swallow the interior, which would also
+ * swallow the gap between two heads).
+ */
+export function fillHoles(mask: Uint8Array, width: number, height: number): Uint8Array {
+  const outside = new Uint8Array(width * height);
+  const stack = new Int32Array(width * height);
+  let stackLen = 0;
+
+  const claim = (i: number) => {
+    if (mask[i] === 0 && !outside[i]) {
+      outside[i] = 1;
+      stack[stackLen++] = i;
+    }
+  };
+
+  for (let x = 0; x < width; x++) {
+    claim(x);
+    claim((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y++) {
+    claim(y * width);
+    claim(y * width + width - 1);
+  }
+
+  while (stackLen > 0) {
+    const i = stack[--stackLen];
+    const x = i % width;
+    const y = (i / width) | 0;
+    if (x > 0) claim(i - 1);
+    if (x < width - 1) claim(i + 1);
+    if (y > 0) claim(i - width);
+    if (y < height - 1) claim(i + width);
+  }
+
+  const out = new Uint8Array(width * height);
+  for (let i = 0; i < out.length; i++) out[i] = outside[i] ? 0 : 1;
+  return out;
+}
+
+/**
+ * Seals a subject that is cut off by the image edge. The master sketch is
+ * trimmed tight to its ink (lib/image-processing.ts), so a chest-up portrait
+ * ends exactly where the torso meets the bottom row — with outline strokes
+ * running down the left and right of the torso but nothing drawn *along*
+ * the bottom edge itself. Left like that, `fillHoles` would flood in through
+ * that open edge and hollow out the whole torso. So along each edge, for the
+ * outermost `depth` rows/columns, everything between the first and last ink
+ * pixel of that row/column is marked foreground — the image edge itself
+ * becomes the closing stroke, which is exactly what the cut boundary should
+ * be there (a flat cut where the artwork ends).
+ */
+export function sealBorderGaps(mask: Uint8Array, width: number, height: number, depth: number): Uint8Array {
+  const out = mask.slice();
+  const rows = Math.min(depth, height);
+  const cols = Math.min(depth, width);
+
+  const sealRow = (y: number) => {
+    const extent = rowExtent(mask, width, y);
+    if (!extent) return;
+    out.fill(1, y * width + extent.minX, y * width + extent.maxX + 1);
+  };
+  const sealColumn = (x: number) => {
+    let minY = -1;
+    let maxY = -1;
+    for (let y = 0; y < height; y++) {
+      if (mask[y * width + x] === 1) {
+        if (minY === -1) minY = y;
+        maxY = y;
+      }
+    }
+    if (minY === -1) return;
+    for (let y = minY; y <= maxY; y++) out[y * width + x] = 1;
+  };
+
+  for (let d = 0; d < rows; d++) {
+    sealRow(d);
+    sealRow(height - 1 - d);
+  }
+  for (let d = 0; d < cols; d++) {
+    sealColumn(d);
+    sealColumn(width - 1 - d);
+  }
+  return out;
+}
+
 /** The mask's foreground bounding box, in mask-pixel coordinates. `null` if the mask is empty. */
 export function boundingBoxOf(
   mask: Uint8Array,
@@ -250,7 +341,14 @@ export function traceOuterBoundary(mask: Uint8Array, width: number, height: numb
   // guaranteed background — a safe starting point to resume the clockwise
   // search from.
   let backtrackDir = 6;
-  const maxSteps = 8 * (width + height) + 64;
+  // Moore-Neighbor tracing revisits boundary pixels at concavities, so the
+  // walk is not bounded by the bounding-box perimeter — a detailed outline
+  // (two people, hair, fingers) can need far more than 8*(w+h) steps, and
+  // an earlier cap at that size silently returned a truncated boundary
+  // that `pointsToPath` then closed with a straight chord across the
+  // pendant. Every boundary pixel is visited at most a handful of times, so
+  // a multiple of the pixel count is a true upper bound rather than a guess.
+  const maxSteps = 4 * width * height + 64;
 
   for (let step = 0; step < maxSteps; step++) {
     let foundDir = -1;
@@ -360,10 +458,10 @@ const CLOSE_RADIUS_STEPS = [0.02, 0.035, 0.055, 0.08, 0.11];
  * into one connected piece, so a mask that was already clean never gets
  * over-smoothed just because a later step in the list exists.
  *
- * Shared by lib/photo-silhouette.ts (a locally-segmented photo mask) and
- * lib/remove-bg-contour.ts (a remove.bg alpha mask) — both need "turn a
- * mostly-good foreground mask into one solid, connected piece", just from
- * masks produced by two different upstream sources.
+ * Used by lib/remove-bg-contour.ts (a remove.bg alpha mask, not currently
+ * wired in) — "turn a mostly-good foreground mask into one solid, connected
+ * piece". The sketch tracer (lib/edge-cut-contour.ts) doesn't need it: its
+ * mask is made solid by `fillHoles` instead.
  */
 export function closeToSingleComponent(rawMask: Uint8Array, width: number, height: number): Uint8Array {
   let totalForeground = 0;
