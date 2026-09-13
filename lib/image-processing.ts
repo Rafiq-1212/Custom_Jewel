@@ -230,6 +230,52 @@ function computeFaceCropBox(
 }
 
 /**
+ * Lifts an off-white "paper" background to true white before any
+ * thresholding. The background tone is measured directly, as the per-channel
+ * median of the image's outer border ring (where there is never artwork, only
+ * background), and every channel is rescaled so that tone becomes 255.
+ *
+ * This exists because `normalise()` below is not enough on its own: it
+ * stretches the 1st-99th percentile range, so the moment a drawing contains
+ * real white (skin, a white shirt) the top percentile is already 255 and a
+ * grey paper background stays exactly where it was. Verified on a real
+ * generation: a background at luminance ~234 landed inside the alpha ramp
+ * and 98% of the frame came out semi-opaque grey.
+ */
+async function liftBackgroundToWhite(input: Buffer): Promise<Buffer> {
+  const { data, info } = await sharp(input).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const ring = Math.max(2, Math.round(Math.max(width, height) * 0.02));
+
+  const samples: [number[], number[], number[]] = [[], [], []];
+  for (let y = 0; y < height; y++) {
+    const inRing = y < ring || y >= height - ring;
+    for (let x = 0; x < width; x++) {
+      if (!inRing && x >= ring && x < width - ring) continue;
+      const i = (y * width + x) * channels;
+      samples[0].push(data[i]);
+      samples[1].push(data[i + 1]);
+      samples[2].push(data[i + 2]);
+    }
+  }
+  const median = (values: number[]) => {
+    values.sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
+  };
+  const background = samples.map(median);
+
+  // Already white enough for the thresholds below — leave the pixels alone.
+  if (Math.min(...background) >= WHITE_THRESHOLD) return input;
+
+  for (let i = 0; i < data.length; i += channels) {
+    for (let c = 0; c < 3; c++) {
+      data[i + c] = Math.min(255, Math.round((data[i + c] * 255) / Math.max(1, background[c])));
+    }
+  }
+  return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
+}
+
+/**
  * Crop the AI's generous white margin to the actual artwork, then convert
  * every near-white pixel to transparent, ramping alpha across the threshold
  * band so anti-aliased line edges don't get a hard, jagged cutout.
@@ -238,7 +284,8 @@ export async function makeTransparentMasterSketch(
   input: Buffer,
   options: MasterSketchOptions = {},
 ): Promise<MasterSketch> {
-  const flattened = sharp(input).flatten({ background: '#ffffff' }).toColourspace('srgb');
+  const opaque = await sharp(input).flatten({ background: '#ffffff' }).toColourspace('srgb').toBuffer();
+  const flattened = sharp(await liftBackgroundToWhite(opaque));
 
   // Crop first: trimming after the alpha punch-out would have nothing but
   // transparent pixels at the edges to measure against.

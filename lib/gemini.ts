@@ -64,9 +64,13 @@ graphic):
 - Clothing, where included: draw the actual garments as they are in the
   photo — collars, folds and any printed pattern (a floral or patterned
   shirt keeps its pattern) — as bold ink line work, simplified only as far
-  as engraving needs, never removed or replaced with plain fabric.
+  as engraving needs, never removed or replaced with plain fabric. Dark or
+  black garments are rendered as solid black with their pattern, folds and
+  edges left as white lines; light garments stay white with black lines.
 
-Remove the background completely and replace it with plain white.
+Remove the background completely and replace it with flat, pure white
+(#FFFFFF) — no paper texture, no grey or cream tint, no vignette, no
+shadow behind the people.
 
 The result must look like a professional pen-and-ink engraving portrait
 — not a cartoon, not a logo, not a sticker, not a caricature, not a
@@ -116,16 +120,24 @@ jewellery composition that keeps both people's recognizable faces, hair and
 upper-body details, arranged as they are in the photo. Crop CHEST-UP and
 tightly around the pair: heads and shoulders close together filling the
 frame, with any outstretched arm (e.g. a selfie arm), hands, and everything
-below the chest left out. Do not remove either person and do not generate
-only one person's face.`,
+below the chest left out. If someone's arm extends toward the camera (a
+selfie arm), omit that arm entirely and end the drawing at their shoulder and
+chest, as if the arm were not there — no forearm or hand may cross the bottom
+of the composition. Do not remove either person and do not generate only one
+person's face.`,
   family: `Framing for this jewellery sketch: FAMILY PENDANT — the widest framing, for
 a group of three or more.
 
 Preserve the family/group members from the reference photo. Create one
 combined jewellery composition that arranges all of the relevant people
-naturally together as they are in the photo, cropped chest-up and tightly
-around the group, keeping recognizable faces and important details for each
-person.`,
+naturally together as they are in the photo, keeping recognizable faces and
+important details for each person — including a baby or child being held.
+Crop CHEST-UP and tightly around the group: heads and shoulders close
+together filling the frame, with any outstretched arm (e.g. a selfie arm),
+hands reaching toward the camera, and everything below the chest left out.
+If someone's arm extends toward the camera (a selfie arm), omit that arm
+entirely and end the drawing at their shoulder and chest, as if the arm were
+not there — no forearm or hand may cross the bottom of the composition.`,
   pet: `Framing for this jewellery sketch: PET PENDANT — a close crop tuned for a
 single pet's head and shoulders.
 
