@@ -82,6 +82,28 @@ Always check each AI mockup before posting it. The prompt forbids changes
 to the engraving and any added text or hallmarks, but the result comes from
 an image model.
 
+## Deployment
+
+**Live:** https://true-beauty-liard.vercel.app (Vercel, project `true-beauty`)
+
+- **Auto-deploy:** the Vercel project is connected to
+  [leroypinto1977/True_Beauty](https://github.com/leroypinto1977/True_Beauty).
+  Every push to `main` deploys to production; every other branch gets a
+  preview deployment, which requires a Vercel login to view.
+- **Environment variables** (Vercel → Project → Settings → Environment
+  Variables): only `GEMINI_API_KEY`, set for Production and Preview as
+  Sensitive. `REMOVE_BG_API_KEY` is intentionally **not** set on Vercel: the
+  only route that uses it is parked and publicly callable, so setting the key
+  would let anyone spend remove.bg credits. After changing a variable,
+  redeploy for it to take effect.
+- **Access:** the production URL is public, and every sketch or mockup is a
+  paid Gemini call. Add authentication before sharing the link widely.
+- **Manual deploy** (without pushing): `npx vercel@latest deploy --prod`.
+- **Cloudflare Containers:** `Dockerfile`, `wrangler.jsonc` and
+  `cloudflare/worker.ts` are ready for running the app on Cloudflare at
+  pendants.goatassets.com. Deploying there requires the Workers Paid plan and
+  a local Docker engine; it has not been deployed yet.
+
 ## Configuration
 
 `.env.local` (server-only — never prefix these with `NEXT_PUBLIC_`):
@@ -89,7 +111,7 @@ an image model.
 | Variable | Required | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | Yes | Sketch generation and product mockups |
-| `REMOVE_BG_API_KEY` | No | Only used by a parked, unwired feature (see below) |
+| `REMOVE_BG_API_KEY` | No | Only used by a parked, unwired feature (see below); keep it local, not on Vercel |
 | `DIECUT_URL`, `DIECUT_TOKEN` | No | Not used by the app (see below) |
 
 Tuning constants:
