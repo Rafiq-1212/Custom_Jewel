@@ -44,10 +44,10 @@
  *      pinhole-sized close: the client's production files cut a border a
  *      constant ~2.5% outside the ink that follows every contour of it
  *   -> trace, simplify, smooth the body outline
- *   -> the HANGING RING is added as its own complete circle plus its hole
- *      (`rings` / `holes`), overlapping the top of the outline — exactly the
- *      two concentric red circles the reference files draw; the nonzero fill
- *      rule unions it with the body wherever the metal is rendered
+ *   -> the HANGING RING is sunk into the top of the outline deep enough to
+ *      be attached on both sides, unioned in and filleted at both joins, so
+ *      the traced cut path flows into it as one curve; its hole is returned
+ *      separately (`holes`)
  *   -> map everything back into the sketch image's own local space, centred
  *      on the image's centre (the `drawImage(img, -w/2, -h/2)` convention),
  *      so `transformPoints` in lib/pendant-geometry.ts carries outline,
@@ -91,7 +91,17 @@ const SMOOTHING_CLOSE_FRACTION = 0.006;
  */
 const RING_OUTER_FRACTION_OF_WIDTH = 0.07;
 const RING_HOLE_RATIO = 0.55;
-const RING_OVERLAP_RATIO = 0.55;
+/**
+ * How far the ring's bottom sinks below the outline's top on the LOWER of
+ * its two sides (as a fraction of the ring radius). Both sides are measured
+ * separately — see `extractSilhouetteContour` — so the ring is attached on
+ * either side, never perched on one head with a gap over the other.
+ */
+const RING_ATTACH_DEPTH_RATIO = 0.35;
+/** The ring never sinks more than this far (fraction of radius) into the HIGHER side. */
+const RING_MAX_SINK_RATIO = 0.6;
+/** Radius of the round close that fillets the two joins between ring and outline, as a fraction of the ring radius. */
+const RING_FILLET_RATIO = 0.6;
 const RING_SEGMENTS = 72;
 /**
  * Curve simplification for the final trace: light, so the line keeps
@@ -110,6 +120,22 @@ function topOfBand(mask: Uint8Array, width: number, height: number, x0: number, 
     for (let x = from; x <= to; x++) if (mask[row + x] === 1) return y;
   }
   return null;
+}
+
+/** Paints a filled disc into `mask` (in place). */
+function stampDisc(mask: Uint8Array, width: number, height: number, cx: number, cy: number, r: number): void {
+  const r2 = r * r;
+  const minY = Math.max(0, Math.floor(cy - r));
+  const maxY = Math.min(height - 1, Math.ceil(cy + r));
+  const minX = Math.max(0, Math.floor(cx - r));
+  const maxX = Math.min(width - 1, Math.ceil(cx + r));
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const dx = x + 0.5 - cx;
+      const dy = y + 0.5 - cy;
+      if (dx * dx + dy * dy <= r2) mask[y * width + x] = 1;
+    }
+  }
 }
 
 function circlePoints(cx: number, cy: number, r: number, segments: number): Point[] {
@@ -183,9 +209,10 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   const largerDim = Math.max(analysisWidth, analysisHeight);
   const marginRadius = Math.max(3, Math.round(largerDim * CUT_MARGIN_FRACTION));
   const smoothingRadius = Math.round(largerDim * SMOOTHING_CLOSE_FRACTION);
-  // Room for every growth step below — a close that touches the canvas edge
-  // would leave a flat artefact there.
-  const pad = marginRadius + smoothingRadius * 2;
+  // Room for every growth step below, including the ring above the top — a
+  // close that touches the canvas edge would leave a flat artefact there.
+  const ringEstimate = Math.ceil((analysisWidth + marginRadius * 2) * RING_OUTER_FRACTION_OF_WIDTH);
+  const pad = marginRadius + smoothingRadius * 2 + ringEstimate * 3;
   const paddedWidth = analysisWidth + pad * 2;
   const paddedHeight = analysisHeight + pad * 2;
   mask = padMask(mask, analysisWidth, analysisHeight, pad);
@@ -197,23 +224,41 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   mask = largestComponentMask(mask, paddedWidth, paddedHeight);
 
   const box = boundingBoxOf(mask, paddedWidth, paddedHeight);
+  if (!box) {
+    throw new Error('This sketch has no visible artwork to trace a silhouette from.');
+  }
+
+  // The ring sits at the top centre of the piece and must be ATTACHED ON
+  // BOTH SIDES. The outline's top is measured separately under the left and
+  // right halves of the ring's footprint — with two heads of different
+  // height (or a single head's sloping hair) those differ, and a ring hung
+  // off just the higher one would touch it at a point and float over the
+  // other side. The ring sinks until its bottom is below the LOWER of the
+  // two tops, capped so it never disappears into the higher one.
+  const ringOuter = Math.max(6, Math.round((box.maxX - box.minX + 1) * RING_OUTER_FRACTION_OF_WIDTH));
+  const ringCx = (box.minX + box.maxX + 1) / 2;
+  const topLeft = topOfBand(mask, paddedWidth, paddedHeight, ringCx - ringOuter, ringCx - ringOuter * 0.2);
+  const topRight = topOfBand(mask, paddedWidth, paddedHeight, ringCx + ringOuter * 0.2, ringCx + ringOuter);
+  const tops = [topLeft, topRight].filter((t): t is number => t !== null);
+  const lowerTop = tops.length ? Math.max(...tops) : box.minY;
+  const higherTop = tops.length ? Math.min(...tops) : box.minY;
+  let ringCy = lowerTop + ringOuter * RING_ATTACH_DEPTH_RATIO - ringOuter;
+  ringCy = Math.max(ringCy, higherTop + ringOuter * RING_MAX_SINK_RATIO - ringOuter);
+
+  // Union the ring into the piece and fillet both joins, so the traced cut
+  // path flows from the outline into the ring on either side as one curve;
+  // the hole is the only separate cut.
+  stampDisc(mask, paddedWidth, paddedHeight, ringCx, ringCy, ringOuter);
+  mask = roundClose(mask, paddedWidth, paddedHeight, Math.round(ringOuter * RING_FILLET_RATIO));
+  mask = largestComponentMask(mask, paddedWidth, paddedHeight);
+
   const smoothed = maskToSmoothContour(mask, paddedWidth, paddedHeight, {
     epsilonFraction: TRACE_EPSILON_FRACTION,
     smoothingIterations: TRACE_SMOOTHING_ITERATIONS,
   });
-  if (!box || !smoothed) {
+  if (!smoothed) {
     throw new Error('This sketch has no visible artwork to trace a silhouette from.');
   }
-
-  // The ring sits at the top centre of the piece. Its depth is measured
-  // against the outline's actual top *within the ring's own columns* — with
-  // two heads of different height, the overall top belongs to one head while
-  // the centre may be the dip between them, and a ring hung off the overall
-  // top would float clear of the outline.
-  const ringOuter = Math.max(6, Math.round((box.maxX - box.minX + 1) * RING_OUTER_FRACTION_OF_WIDTH));
-  const ringCx = (box.minX + box.maxX + 1) / 2;
-  const topAtRing = topOfBand(mask, paddedWidth, paddedHeight, ringCx - ringOuter, ringCx + ringOuter) ?? box.minY;
-  const ringCy = topAtRing - ringOuter * (1 - RING_OVERLAP_RATIO);
 
   const scaleX = naturalWidth / analysisWidth;
   const scaleY = naturalHeight / analysisHeight;
@@ -224,7 +269,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
 
   return {
     points: smoothed.map(toLocal),
-    rings: [circlePoints(ringCx, ringCy, ringOuter, RING_SEGMENTS).map(toLocal)],
+    rings: [],
     holes: [circlePoints(ringCx, ringCy, ringOuter * RING_HOLE_RATIO, RING_SEGMENTS).map(toLocal)],
     imageWidth: naturalWidth,
     imageHeight: naturalHeight,
