@@ -1,0 +1,10 @@
+# Never upload local secrets or tool state.
+.env*
+!.env.example
+.claude-flow
+.wrangler
+# Cloudflare Containers deployment files — unused on Vercel.
+cloudflare
+Dockerfile
+.dockerignore
+wrangler.jsonc

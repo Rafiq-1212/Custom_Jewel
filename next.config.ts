@@ -11,6 +11,14 @@ const nextConfig: NextConfig = {
   // its package directory at load time; bundling it would break that lookup.
   // Only used server-side, in lib/rhino-export.ts.
   serverExternalPackages: ["potrace", "rhino3dm"],
+
+  // rhino3dm reads rhino3dm.wasm from disk at runtime rather than importing
+  // it, so file tracing can't see it. Without this, serverless deployments
+  // (e.g. Vercel) ship the export route without the .wasm and the 3DM export
+  // fails in production only.
+  outputFileTracingIncludes: {
+    "/api/export-laser": ["./node_modules/rhino3dm/rhino3dm.wasm"],
+  },
 };
 
 export default nextConfig;
