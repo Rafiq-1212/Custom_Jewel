@@ -32,7 +32,7 @@ no free-tier allowance, so a `429` quota error means billing, not a bug.
 | 3. Master Sketch | Review; regenerate if needed | The sketch is cropped to the ink and its background made transparent |
 | 4. Pendant Type | **Silhouette Cut** or **Shape Pendant** | Silhouette Cut traces its cut outline and hanging ring from the sketch |
 | 5. Metal | Silver or Gold | — |
-| 6. Preview | Compare metals side by side | Rendered instantly in the browser |
+| 6. Preview | Compare metals side by side; check the cut layout (black engraving, red cut line, ring) | Rendered instantly in the browser |
 | 7. Customize | Zoom, rotate, move the artwork | Rendered instantly in the browser |
 | 8. Product Mockup | Click **Render Silver / Gold mockup** | **AI call #2**, once per metal clicked (~13 s) |
 | 9. Manufacturing Files | Click **Prepare manufacturing files** | 3DM, DXF and SVG, no AI |
@@ -67,6 +67,7 @@ have a red or blue enamel rim ("Heart with Color" / "Round with Color").
 | Engraving sketch | PNG, transparent | Gemini + pixel clean-up | Reference artwork |
 | Product mockup | PNG or JPEG (whichever Gemini returns; the file is named to match) | Gemini, from a flat render of the exact design | E-commerce listing |
 | Manufacturing files | **3DM**, **DXF**, SVG | Vector tracing, no AI | Rhino / laser cutter |
+| Cut layout | PNG, white background | Browser canvas, from the export geometry | Check the red cut line and ring before production |
 | Preview image | PNG, transparent | Browser canvas | Quick share |
 
 The manufacturing files contain two layers, in millimetres at a default width

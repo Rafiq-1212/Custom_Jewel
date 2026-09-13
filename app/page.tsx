@@ -32,6 +32,7 @@ import { DownloadPanel } from '@/components/DownloadPanel';
 import { ExportPanel } from '@/components/ExportPanel';
 import { GeneratedImage } from '@/components/GeneratedImage';
 import { GenerationProgress } from '@/components/GenerationProgress';
+import { CutLayoutPreview } from '@/components/CutLayoutPreview';
 import { PhotoCropper } from '@/components/PhotoCropper';
 import { FULL_CROP, cropImageFile, type CropRect } from '@/lib/photo-crop';
 import { ImageUploader } from '@/components/ImageUploader';
@@ -418,6 +419,18 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
+              </div>
+              <div className="flex w-full flex-col gap-3 border-t border-slate-100 pt-6">
+                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Cut layout — {designLabel}</p>
+                <CutLayoutPreview
+                  sketch={masterSketch}
+                  shape={selectedShape}
+                  category={activeCategoryId}
+                  designType={selectedDesignType}
+                  contour={activeContour}
+                  transform={transform}
+                  size={280}
+                />
               </div>
             </div>
           </Section>
