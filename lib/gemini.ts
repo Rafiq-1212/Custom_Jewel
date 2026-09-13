@@ -19,55 +19,67 @@ const REQUEST_TIMEOUT_MS = 55_000;
  * ("preserve both people", "crop to the face only") without disturbing the
  * medium/style/output rules that follow.
  */
-const LINE_ART_PROMPT_HEAD = `Transform the provided reference photograph into a highly detailed
-black-and-white jewellery engraving illustration.
+/**
+ * The sketch style is calibrated against the client's own reference
+ * artwork (their production files: pen-and-ink portraits with heavy,
+ * textured hair, bold contours and white skin). An earlier "bold vector /
+ * solid black fills" prompt produced generic, symmetrical sticker-style
+ * faces that lost the likeness — the head turn, the real hair texture, the
+ * person — which is the one thing a memorial/portrait pendant can't lose.
+ */
+const LINE_ART_PROMPT_HEAD = `Transform the provided reference photograph into a black-and-white
+pen-and-ink portrait illustration for laser engraving on a small metal
+pendant (about 25 mm wide).`;
 
-Preserve the recognizable facial characteristics, facial proportions,
-hairstyles, expressions, pose, and overall appearance of every person
-in the reference image.
+const LINE_ART_PROMPT_TAIL = `The single most important requirement is a FAITHFUL LIKENESS of each
+specific person:
+- Reproduce the exact head angle, tilt and turn, the gaze direction, the
+  facial proportions, the expression and every distinctive feature exactly
+  as they are in the photograph. If a head is turned three-quarter, draw
+  it three-quarter. Do NOT rotate faces to frontal, do NOT make them
+  symmetrical, do NOT idealise, beautify, age or slim anyone. Someone who
+  knows them must recognise them.
 
-Do not change the identity or facial structure of the people.`;
+Work like a portrait engraver tracing the actual photograph: follow the
+real edges and forms in the photo rather than inventing a stylised
+version.
 
-const LINE_ART_PROMPT_TAIL = `Convert the photograph into bold, clean, high-contrast black-and-white
-vector-style line art for laser engraving on a small metal pendant
-(about 25 mm wide).
+Ink technique (a hand-inked portrait with confident, heavy ink — not a
+graphic):
+- Face, ears, nose, lips, eyelids: bold, clean black contour lines of
+  medium-thick weight. Skin stays pure white — no shading on skin, apart
+  from a few short contour strokes where a shadow edge defines the form
+  (under the cheekbone, beside the nose, under the lower lip).
+- Hair, beard, moustache and eyebrows: heavy, dark ink masses built from
+  many thick overlapping strokes that follow the direction the hair grows.
+  The dark areas should read as mostly black from a distance, with white
+  highlight strokes and small white gaps left inside them so the texture
+  still reads as hair up close. Never a flat solid silhouette, and never
+  thin scratchy hairlines either.
+- Solid black for the pupils, the nostrils and the line between the lips.
+- Pure black on pure white only: no grey, no gradients, no halftone, no
+  stippling, no pencil texture.
+- Every stroke must be crisp and thick enough to survive engraving at
+  that size — no microscopic detail.
+- Clothing, where included: draw the actual garments as they are in the
+  photo — collars, folds and any printed pattern (a floral or patterned
+  shirt keeps its pattern) — as bold ink line work, simplified only as far
+  as engraving needs, never removed or replaced with plain fabric.
 
-Style rules, all mandatory:
-- Thick, uniform, confident black outlines for every contour.
-- Solid black fills for hair, beard, moustache, eyebrows, pupils and
-  the deepest shadows — like an ink drawing or a vinyl-cut sticker.
-- Everything else stays pure white. NO fine hatching, cross-hatching,
-  stippling, dot shading, halftone or grey tones anywhere: every mark
-  must be either pure black or pure white.
-- Every line must be thick enough to survive engraving at that small
-  size — no hairlines, no tiny isolated marks.
-- Simplify clothing patterns into a few bold shapes rather than
-  detailed texture.
+Remove the background completely and replace it with plain white.
 
-Remove the original background and replace it with a clean white
-background.
-
-Simplify unnecessary photographic details while preserving important
-facial and clothing characteristics.
-
-The final result should look like a professional bold ink portrait
-prepared for laser cutting and engraving, rather than a cartoon, anime
-image, painting, 3D render, pencil sketch or generic AI portrait.
+The result must look like a professional pen-and-ink engraving portrait
+— not a cartoon, not a logo, not a sticker, not a caricature, not a
+vector avatar, not anime, not a painting, not a 3D render and not a
+pencil sketch.
 
 Do not duplicate faces.
-Do not distort facial features.
-Do not exaggerate eyes.
-Do not alter hairstyles unnecessarily.
-Do not add text.
-Do not add a watermark.
+Do not add text or a watermark.
 
-The final artwork should be centered, clean, high contrast,
-monochrome black line artwork on a white background.
-
-Draw ONLY the people themselves. Do not draw any pendant, plate,
-medallion, disc, frame, border, circle, oval, heart or any other
-background shape or outline around them — the pendant shape is added
-separately later. Nothing but the subjects on plain white.`;
+Draw ONLY the people themselves, centred on plain white. Do not draw any
+pendant, plate, medallion, disc, frame, border, circle, oval, heart or
+any other background shape or outline around them — the pendant shape is
+added separately later.`;
 
 /**
  * Category-specific subject-selection/framing instructions — what the base
@@ -83,12 +95,12 @@ const CATEGORY_FRAMING_PROMPTS: Partial<Record<CategoryId, string>> = {
 crop, the tightest framing in the catalogue.
 
 Prioritize the person's recognizable face, head and hair. Crop tightly
-around the head and face ONLY. The composition must end at the jawline/chin
-— completely exclude the neck, throat, shoulders, chest, collar and clothing,
-and any other body content, even if more of the body is visible in the
-reference photo. Do not extend the artwork downward past the chin. Generate
-only the requested close-up face framing, with nothing but clean background
-below the jaw.`,
+around the head ONLY: face, hair, ears and beard. The composition must end at
+the jawline/chin (at the bottom of the beard, if there is one) — completely
+exclude the neck, throat, shoulders, chest, collar and clothing, and any other
+body content, even if more of the body is visible in the reference photo. Do
+not extend the artwork downward past the chin/beard. Generate only the
+requested close-up head framing, with nothing but clean background below it.`,
   'half-size': `Framing for this jewellery sketch: HALF SIZE PENDANT — chest-up framing,
 more of the person than a Face Pendant.
 
@@ -101,15 +113,19 @@ keep two people comfortably in frame.
 
 Preserve both people from the reference photo. Create a single, combined
 jewellery composition that keeps both people's recognizable faces, hair and
-relevant upper-body details, arranged in a balanced composition. Do not
-remove either person and do not generate only one person's face.`,
+upper-body details, arranged as they are in the photo. Crop CHEST-UP and
+tightly around the pair: heads and shoulders close together filling the
+frame, with any outstretched arm (e.g. a selfie arm), hands, and everything
+below the chest left out. Do not remove either person and do not generate
+only one person's face.`,
   family: `Framing for this jewellery sketch: FAMILY PENDANT — the widest framing, for
 a group of three or more.
 
 Preserve the family/group members from the reference photo. Create one
 combined jewellery composition that arranges all of the relevant people
-naturally together, keeping recognizable faces and important details for
-each person.`,
+naturally together as they are in the photo, cropped chest-up and tightly
+around the group, keeping recognizable faces and important details for each
+person.`,
   pet: `Framing for this jewellery sketch: PET PENDANT — a close crop tuned for a
 single pet's head and shoulders.
 
