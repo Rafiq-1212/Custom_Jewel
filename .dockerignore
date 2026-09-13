@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env*
+.wrangler
+.claude-flow
+cloudflare
+Dockerfile
+.dockerignore
+wrangler.jsonc
