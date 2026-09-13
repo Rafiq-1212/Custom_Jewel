@@ -32,7 +32,8 @@ import { DownloadPanel } from '@/components/DownloadPanel';
 import { ExportPanel } from '@/components/ExportPanel';
 import { GeneratedImage } from '@/components/GeneratedImage';
 import { GenerationProgress } from '@/components/GenerationProgress';
-import { ImagePreview } from '@/components/ImagePreview';
+import { PhotoCropper } from '@/components/PhotoCropper';
+import { FULL_CROP, cropImageFile, type CropRect } from '@/lib/photo-crop';
 import { ImageUploader } from '@/components/ImageUploader';
 import { MaterialPicker } from '@/components/MaterialPicker';
 import { MockupPanel } from '@/components/MockupPanel';
@@ -54,6 +55,9 @@ type Status = 'idle' | 'generating' | 'done' | 'error';
 export default function Home() {
   const [file, setFile] = React.useState<File | null>(null);
   const [originalImage, setOriginalImage] = React.useState<string | null>(null);
+  // What part of the photo goes to the AI (lib/photo-crop.ts). Kept across
+  // "Regenerate" so a redo uses the same framing; reset on a new photo.
+  const [crop, setCrop] = React.useState<CropRect>(FULL_CROP);
 
   // Deliberately *not* hydrated via a lazy initializer: sessionStorage does
   // not exist during server rendering, so both server and client must render
@@ -174,6 +178,7 @@ export default function Home() {
   const handleFileSelected = (selected: File) => {
     if (originalImage) URL.revokeObjectURL(originalImage);
     setFile(selected);
+    setCrop(FULL_CROP);
     setOriginalImage(URL.createObjectURL(selected));
     setErrorMessage(null);
     setStatus('idle');
@@ -196,9 +201,19 @@ export default function Home() {
     setStatus('generating');
     setErrorMessage(null);
     setMasterSketch(null);
+    // Only the boxed part of the photo is ever sent — see lib/photo-crop.ts.
+    let cropped: File;
+    try {
+      cropped = await cropImageFile(file, crop);
+    } catch {
+      if (requestId !== requestIdRef.current) return;
+      setErrorMessage('Could not crop the photo. Please try a different photo.');
+      setStatus('error');
+      return;
+    }
     try {
       const formData = new FormData();
-      formData.set('file', file);
+      formData.set('file', cropped);
       formData.set('category', selectedCategory);
       const response = await fetch('/api/generate-image', { method: 'POST', body: formData });
       const body = (await response.json().catch(() => null)) as
@@ -281,8 +296,8 @@ export default function Home() {
               <ImageUploader onFileSelected={handleFileSelected} onValidationError={setErrorMessage} />
             ) : (
               <>
-                <div className="mx-auto w-full max-w-xs">
-                  <ImagePreview src={originalImage} alt="Your uploaded photo" label="Original Photo" />
+                <div className="mx-auto w-full max-w-md">
+                  <PhotoCropper src={originalImage} crop={crop} onChange={setCrop} disabled={isGenerating} />
                 </div>
                 <div className="flex justify-center">
                   <button

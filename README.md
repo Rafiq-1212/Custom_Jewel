@@ -26,7 +26,7 @@ no free-tier allowance, so a `429` quota error means billing, not a bug.
 
 | Step | What the operator does | What happens |
 |---|---|---|
-| 1. Upload Photo | Drag in or browse to a JPG / PNG / WEBP (max 8 MB) | Checked in the browser, then re-checked on the server by its actual bytes |
+| 1. Upload Photo | Drag in or browse to a JPG / PNG / WEBP (max 8 MB), then drag the crop box to choose what goes in — leave out selfie arms, other people, busy backgrounds | Checked in the browser, then re-checked on the server by its actual bytes; only the boxed area is sent |
 | 2. Choose Category | Face, Half Size, Couple, Family or Pet | Selects how Gemini frames the sketch (e.g. Face crops at the jaw; Couple keeps both people) |
 | — | Click **Generate Sketch** | **AI call #1** (~10–15 s) |
 | 3. Master Sketch | Review; regenerate if needed | The sketch is cropped to the ink and its background made transparent |
