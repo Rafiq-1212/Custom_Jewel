@@ -46,17 +46,35 @@ export interface Rect {
  * transform changes.
  */
 export interface SilhouetteContour {
-  /** The outer cut boundary — the artwork's outline offset by the cut margin, with the hanging ring merged in. */
+  /** The body's cut boundary — the artwork's outline offset outward by the cut margin. */
   points: Point[];
   /**
-   * Closed inner contours in the same local space that are cut OUT of the
-   * plate — in practice the round hole of the hanging ring. Rendered with an
-   * even-odd fill rule everywhere (canvas, SVG, sharp mask, DXF/3DM as their
-   * own closed polylines on the CUT layer).
+   * Additional closed curves that are ADDED to the plate — the hanging
+   * ring's outer circle, which overlaps the top of the body. Kept as its own
+   * complete circle rather than merged into `points`, exactly as the client's
+   * production files draw it (two concentric circles over the outline).
    */
+  rings: Point[][];
+  /** Closed curves that are cut OUT of the plate — the ring's hole. */
   holes: Point[][];
   imageWidth: number;
   imageHeight: number;
+}
+
+/** Signed area (shoelace); the sign encodes winding direction in this Y-down space. */
+function signedArea(points: Point[]): number {
+  let area = 0;
+  for (let i = 0, n = points.length; i < n; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % n];
+    area += a.x * b.y - b.x * a.y;
+  }
+  return area / 2;
+}
+
+/** Returns `points` wound so that its signed area has the requested sign. */
+function windTo(points: Point[], positive: boolean): Point[] {
+  return signedArea(points) >= 0 === positive ? points : [...points].reverse();
 }
 
 /**
@@ -177,10 +195,12 @@ function placeholderPath(area: Rect): string {
 export interface PendantGeometry {
   /**
    * The metal boundary: fill/sheen/rim are all drawn against this path.
-   * May contain several subpaths (a Silhouette Cut's outline plus its ring
-   * hole) — always fill and clip it with the EVEN-ODD rule so inner
-   * subpaths read as holes. Catalogue shapes are a single subpath, for
-   * which even-odd and nonzero agree.
+   * For a Silhouette Cut it holds several subpaths — the body outline, the
+   * ring's outer circle (wound the same way, so it ADDS to the body where
+   * they overlap) and the ring's hole (wound the opposite way, so it
+   * subtracts). Fill and clip it with the default NONZERO rule; stroking it
+   * draws every curve in full, which is what the cut layout and the
+   * production files show. Catalogue shapes are a single subpath.
    */
   outerPath: string;
   /** Target box the artwork is fit into, per `fitMode`. */
@@ -227,15 +247,22 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
     };
   }
 
-  // Silhouette Cut: the traced outline (artwork + cut margin + ring) is the
-  // outer boundary, and the ring's hole rides along as a second subpath —
-  // both carried through the exact same transform as the artwork.
+  // Silhouette Cut: the body outline, the ring's outer circle and the
+  // ring's hole are all carried through the exact same transform as the
+  // artwork. Winding is normalised here so the nonzero rule unions body and
+  // ring and subtracts the hole regardless of how each was traced.
   let outerPath = placeholderPath(EDGE_CUT_AREA);
   if (contour) {
     const { imageWidth, imageHeight } = contour;
-    const place = (points: Point[]) =>
-      pointsToPath(transformPoints(points, imageWidth, imageHeight, EDGE_CUT_AREA, transform, 'contain'));
-    outerPath = [place(contour.points), ...contour.holes.map(place)].join(' ');
+    const place = (points: Point[], positive: boolean) =>
+      pointsToPath(
+        windTo(transformPoints(points, imageWidth, imageHeight, EDGE_CUT_AREA, transform, 'contain'), positive),
+      );
+    outerPath = [
+      place(contour.points, true),
+      ...contour.rings.map((ring) => place(ring, true)),
+      ...contour.holes.map((hole) => place(hole, false)),
+    ].join(' ');
   }
   return {
     outerPath,

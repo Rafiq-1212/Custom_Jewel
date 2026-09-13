@@ -430,12 +430,17 @@ export function chaikinSmooth(points: Point[], iterations: number): Point[] {
  * The full trace -> simplify -> smooth pipeline, shared by both extractors
  * once they each have their own cleaned-up binary mask ready.
  */
-export function maskToSmoothContour(mask: Uint8Array, width: number, height: number): Point[] | null {
+export function maskToSmoothContour(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  options: { epsilonFraction?: number; smoothingIterations?: number } = {},
+): Point[] | null {
   const traced = traceOuterBoundary(mask, width, height);
   if (!traced) return null;
-  const epsilon = Math.max(1, Math.max(width, height) * 0.004);
+  const epsilon = Math.max(1, Math.max(width, height) * (options.epsilonFraction ?? 0.004));
   const simplified = rdpSimplify(traced, epsilon);
-  return chaikinSmooth(simplified, 2);
+  return chaikinSmooth(simplified, options.smoothingIterations ?? 2);
 }
 
 /** How much of the raw foreground mask the single largest closed-and-kept component must retain. */

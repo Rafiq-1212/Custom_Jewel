@@ -55,8 +55,8 @@ async function rasterizePlate(
     ? `<path d="${d}" fill="none" stroke="${rimHex}" stroke-width="${RIM_BAND_WIDTH * 2}" clip-path="url(#plate)"/>`
     : '';
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${PENDANT_VIEWBOX.width} ${PENDANT_VIEWBOX.height}">
-  <defs><clipPath id="plate" clip-rule="evenodd"><path d="${d}" clip-rule="evenodd"/></clipPath></defs>
-  <path d="${d}" fill="${fill}" fill-rule="evenodd"/>
+  <defs><clipPath id="plate"><path d="${d}"/></clipPath></defs>
+  <path d="${d}" fill="${fill}"/>
   ${band}
 </svg>`;
   return sharp(Buffer.from(svg)).resize(width, height).png().toBuffer();

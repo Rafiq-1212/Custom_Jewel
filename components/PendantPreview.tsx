@@ -124,12 +124,12 @@ function paintDimensionalPendant(
   ctx.shadowBlur = 3;
   ctx.shadowOffsetY = 1.5;
   ctx.fillStyle = metalGradient;
-  ctx.fill(shapePath, 'evenodd');
+  ctx.fill(shapePath);
   ctx.restore();
 
   // Studio sheen.
   ctx.save();
-  ctx.clip(shapePath, 'evenodd');
+  ctx.clip(shapePath);
   const sheen = ctx.createRadialGradient(35, 45, 2, 35, 45, 55);
   sheen.addColorStop(0, 'rgba(255,255,255,0.55)');
   sheen.addColorStop(1, 'rgba(255,255,255,0)');
@@ -150,7 +150,7 @@ function paintDimensionalPendant(
   // `engravingArea` is only ever a *target box* for the fit maths below —
   // where and how big to draw by default — never a clip boundary.
   ctx.save();
-  ctx.clip(shapePath, 'evenodd');
+  ctx.clip(shapePath);
 
   const { cx, cy, scale: finalScale } = placeArtwork(
     geometry,
@@ -197,7 +197,7 @@ function paintDimensionalPendant(
   const rimHex = RIM_COLORS[rimColor].hex;
   if (rimHex) {
     ctx.save();
-    ctx.clip(shapePath, 'evenodd');
+    ctx.clip(shapePath);
     ctx.strokeStyle = rimHex;
     ctx.lineWidth = RIM_BAND_WIDTH * 2;
     ctx.stroke(shapePath);
@@ -212,7 +212,7 @@ function paintDimensionalPendant(
   // *inside* of `shapePath`, so nothing is ever drawn outside it — this is
   // shading on the existing edge, never an added outline/halo/border.
   ctx.save();
-  ctx.clip(shapePath, 'evenodd');
+  ctx.clip(shapePath);
   for (const [width, alpha] of [
     [4.5, 0.1],
     [3, 0.1],

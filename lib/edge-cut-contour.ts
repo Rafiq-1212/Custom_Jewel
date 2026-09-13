@@ -40,23 +40,24 @@
  *      boundary sits back on the ink's own edge, leaving ~1px so the outline
  *      stroke itself is never shaved by the clip
  *   -> keep the largest connected component only (one pendant, one piece)
- *   -> dilate by the CUT MARGIN: the client's production files (see the
- *      reference DXFs) cut a smooth border a few percent outside the ink,
- *      never flush with it — that margin is the visible metal edge
- *   -> stamp the HANGING RING onto the top centre: a disc that overlaps the
- *      outline so the traced boundary flows around it as one piece, plus
- *      its round hole returned separately (`holes`), the way the reference
- *      files draw two concentric red circles at the top
- *   -> trace, simplify, smooth -> map back into the sketch image's own local
- *      space, centred on the image's centre (the `drawImage(img, -w/2,
- *      -h/2)` convention), so `transformPoints` in lib/pendant-geometry.ts
- *      carries outline and hole through whatever zoom/pan/rotation the
- *      customer applies.
+ *   -> dilate by the CUT MARGIN, then a light close: the client's production
+ *      files cut a smooth border a few percent outside the ink, never flush
+ *      with it — that margin is the visible metal edge
+ *   -> trace, simplify, smooth the body outline
+ *   -> the HANGING RING is added as its own complete circle plus its hole
+ *      (`rings` / `holes`), overlapping the top of the outline — exactly the
+ *      two concentric red circles the reference files draw; the nonzero fill
+ *      rule unions it with the body wherever the metal is rendered
+ *   -> map everything back into the sketch image's own local space, centred
+ *      on the image's centre (the `drawImage(img, -w/2, -h/2)` convention),
+ *      so `transformPoints` in lib/pendant-geometry.ts carries outline,
+ *      ring and hole through whatever zoom/pan/rotation the customer applies.
  */
 
 import type { Point, SilhouetteContour } from './pendant-geometry';
 import {
   boundingBoxOf,
+  closeMask,
   dilate,
   erode,
   fillHoles,
@@ -68,27 +69,37 @@ import {
 const MAX_ANALYSIS_DIM = 450;
 const ALPHA_THRESHOLD = 24;
 /** Cut margin outside the ink, as a fraction of the sketch's larger dimension — matches the client's reference files. */
-const CUT_MARGIN_FRACTION = 0.035;
-/** Hanging ring: outer radius as a fraction of the larger dimension, hole as a fraction of that, and how deep the ring sinks into the outline. */
-const RING_OUTER_FRACTION = 0.07;
-const RING_HOLE_RATIO = 0.5;
+const CUT_MARGIN_FRACTION = 0.03;
+/**
+ * After the margin, a light morphological close rounds off tufts of hair
+ * and pinholes so the cut line is one smooth curve — but small enough that
+ * the outline still dips into the real gap between two heads, as the
+ * client's reference files do.
+ */
+const SMOOTHING_CLOSE_FRACTION = 0.03;
+/**
+ * Hanging ring, measured against the client's reference files: outer
+ * diameter ~14% of the piece's width, hole ~55% of that, and the ring
+ * overlapping the top of the outline by a little over half its radius. It
+ * is kept as its own complete circle (see `SilhouetteContour.rings`).
+ */
+const RING_OUTER_FRACTION_OF_WIDTH = 0.07;
+const RING_HOLE_RATIO = 0.55;
 const RING_OVERLAP_RATIO = 0.55;
-const RING_HOLE_SEGMENTS = 48;
+const RING_SEGMENTS = 72;
+/** Curve smoothing for the final trace — heavier than the default so the cut line reads as one clean curve. */
+const TRACE_EPSILON_FRACTION = 0.005;
+const TRACE_SMOOTHING_ITERATIONS = 3;
 
-/** Paints a filled disc into `mask` (in place). */
-function stampDisc(mask: Uint8Array, width: number, height: number, cx: number, cy: number, r: number): void {
-  const r2 = r * r;
-  const minY = Math.max(0, Math.floor(cy - r));
-  const maxY = Math.min(height - 1, Math.ceil(cy + r));
-  const minX = Math.max(0, Math.floor(cx - r));
-  const maxX = Math.min(width - 1, Math.ceil(cx + r));
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      const dx = x + 0.5 - cx;
-      const dy = y + 0.5 - cy;
-      if (dx * dx + dy * dy <= r2) mask[y * width + x] = 1;
-    }
+/** Topmost foreground row within a horizontal band of columns, or `null` if the band is empty. */
+function topOfBand(mask: Uint8Array, width: number, height: number, x0: number, x1: number): number | null {
+  const from = Math.max(0, Math.floor(x0));
+  const to = Math.min(width - 1, Math.ceil(x1));
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = from; x <= to; x++) if (mask[row + x] === 1) return y;
   }
+  return null;
 }
 
 function circlePoints(cx: number, cy: number, r: number, segments: number): Point[] {
@@ -161,27 +172,36 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   // sketch's own local space below.
   const largerDim = Math.max(analysisWidth, analysisHeight);
   const marginRadius = Math.max(3, Math.round(largerDim * CUT_MARGIN_FRACTION));
-  const ringOuter = Math.max(6, Math.round(largerDim * RING_OUTER_FRACTION));
-  const pad = marginRadius + ringOuter * 2;
+  const smoothingRadius = Math.round(largerDim * SMOOTHING_CLOSE_FRACTION);
+  // Room for every growth step below — a close that touches the canvas edge
+  // would leave a flat artefact there.
+  const pad = marginRadius + smoothingRadius * 2;
   const paddedWidth = analysisWidth + pad * 2;
   const paddedHeight = analysisHeight + pad * 2;
   mask = padMask(mask, analysisWidth, analysisHeight, pad);
 
   mask = dilate(mask, paddedWidth, paddedHeight, marginRadius);
-
-  const box = boundingBoxOf(mask, paddedWidth, paddedHeight);
-  if (!box) {
-    throw new Error('This sketch has no visible artwork to trace a silhouette from.');
-  }
-  const ringCx = (box.minX + box.maxX + 1) / 2;
-  const ringCy = box.minY - ringOuter * (1 - RING_OVERLAP_RATIO);
-  stampDisc(mask, paddedWidth, paddedHeight, ringCx, ringCy, ringOuter);
+  mask = closeMask(mask, paddedWidth, paddedHeight, smoothingRadius);
   mask = largestComponentMask(mask, paddedWidth, paddedHeight);
 
-  const smoothed = maskToSmoothContour(mask, paddedWidth, paddedHeight);
-  if (!smoothed) {
+  const box = boundingBoxOf(mask, paddedWidth, paddedHeight);
+  const smoothed = maskToSmoothContour(mask, paddedWidth, paddedHeight, {
+    epsilonFraction: TRACE_EPSILON_FRACTION,
+    smoothingIterations: TRACE_SMOOTHING_ITERATIONS,
+  });
+  if (!box || !smoothed) {
     throw new Error('This sketch has no visible artwork to trace a silhouette from.');
   }
+
+  // The ring sits at the top centre of the piece. Its depth is measured
+  // against the outline's actual top *within the ring's own columns* — with
+  // two heads of different height, the overall top belongs to one head while
+  // the centre may be the dip between them, and a ring hung off the overall
+  // top would float clear of the outline.
+  const ringOuter = Math.max(6, Math.round((box.maxX - box.minX + 1) * RING_OUTER_FRACTION_OF_WIDTH));
+  const ringCx = (box.minX + box.maxX + 1) / 2;
+  const topAtRing = topOfBand(mask, paddedWidth, paddedHeight, ringCx - ringOuter, ringCx + ringOuter) ?? box.minY;
+  const ringCy = topAtRing - ringOuter * (1 - RING_OVERLAP_RATIO);
 
   const scaleX = naturalWidth / analysisWidth;
   const scaleY = naturalHeight / analysisHeight;
@@ -190,8 +210,11 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
     y: (p.y - pad) * scaleY - naturalHeight / 2,
   });
 
-  const points = smoothed.map(toLocal);
-  const hole = circlePoints(ringCx, ringCy, ringOuter * RING_HOLE_RATIO, RING_HOLE_SEGMENTS).map(toLocal);
-
-  return { points, holes: [hole], imageWidth: naturalWidth, imageHeight: naturalHeight };
+  return {
+    points: smoothed.map(toLocal),
+    rings: [circlePoints(ringCx, ringCy, ringOuter, RING_SEGMENTS).map(toLocal)],
+    holes: [circlePoints(ringCx, ringCy, ringOuter * RING_HOLE_RATIO, RING_SEGMENTS).map(toLocal)],
+    imageWidth: naturalWidth,
+    imageHeight: naturalHeight,
+  };
 }

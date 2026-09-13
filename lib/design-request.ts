@@ -81,7 +81,8 @@ function isSilhouetteContour(value: unknown): value is SilhouetteContour {
   if (typeof c.imageWidth !== 'number' || c.imageWidth <= 0) return false;
   if (typeof c.imageHeight !== 'number' || c.imageHeight <= 0) return false;
   if (!isPointList(c.points)) return false;
-  return Array.isArray(c.holes) && c.holes.length <= MAX_HOLES && c.holes.every(isPointList);
+  const isCurveList = (v: unknown) => Array.isArray(v) && v.length <= MAX_HOLES && v.every(isPointList);
+  return isCurveList(c.rings) && isCurveList(c.holes);
 }
 
 export function parseDesignRequest(body: unknown): ParseResult {

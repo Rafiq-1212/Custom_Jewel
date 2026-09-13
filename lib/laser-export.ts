@@ -90,7 +90,7 @@ function escapeAttr(value: string): string {
  */
 async function rasterizeShapeMask(shapePath: string, width: number, height: number): Promise<Buffer> {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${PENDANT_VIEWBOX.width} ${PENDANT_VIEWBOX.height}">
-  <path d="${escapeAttr(shapePath)}" fill="#ffffff" fill-rule="evenodd"/>
+  <path d="${escapeAttr(shapePath)}" fill="#ffffff"/>
 </svg>`;
   return sharp(Buffer.from(svg)).resize(width, height).toColourspace('b-w').raw().toBuffer();
 }
@@ -291,7 +291,7 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
      your laser software. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="${widthMm}mm" height="${heightMm.toFixed(3)}mm" viewBox="0 0 ${PENDANT_VIEWBOX.width} ${PENDANT_VIEWBOX.height}">
   <g id="cut" fill="none" stroke="#ff0000" stroke-width="0.3">
-    <path d="${escapeAttr(geometry.outerPath)}" fill-rule="evenodd"/>
+    <path d="${escapeAttr(geometry.outerPath)}"/>
   </g>
   <g id="engrave" fill="#000000" stroke="none" transform="scale(${unitsPerRasterPx})">
     <path d="${tracedD}"/>
