@@ -40,9 +40,9 @@
  *      boundary sits back on the ink's own edge, leaving ~1px so the outline
  *      stroke itself is never shaved by the clip
  *   -> keep the largest connected component only (one pendant, one piece)
- *   -> dilate by the CUT MARGIN, then a light close: the client's production
- *      files cut a smooth border a few percent outside the ink, never flush
- *      with it — that margin is the visible metal edge
+ *   -> offset by the CUT MARGIN as a true round (Euclidean) offset, then a
+ *      pinhole-sized close: the client's production files cut a border a
+ *      constant ~2.5% outside the ink that follows every contour of it
  *   -> trace, simplify, smooth the body outline
  *   -> the HANGING RING is added as its own complete circle plus its hole
  *      (`rings` / `holes`), overlapping the top of the outline — exactly the
@@ -55,28 +55,34 @@
  */
 
 import type { Point, SilhouetteContour } from './pendant-geometry';
+import { roundClose, roundDilate, roundErode } from './distance-transform';
 import {
   boundingBoxOf,
-  closeMask,
-  dilate,
-  erode,
   fillHoles,
   largestComponentMask,
   maskToSmoothContour,
   sealBorderGaps,
 } from './silhouette-geometry';
 
-const MAX_ANALYSIS_DIM = 450;
-const ALPHA_THRESHOLD = 24;
-/** Cut margin outside the ink, as a fraction of the sketch's larger dimension — matches the client's reference files. */
-const CUT_MARGIN_FRACTION = 0.03;
 /**
- * After the margin, a light morphological close rounds off tufts of hair
- * and pinholes so the cut line is one smooth curve — but small enough that
- * the outline still dips into the real gap between two heads, as the
- * client's reference files do.
+ * Analysis resolution. The cut line is built from this mask, so it must be
+ * fine enough that hair tufts, ears and fingers survive as real contours —
+ * at 450 px they blurred into lumps once offset and simplified.
  */
-const SMOOTHING_CLOSE_FRACTION = 0.03;
+const MAX_ANALYSIS_DIM = 900;
+const ALPHA_THRESHOLD = 24;
+/**
+ * Cut margin outside the ink, as a fraction of the sketch's larger
+ * dimension — measured on the client's reference files, whose red line
+ * sits a constant ~2.5% outside the artwork.
+ */
+const CUT_MARGIN_FRACTION = 0.025;
+/**
+ * A tiny round close after the offset removes pinholes and single-pixel
+ * nicks only. Anything larger would fill the real concavities — the gap
+ * between two heads, the notch under an ear — that the client's line keeps.
+ */
+const SMOOTHING_CLOSE_FRACTION = 0.006;
 /**
  * Hanging ring, measured against the client's reference files: outer
  * diameter ~14% of the piece's width, hole ~55% of that, and the ring
@@ -87,9 +93,13 @@ const RING_OUTER_FRACTION_OF_WIDTH = 0.07;
 const RING_HOLE_RATIO = 0.55;
 const RING_OVERLAP_RATIO = 0.55;
 const RING_SEGMENTS = 72;
-/** Curve smoothing for the final trace — heavier than the default so the cut line reads as one clean curve. */
-const TRACE_EPSILON_FRACTION = 0.005;
-const TRACE_SMOOTHING_ITERATIONS = 3;
+/**
+ * Curve simplification for the final trace: light, so the line keeps
+ * following the ink rather than being rounded into blobs — the round
+ * offset above already made it smooth.
+ */
+const TRACE_EPSILON_FRACTION = 0.0015;
+const TRACE_SMOOTHING_ITERATIONS = 2;
 
 /** Topmost foreground row within a horizontal band of columns, or `null` if the band is empty. */
 function topOfBand(mask: Uint8Array, width: number, height: number, x0: number, x1: number): number | null {
@@ -160,10 +170,10 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
 
   const bridgeRadius = Math.max(3, Math.round(Math.max(analysisWidth, analysisHeight) * 0.015));
 
-  mask = dilate(mask, analysisWidth, analysisHeight, bridgeRadius);
+  mask = roundDilate(mask, analysisWidth, analysisHeight, bridgeRadius);
   mask = sealBorderGaps(mask, analysisWidth, analysisHeight, bridgeRadius);
   mask = fillHoles(mask, analysisWidth, analysisHeight);
-  mask = erode(mask, analysisWidth, analysisHeight, Math.max(0, bridgeRadius - 1));
+  mask = roundErode(mask, analysisWidth, analysisHeight, Math.max(0, bridgeRadius - 1));
   mask = largestComponentMask(mask, analysisWidth, analysisHeight);
 
   // From here on the mask needs room outside the sketch's own frame: the cut
@@ -180,8 +190,10 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   const paddedHeight = analysisHeight + pad * 2;
   mask = padMask(mask, analysisWidth, analysisHeight, pad);
 
-  mask = dilate(mask, paddedWidth, paddedHeight, marginRadius);
-  mask = closeMask(mask, paddedWidth, paddedHeight, smoothingRadius);
+  // A true round offset (Euclidean distance <= margin), not a box filter —
+  // see lib/distance-transform.ts for why that matters at every corner.
+  mask = roundDilate(mask, paddedWidth, paddedHeight, marginRadius);
+  mask = roundClose(mask, paddedWidth, paddedHeight, smoothingRadius);
   mask = largestComponentMask(mask, paddedWidth, paddedHeight);
 
   const box = boundingBoxOf(mask, paddedWidth, paddedHeight);

@@ -20,7 +20,7 @@ const CUT_COLOUR = '#ff0000';
 /** White margin around the piece, as a fraction of its larger dimension — the layout is cropped to the cut, like the client's files. */
 const FRAME_PADDING = 0.04;
 /** Cut-line width as a fraction of the framed width — a hairline, like the client's files. */
-const CUT_LINE_FRACTION = 0.0016;
+const CUT_LINE_FRACTION = 0.0012;
 
 /** Bounding box of every coordinate in an SVG path `d` (exact for polylines and lines; control points for curves/arcs). */
 function pathBounds(d: string): { x: number; y: number; width: number; height: number } {
