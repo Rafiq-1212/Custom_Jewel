@@ -86,16 +86,16 @@ function isSilhouetteContour(value: unknown): value is SilhouetteContour {
 }
 
 export function parseDesignRequest(body: unknown): ParseResult {
-  if (!body || typeof body !== 'object') return { ok: false, error: 'Unable to read the request.' };
+  if (!body || typeof body !== 'object') return { ok: false, error: 'Something went wrong. Please try again.' };
   const b = body as Record<string, unknown>;
 
   if (typeof b.sketch !== 'string' || !b.sketch.startsWith('data:image/') || b.sketch.length > MAX_SKETCH_CHARS) {
-    return { ok: false, error: 'No design to work from yet — generate a sketch first.' };
+    return { ok: false, error: 'Create a sketch first.' };
   }
-  if (typeof b.shape !== 'string' || !isShapeId(b.shape)) return { ok: false, error: 'Unknown pendant shape.' };
-  if (typeof b.material !== 'string' || !isMaterialId(b.material)) return { ok: false, error: 'Unknown material.' };
-  if (!isPendantTransform(b.transform)) return { ok: false, error: 'Invalid adjustment values.' };
-  if (!isRect(b.engravingArea)) return { ok: false, error: 'Invalid engraving area.' };
+  if (typeof b.shape !== 'string' || !isShapeId(b.shape)) return { ok: false, error: 'Please choose a pendant shape.' };
+  if (typeof b.material !== 'string' || !isMaterialId(b.material)) return { ok: false, error: 'Please choose a metal.' };
+  if (!isPendantTransform(b.transform)) return { ok: false, error: 'Something is off with the adjustments. Try resetting them.' };
+  if (!isRect(b.engravingArea)) return { ok: false, error: 'Something went wrong. Please try again.' };
 
   const designType = typeof b.designType === 'string' && isDesignType(b.designType) ? b.designType : 'standard';
   const rimColor = typeof b.rimColor === 'string' && isRimColorId(b.rimColor) ? b.rimColor : 'none';
@@ -104,7 +104,7 @@ export function parseDesignRequest(body: unknown): ParseResult {
   let contour: SilhouetteContour | null = null;
   if (designType === 'edge-cut') {
     if (!isSilhouetteContour(b.contour)) {
-      return { ok: false, error: 'The silhouette outline is missing — try re-selecting Silhouette Cut and trying again.' };
+      return { ok: false, error: 'The cut line isn\'t ready yet. Choose "Cut to shape" again and retry.' };
     }
     contour = b.contour;
   }

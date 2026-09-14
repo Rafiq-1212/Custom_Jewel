@@ -81,7 +81,7 @@ export function ExportPanel({
         | null;
       if (requestKeyRef.current !== key) return; // superseded by a newer request
       if (!body || !response.ok || !body.success) {
-        setError(!body || !('error' in body) ? 'Unable to prepare the files.' : body.error);
+        setError(!body || !('error' in body) ? 'We couldn\'t prepare the files.' : body.error);
         setStatus('error');
         return;
       }
@@ -89,7 +89,7 @@ export function ExportPanel({
       setStatus('idle');
     } catch {
       if (requestKeyRef.current !== key) return;
-      setError('Unable to reach the export service. Please check your connection and try again.');
+      setError('We couldn\'t connect. Check your internet and try again.');
       setStatus('error');
     }
   };
@@ -111,9 +111,8 @@ export function ExportPanel({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-slate-500">
-        Vector files for production — the red CUT outline (with the hanging ring and its hole for Silhouette Cut)
-        and the black ENGRAVE artwork, in millimetres. DXF for the laser cutter, 3DM for Rhino, SVG for anything
-        else. No additional AI calls.
+        Files for making the pendant, measured in millimetres. The red line is where the metal gets cut and the black
+        is what gets engraved. Use the DXF for the laser cutter, the 3DM for Rhino, and the SVG for anything else.
       </p>
       {error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
@@ -127,7 +126,7 @@ export function ExportPanel({
           disabled={status === 'loading' || silhouettePending}
           className="inline-flex items-center justify-center gap-2 self-start rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {status === 'loading' ? 'Preparing files…' : 'Prepare manufacturing files'}
+          {status === 'loading' ? 'Getting files ready…' : 'Get production files'}
         </button>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
@@ -141,7 +140,7 @@ export function ExportPanel({
             Download SVG
           </button>
           <span className="text-xs text-slate-400">
-            {assets.widthMm}mm × {assets.heightMm.toFixed(0)}mm — rescale freely in your software
+            {assets.widthMm}mm × {assets.heightMm.toFixed(0)}mm. You can resize it in your software.
           </span>
         </div>
       )}

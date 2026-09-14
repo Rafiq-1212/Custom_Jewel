@@ -57,7 +57,7 @@ export function ImageUploader({
         />
       </svg>
 
-      <p className="mt-3 text-sm text-slate-600">Drag a photo here, or</p>
+      <p className="mt-3 text-sm text-slate-600">Drop a photo here, or</p>
 
       <button
         type="button"
@@ -65,7 +65,7 @@ export function ImageUploader({
         onClick={() => inputRef.current?.click()}
         className="mt-3 inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Browse files
+        Choose a photo
       </button>
 
       <input

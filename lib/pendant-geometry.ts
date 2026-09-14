@@ -269,6 +269,6 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
     engravingArea: EDGE_CUT_AREA,
     fitMode: 'contain',
     hasDecorativeRim: false,
-    label: 'Silhouette Cut',
+    label: 'Cut to shape',
   };
 }

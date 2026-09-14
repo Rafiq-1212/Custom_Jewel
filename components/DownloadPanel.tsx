@@ -86,7 +86,7 @@ export function DownloadPanel({
       }
       setStatus('idle');
     } catch {
-      setError('Unable to prepare the image. Please try again.');
+      setError('We couldn\'t prepare that image. Please try again.');
       setStatus('error');
     }
   };
@@ -99,7 +99,7 @@ export function DownloadPanel({
   return (
     <div className="flex flex-col gap-5">
       <p className="text-xs text-slate-500">
-        Quick preview images — select one and download it as a transparent PNG. No AI calls.
+        Pick one and save it as a PNG with a see-through background.
       </p>
 
       <div role="radiogroup" aria-label="Output to download" className="grid grid-cols-3 gap-3">
@@ -108,7 +108,7 @@ export function DownloadPanel({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={sketch} alt="Engraving sketch" className="max-h-full max-w-full object-contain" />
           </span>
-          <span className="text-xs font-medium text-slate-700">Engraving sketch</span>
+          <span className="text-xs font-medium text-slate-700">Sketch</span>
         </button>
 
         {PENDANT_MATERIAL_LIST.map((option) => {
@@ -126,7 +126,7 @@ export function DownloadPanel({
                 transform={transform}
                 size={96}
               />
-              <span className="text-xs font-medium text-slate-700">{option.label} preview</span>
+              <span className="text-xs font-medium text-slate-700">{option.label}</span>
             </button>
           );
         })}
@@ -148,8 +148,8 @@ export function DownloadPanel({
           {status === 'loading'
             ? 'Preparing…'
             : selected === 'sketch'
-              ? 'Download PNG — Engraving sketch'
-              : `Download PNG — ${designLabel} · ${PENDANT_MATERIAL_LIST.find((m) => m.id === selected)?.label ?? ''}`}
+              ? 'Download the sketch'
+              : `Download ${(PENDANT_MATERIAL_LIST.find((m) => m.id === selected)?.label ?? '').toLowerCase()} preview`}
         </button>
       </div>
     </div>

@@ -15,13 +15,13 @@ export function GeneratedImage({ image }: { image: string }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <ImagePreview src={image} alt="Generated jewellery engraving line art" label="Engraving Artwork" />
+      <ImagePreview src={image} alt="Generated jewellery engraving line art" label="Sketch" />
       <button
         type="button"
         onClick={download}
         className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
       >
-        Download Preview
+        Download sketch
       </button>
     </div>
   );

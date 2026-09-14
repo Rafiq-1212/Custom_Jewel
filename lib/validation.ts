@@ -35,7 +35,7 @@ function isAcceptedType(type: string): type is AcceptedImageType {
  * Used by the uploader before it even reads the file, for instant feedback.
  */
 export function quickValidate(file: File | null | undefined): ValidationResult {
-  if (!file) return fail('NO_FILE', 'No image selected.');
+  if (!file) return fail('NO_FILE', 'Please choose a photo.');
   if (!isAcceptedType(file.type)) {
     return fail('INVALID_TYPE', `Unsupported image format. Please use ${ACCEPTED_IMAGE_LABEL}.`);
   }

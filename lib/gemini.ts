@@ -168,14 +168,14 @@ export type GeminiErrorCode =
   | 'NETWORK_ERROR';
 
 const ERROR_MESSAGES: Record<GeminiErrorCode, string> = {
-  MISSING_API_KEY: 'The image generator is not configured yet. Please try again later.',
-  INVALID_API_KEY: 'Unable to generate the image. Please try again later.',
-  RATE_LIMITED: 'Too many requests right now. Please wait a moment and try again.',
-  SAFETY_BLOCKED: 'This photo could not be processed. Please try a different photo.',
-  EMPTY_RESPONSE: 'Unable to generate the image. Please try again.',
-  REQUEST_FAILED: 'Unable to generate the image. Please try again.',
-  SERVICE_UNAVAILABLE: 'The image service is temporarily unavailable. Please try again shortly.',
-  NETWORK_ERROR: 'Unable to reach the image service. Please check your connection and try again.',
+  MISSING_API_KEY: 'The sketch maker isn\'t set up yet. Please try again later.',
+  INVALID_API_KEY: 'Something went wrong on our side. Please try again later.',
+  RATE_LIMITED: 'We\'re a bit busy right now. Please wait a moment and try again.',
+  SAFETY_BLOCKED: 'We can\'t use this photo. Please try a different one.',
+  EMPTY_RESPONSE: 'Something went wrong making the image. Please try again.',
+  REQUEST_FAILED: 'Something went wrong making the image. Please try again.',
+  SERVICE_UNAVAILABLE: 'The service is down for a moment. Please try again shortly.',
+  NETWORK_ERROR: 'We couldn\'t connect. Check your internet and try again.',
 };
 
 export class GeminiGenerationError extends Error {

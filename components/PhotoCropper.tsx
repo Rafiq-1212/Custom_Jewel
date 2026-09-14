@@ -89,7 +89,7 @@ export function PhotoCropper({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Original Photo — crop</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Your photo</p>
         {!isFullCrop(crop) && (
           <button
             type="button"
@@ -142,8 +142,8 @@ export function PhotoCropper({
       </div>
 
       <p className="text-xs text-slate-400">
-        Drag the box to choose exactly what goes into the sketch — leave out outstretched arms, other people and
-        busy backgrounds. Only the boxed area is sent to the AI.
+        Drag the box around the people you want in the sketch. Leave out stretched-out arms, other people and busy
+        backgrounds. Only what&apos;s inside the box gets drawn.
       </p>
     </div>
   );

@@ -66,7 +66,7 @@ export function MockupPanel({
         | null;
       if (requestKeyRef.current[material] !== key) return; // superseded
       if (!body || !response.ok || !body.success) {
-        const error = body && !body.success ? body.error : 'Unable to render the product mockup. Please try again.';
+        const error = body && !body.success ? body.error : 'We couldn\'t make the product photo. Please try again.';
         setMockups((m) => ({ ...m, [material]: { status: 'error', error } }));
         return;
       }
@@ -75,7 +75,7 @@ export function MockupPanel({
       if (requestKeyRef.current[material] !== key) return;
       setMockups((m) => ({
         ...m,
-        [material]: { status: 'error', error: 'Unable to reach the mockup service. Please check your connection and try again.' },
+        [material]: { status: 'error', error: 'We couldn\'t connect. Check your internet and try again.' },
       }));
     }
   };
@@ -85,8 +85,8 @@ export function MockupPanel({
   return (
     <div className="flex flex-col gap-5">
       <p className="text-xs text-slate-500">
-        A photorealistic product photo of the exact pendant above, rendered by AI from the current design — this is
-        the image for the product listing. Each render is one AI call (about 10–15 seconds).
+        A realistic photo of this exact pendant, ready for your product page. Each one takes about 10 to 15 seconds to
+        make.
       </p>
 
       <div className="grid gap-6 sm:grid-cols-2">
@@ -103,10 +103,10 @@ export function MockupPanel({
                   className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {state?.status === 'loading'
-                    ? 'Rendering…'
+                    ? 'Making photo…'
                     : state?.status === 'done'
-                      ? 'Render again'
-                      : `Render ${material.label} mockup`}
+                      ? 'Make another'
+                      : `Make ${material.label.toLowerCase()} photo`}
                 </button>
               </div>
 
@@ -115,9 +115,9 @@ export function MockupPanel({
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={state.dataUrl} alt={`${material.label} ${designLabel} product mockup`} className="h-full w-full object-contain" />
                 ) : state?.status === 'loading' ? (
-                  <span className="text-xs text-slate-400">Rendering the {material.label.toLowerCase()} pendant…</span>
+                  <span className="text-xs text-slate-400">Photographing the {material.label.toLowerCase()} pendant…</span>
                 ) : (
-                  <span className="px-6 text-center text-xs text-slate-400">No mockup rendered yet.</span>
+                  <span className="px-6 text-center text-xs text-slate-400">No photo yet.</span>
                 )}
               </div>
 
@@ -137,7 +137,7 @@ export function MockupPanel({
                   }
                   className="inline-flex items-center justify-center self-start rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 >
-                  Download {material.label} mockup
+                  Download {material.label.toLowerCase()} photo
                 </button>
               )}
             </div>
@@ -146,7 +146,7 @@ export function MockupPanel({
       </div>
 
       {silhouettePending && (
-        <p className="text-xs text-slate-400">Tracing the silhouette outline first — mockups will be available in a moment.</p>
+        <p className="text-xs text-slate-400">Just a moment while we work out the cut line.</p>
       )}
     </div>
   );

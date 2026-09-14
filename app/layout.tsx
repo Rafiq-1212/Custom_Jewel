@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Custom Jewellery Image Generator",
-  description: "Transform your photo into a jewellery engraving design.",
+  title: "Custom Pendant Design",
+  description: "Turn a photo into an engraved pendant design.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

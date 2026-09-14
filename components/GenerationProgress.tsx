@@ -10,9 +10,9 @@
 import * as React from 'react';
 
 const MESSAGES = [
-  'Analyzing your photo...',
-  'Creating your engraving artwork...',
-  'Almost ready...',
+  'Looking at your photo…',
+  'Drawing the engraving…',
+  'Nearly there…',
 ] as const;
 
 /** How long each phrase holds before advancing to the next (ms). */

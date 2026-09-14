@@ -285,8 +285,8 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
   const materialLabel = PENDANT_MATERIALS[input.material].label;
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<!-- Custom Pendant Design — ${escapeAttr(geometry.label)} (${escapeAttr(materialLabel)})
-     Generated once from an AI sketch, then only ever transformed and traced —
+<!-- Custom Pendant Design: ${escapeAttr(geometry.label)} (${escapeAttr(materialLabel)})
+     Made from the sketch and traced to vectors;
      see lib/laser-export.ts. Sized to ${widthMm}mm wide; rescale freely in
      your laser software. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="${widthMm}mm" height="${heightMm.toFixed(3)}mm" viewBox="0 0 ${PENDANT_VIEWBOX.width} ${PENDANT_VIEWBOX.height}">

@@ -48,17 +48,17 @@ export async function POST(request: Request): Promise<Response> {
   try {
     formData = await request.formData();
   } catch {
-    return fail('Unable to read the upload. Please try again.', 400);
+    return fail('We couldn\'t read that upload. Please try again.', 400);
   }
 
   const file = formData.get('file');
   if (!(file instanceof File) || file.size === 0) {
-    return fail('No image selected.', 400);
+    return fail('Please choose a photo.', 400);
   }
 
   const categoryRaw = formData.get('category');
   if (typeof categoryRaw !== 'string' || !isCategoryId(categoryRaw)) {
-    return fail('Please select a pendant category before generating your design.', 400);
+    return fail('Pick a pendant style first, then create the sketch.', 400);
   }
   const category = categoryRaw;
 
@@ -66,7 +66,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     bytes = new Uint8Array(await file.arrayBuffer());
   } catch {
-    return fail('Unable to read the uploaded image. Please try again.', 400);
+    return fail('We couldn\'t read that photo. Please try again.', 400);
   }
 
   // Declared size/type are just labels the client attached; the bytes are

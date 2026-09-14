@@ -27,7 +27,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     body = await request.json();
   } catch {
-    return fail('Unable to read the request.', 400);
+    return fail('Something went wrong. Please try again.', 400);
   }
 
   const parsed = parseDesignRequest(body);
@@ -45,6 +45,6 @@ export async function POST(request: Request): Promise<Response> {
       return fail(error.message, status);
     }
     console.error('[render-mockup]', error instanceof Error ? error.message : error);
-    return fail('Unable to render the product mockup. Please try again.', 502);
+    return fail('We couldn\'t make the product photo. Please try again.', 502);
   }
 }

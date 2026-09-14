@@ -13,13 +13,13 @@ import type { DesignType } from '@/lib/pendant-geometry';
 const OPTIONS: { id: DesignType; label: string; description: string }[] = [
   {
     id: 'edge-cut',
-    label: 'Silhouette Cut',
-    description: "The metal is cut along the artwork's own outline, with its hanging ring — Face, Half Size, Couple, Family, Pet.",
+    label: 'Cut to shape',
+    description: "Cut to the shape of the people in the drawing, with a ring to hang it. Used for face, half size, couple, family and pet pendants.",
   },
   {
     id: 'standard',
-    label: 'Shape Pendant',
-    description: 'A catalogue plate — Round, Oval, Heart, Bar, Tag or Octagonal.',
+    label: 'Shaped pendant',
+    description: 'The drawing engraved on a round, oval, heart, bar, tag or octagonal pendant.',
   },
 ];
 

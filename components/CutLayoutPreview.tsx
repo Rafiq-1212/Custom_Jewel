@@ -159,11 +159,11 @@ export function CutLayoutPreview({ size = 280, ...input }: CutLayoutInput & { si
     <div className="flex flex-col items-center gap-3">
       <canvas ref={canvasRef} role="img" aria-label="Cut layout: artwork with red cut outline" className="rounded-xl border border-slate-200 bg-white" />
       <p className="max-w-sm text-center text-xs text-slate-500">
-        Production layout — black is engraved, the red line is the cut{designType === 'edge-cut' ? ', including the hanging ring and its hole' : ''}. Exactly what the SVG / DXF / 3DM contain.
+        Black is engraved and the red line is where the metal is cut{designType === 'edge-cut' ? ', including the ring and its hole' : ''}. This is exactly what goes into the production files.
       </p>
       {status === 'error' && (
         <p role="alert" className="text-xs text-red-600">
-          Unable to prepare the image. Please try again.
+          We couldn&apos;t prepare that image. Please try again.
         </p>
       )}
       <button
@@ -172,7 +172,7 @@ export function CutLayoutPreview({ size = 280, ...input }: CutLayoutInput & { si
         disabled={status === 'loading' || pending}
         className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {status === 'loading' ? 'Preparing…' : 'Download cut layout (PNG)'}
+        {status === 'loading' ? 'Preparing…' : 'Download cut layout'}
       </button>
     </div>
   );

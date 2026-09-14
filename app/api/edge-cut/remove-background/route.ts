@@ -50,7 +50,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (typeof body.sketch !== 'string' || !body.sketch.startsWith('data:image/')) {
-    return fail('No sketch to process — generate a sketch first.', 400);
+    return fail('Create a sketch first.', 400);
   }
 
   let sketchBuffer: Buffer;

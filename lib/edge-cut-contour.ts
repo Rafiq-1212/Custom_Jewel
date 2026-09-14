@@ -174,7 +174,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   const naturalWidth = image.naturalWidth;
   const naturalHeight = image.naturalHeight;
   if (!naturalWidth || !naturalHeight) {
-    throw new Error('Could not read the sketch dimensions.');
+    throw new Error('We couldn\'t read this sketch.');
   }
 
   const downscale = Math.min(1, MAX_ANALYSIS_DIM / Math.max(naturalWidth, naturalHeight));
@@ -225,7 +225,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
 
   const box = boundingBoxOf(mask, paddedWidth, paddedHeight);
   if (!box) {
-    throw new Error('This sketch has no visible artwork to trace a silhouette from.');
+    throw new Error('We couldn\'t find a clear outline in this sketch.');
   }
 
   // The ring sits at the top centre of the piece and must be ATTACHED ON
@@ -257,7 +257,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
     smoothingIterations: TRACE_SMOOTHING_ITERATIONS,
   });
   if (!smoothed) {
-    throw new Error('This sketch has no visible artwork to trace a silhouette from.');
+    throw new Error('We couldn\'t find a clear outline in this sketch.');
   }
 
   const scaleX = naturalWidth / analysisWidth;

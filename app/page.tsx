@@ -169,7 +169,7 @@ export default function Home() {
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setContourError(error instanceof Error ? error.message : 'Could not trace the silhouette outline from this sketch.');
+        setContourError(error instanceof Error ? error.message : 'We couldn\'t find a clear outline in this sketch.');
       });
     return () => {
       cancelled = true;
@@ -195,7 +195,7 @@ export default function Home() {
   const generateSketch = async () => {
     if (!file || status === 'generating') return;
     if (!selectedCategory) {
-      setErrorMessage('Please select a pendant category before generating your design.');
+      setErrorMessage('Pick a pendant style first, then create the sketch.');
       return;
     }
     const requestId = ++requestIdRef.current;
@@ -208,7 +208,7 @@ export default function Home() {
       cropped = await cropImageFile(file, crop);
     } catch {
       if (requestId !== requestIdRef.current) return;
-      setErrorMessage('Could not crop the photo. Please try a different photo.');
+      setErrorMessage('We couldn\'t crop this photo. Please try another one.');
       setStatus('error');
       return;
     }
@@ -223,7 +223,7 @@ export default function Home() {
         | null;
       if (requestId !== requestIdRef.current) return; // superseded by a newer request
       if (!body || !response.ok || !body.success) {
-        setErrorMessage(body && !body.success ? body.error : 'Unable to generate the image. Please try again.');
+        setErrorMessage(body && !body.success ? body.error : 'Something went wrong making the sketch. Please try again.');
         setStatus('error');
         return;
       }
@@ -231,7 +231,7 @@ export default function Home() {
       setStatus('done');
     } catch {
       if (requestId !== requestIdRef.current) return;
-      setErrorMessage('Unable to reach the image service. Please check your connection and try again.');
+      setErrorMessage('We couldn\'t connect. Check your internet and try again.');
       setStatus('error');
     }
   };
@@ -261,7 +261,7 @@ export default function Home() {
   const effectiveRim: RimColorId = shapeSupportsRim ? rimColor : 'none';
   const designLabel =
     selectedDesignType === 'edge-cut'
-      ? `${PENDANT_CATEGORIES[activeCategoryId].label} · Silhouette Cut`
+      ? `${PENDANT_CATEGORIES[activeCategoryId].label} · Cut to shape`
       : `${PENDANT_SHAPES[selectedShape].label} pendant`;
 
   const previewProps = {
@@ -279,8 +279,8 @@ export default function Home() {
       <header className="flex flex-col gap-2 text-center">
         <h1 className="text-2xl font-semibold text-slate-900 sm:text-3xl">Custom Pendant Design</h1>
         <p className="text-sm text-slate-500">
-          Upload a customer&apos;s photo once — preview every pendant and metal instantly, then render the product photo
-          and download the production files.
+          Start with one photo of your customer. Try it on every pendant and metal, then create the product photo and the
+          files for production.
         </p>
       </header>
 
@@ -290,7 +290,7 @@ export default function Home() {
         </div>
       )}
 
-      <Section step={1} title="Upload Photo">
+      <Section step={1} title="Add a photo">
         {!hasSketch ? (
           <div className="flex flex-col gap-6">
             {!originalImage ? (
@@ -321,19 +321,18 @@ export default function Home() {
           </div>
         ) : (
           <SummaryRow
-            label={originalImage ? 'Photo uploaded' : 'Photo uploaded (from a previous session)'}
-            action={{ label: 'Start over with a new photo', onClick: startOver }}
+            label={originalImage ? 'Photo added' : 'Photo added earlier'}
+            action={{ label: 'Start again with a new photo', onClick: startOver }}
           />
         )}
       </Section>
 
       {!hasSketch && originalImage && (
-        <Section step={2} title="Choose Pendant Category">
+        <Section step={2} title="Pick a pendant style">
           <div className="flex flex-col gap-4">
             <PendantCategoryPicker value={selectedCategory} onChange={setSelectedCategory} categories={GENERATION_CATEGORY_LIST} />
             <p className="text-xs text-slate-400">
-              This controls how much of the photo the AI includes in the sketch — the pendant type and shape are chosen after
-              generation.
+              This decides how much of the photo goes into the sketch. You can choose the pendant shape afterwards.
             </p>
             <div className="flex flex-col items-center gap-3">
               <button
@@ -342,10 +341,10 @@ export default function Home() {
                 disabled={isGenerating || !selectedCategory}
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Generate Sketch
+                Create sketch
               </button>
               {!selectedCategory && (
-                <p className="text-center text-xs text-amber-600">Please select a pendant category before generating your design.</p>
+                <p className="text-center text-xs text-amber-600">Pick a pendant style above to continue.</p>
               )}
             </div>
             {isGenerating && <GenerationProgress />}
@@ -355,14 +354,14 @@ export default function Home() {
 
       {hasSketch && (
         <>
-          <Section step={3} title="Master Sketch">
+          <Section step={3} title="Your sketch">
             <div className="flex flex-col gap-4">
               <div className="mx-auto w-full max-w-xs">
                 <GeneratedImage image={masterSketch} />
               </div>
               <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700">
-                <span aria-hidden>✓</span> Sketch generated as a {PENDANT_CATEGORIES[activeCategoryId].label} — reused for every
-                pendant and metal below.
+                <span aria-hidden>✓</span> Your {PENDANT_CATEGORIES[activeCategoryId].label} sketch is ready. Everything below uses
+                this same drawing.
               </p>
               {file && (
                 <button
@@ -371,22 +370,22 @@ export default function Home() {
                   disabled={isGenerating}
                   className="mx-auto text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Not quite right? Regenerate from the same photo (calls the AI again)
+                  Not quite right? Draw it again from the same photo
                 </button>
               )}
             </div>
           </Section>
 
-          <Section step={4} title="Choose Pendant Type">
+          <Section step={4} title="Choose the pendant">
             <div className="flex flex-col gap-4">
               <PendantDesignPicker value={selectedDesignType} onChange={setSelectedDesignType} />
               {selectedDesignType === 'edge-cut' && contourError && (
                 <p role="alert" className="text-xs text-red-600">
-                  {contourError} Shape pendants are still fully available.
+                  {contourError} You can still use any of the shaped pendants.
                 </p>
               )}
               {selectedDesignType === 'edge-cut' && !contour && !contourError && (
-                <p className="text-xs text-slate-400">Tracing the cut outline from the sketch…</p>
+                <p className="text-xs text-slate-400">Working out the cut line…</p>
               )}
               {selectedDesignType === 'standard' && (
                 <>
@@ -397,15 +396,15 @@ export default function Home() {
             </div>
           </Section>
 
-          <Section step={5} title="Choose Metal">
+          <Section step={5} title="Choose the metal">
             <MaterialPicker value={selectedMaterial} onChange={setSelectedMaterial} />
           </Section>
 
-          <Section step={6} title="Pendant Preview">
+          <Section step={6} title="Preview">
             <div className="flex flex-col items-center gap-8">
               <PendantPreview {...previewProps} material={selectedMaterial} size={280} />
               <div className="flex w-full flex-col gap-3 border-t border-slate-100 pt-6">
-                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Compare metals — {designLabel}</p>
+                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Silver and gold side by side: {designLabel}</p>
                 <div className="flex items-start justify-center gap-8">
                   {PENDANT_MATERIAL_LIST.map((material) => (
                     <div key={material.id} className="flex flex-col items-center gap-2">
@@ -421,7 +420,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex w-full flex-col gap-3 border-t border-slate-100 pt-6">
-                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Cut layout — {designLabel}</p>
+                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Cut layout: {designLabel}</p>
                 <CutLayoutPreview
                   sketch={masterSketch}
                   shape={selectedShape}
@@ -435,19 +434,19 @@ export default function Home() {
             </div>
           </Section>
 
-          <Section step={7} title="Customize Image">
+          <Section step={7} title="Adjust the artwork">
             <PendantControls transform={transform} onChange={setTransform} />
           </Section>
 
-          <Section step={8} title="Product Mockup">
+          <Section step={8} title="Product photo">
             <MockupPanel {...previewProps} sketch={masterSketch} />
           </Section>
 
-          <Section step={9} title="Manufacturing Files">
+          <Section step={9} title="Files for production">
             <ExportPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} />
           </Section>
 
-          <Section step={10} title="Download Preview Image">
+          <Section step={10} title="Download a preview">
             <DownloadPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} />
           </Section>
         </>
