@@ -1,22 +1,23 @@
 'use client';
 
 /**
- * Loading state. Cycles through three real phrases instead of a bare spinner
- * — the request genuinely takes up to a minute, and a static "Loading…" for
- * that long reads as stuck. No fixed percentage: we don't know how far along
- * the model actually is, so this shows a mood, not a number.
+ * Loading state. Cycles through a few real phrases instead of a bare spinner
+ * — the request genuinely runs for a minute or more, and a static "Loading…"
+ * for that long reads as stuck. No fixed percentage: we don't know how far
+ * along the model actually is, so this shows a mood, not a number.
  */
 
 import * as React from 'react';
 
 const MESSAGES = [
-  'Looking at your photo…',
-  'Drawing the engraving…',
+  'Touching up your photo…',
+  'Tracing the lines…',
+  'Inking the details…',
   'Nearly there…',
 ] as const;
 
 /** How long each phrase holds before advancing to the next (ms). */
-const STEP_MS = 4000;
+const STEP_MS = 14000;
 
 export function GenerationProgress() {
   const [index, setIndex] = React.useState(0);
@@ -53,7 +54,7 @@ export function GenerationProgress() {
         ))}
       </div>
 
-      <p className="text-xs text-slate-400">This can take up to a minute.</p>
+      <p className="text-xs text-slate-400">This usually takes a minute or two.</p>
     </div>
   );
 }

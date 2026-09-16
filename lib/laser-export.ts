@@ -118,6 +118,8 @@ export async function renderTransformedArtwork(
   sketchDataUrl: string,
   geometry: PendantGeometry,
   transform: PendantTransform,
+  /** Raster pixels per viewBox unit. The product photo passes a higher value so fine engraving stays legible. */
+  rasterScale: number = RASTER_SCALE,
 ): Promise<{ png: Buffer; width: number; height: number }> {
   const { buffer } = decodeDataUrl(sketchDataUrl);
   const meta = await sharp(buffer).metadata();
@@ -129,13 +131,13 @@ export async function renderTransformedArtwork(
 
   const { cx, cy, scale } = placeArtwork(geometry, imageWidth, imageHeight, transform);
 
-  const canvasWidth = Math.round(PENDANT_VIEWBOX.width * RASTER_SCALE);
-  const canvasHeight = Math.round(PENDANT_VIEWBOX.height * RASTER_SCALE);
+  const canvasWidth = Math.round(PENDANT_VIEWBOX.width * rasterScale);
+  const canvasHeight = Math.round(PENDANT_VIEWBOX.height * rasterScale);
 
   // Resize to the exact target pixel size implied by the fit scale, in
   // canvas (raster) pixels.
-  const targetWidth = Math.max(1, Math.round(imageWidth * scale * RASTER_SCALE));
-  const targetHeight = Math.max(1, Math.round(imageHeight * scale * RASTER_SCALE));
+  const targetWidth = Math.max(1, Math.round(imageWidth * scale * rasterScale));
+  const targetHeight = Math.max(1, Math.round(imageHeight * scale * rasterScale));
 
   let artwork = sharp(buffer).resize(targetWidth, targetHeight, { fit: 'fill' });
   if (transform.rotation % 360 !== 0) {
@@ -150,8 +152,8 @@ export async function renderTransformedArtwork(
   let artworkWidth = artworkMeta.width ?? targetWidth;
   let artworkHeight = artworkMeta.height ?? targetHeight;
 
-  let left = Math.round(cx * RASTER_SCALE - artworkWidth / 2);
-  let top = Math.round(cy * RASTER_SCALE - artworkHeight / 2);
+  let left = Math.round(cx * rasterScale - artworkWidth / 2);
+  let top = Math.round(cy * rasterScale - artworkHeight / 2);
 
   // "Cover" fit means the artwork is *meant* to overflow its target box —
   // the outer shape is what's supposed to crop that overflow. But for a

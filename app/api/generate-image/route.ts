@@ -1,29 +1,32 @@
 /**
  * POST /api/generate-image
  *
- * Accepts a photograph plus the customer's pendant category (chosen BEFORE
- * generation — it selects which framing/subject-selection prompt Gemini
- * gets, see lib/gemini.ts's `CATEGORY_FRAMING_PROMPTS`) as multipart form
- * data, validates both, sends the image to Gemini as an actual image input
- * exactly once, and returns the resulting master sketch as a data URL. The
- * Gemini API key never leaves this file's process — it is read from
- * `process.env` on the server and is never echoed back in any response.
+ * Accepts the (already cropped) photograph plus the pendant style as
+ * multipart form data, validates both, and returns the finished sketch as a
+ * data URL. The sketch is made in three steps, the same ones the client uses
+ * by hand: an AI photo edit (background removed, framing applied, enhanced),
+ * a comic ink filter on that photo, and an AI finish that cleans up the trace
+ * without moving its lines. See lib/sketch-pipeline.ts.
  *
- * Gemini's raw output is cropped and background-removed (`lib/image-
- * processing.ts`) before it is returned — deterministic pixel arithmetic, not
- * a second AI call. This is what the client receives and stores as
- * `masterSketch`; it is never sent back through Gemini again.
+ * The result is then trimmed and given a transparent background
+ * (lib/image-processing.ts) before it is returned. This is what the browser
+ * keeps as `masterSketch`; it is never sent back through the AI.
+ *
+ * The Gemini API key is read from `process.env` on the server and never
+ * appears in any response.
  */
 
-import { GeminiGenerationError, generateLineArt, type GeminiErrorCode } from '@/lib/gemini';
+import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId } from '@/lib/pendant-categories';
+import { createSketch } from '@/lib/sketch-pipeline';
 import { validateImageBytes } from '@/lib/validation';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// Two AI calls at 2K plus the ink filter; usually well under a minute.
+export const maxDuration = 240;
 
 interface SuccessResponse {
   success: true;
@@ -78,8 +81,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    // The one and only Gemini call for this photo.
-    const result = await generateLineArt({ imageBytes: bytes, mimeType: file.type, category });
+    // Enhance, rough ink trace, finish. See lib/sketch-pipeline.ts.
+    const sketch = await createSketch({ imageBytes: bytes, mimeType: file.type, category });
 
     // Deterministic post-processing, not AI: crop the AI's white margin and
     // turn the remaining background transparent. See lib/image-processing.ts
@@ -87,7 +90,7 @@ export async function POST(request: Request): Promise<Response> {
     // ever" actually true rather than merely usually true. For Face Pendant
     // specifically, also enforces the jaw cutoff the prompt asks for but
     // can't fully guarantee on its own.
-    const master = await makeTransparentMasterSketch(Buffer.from(result.bytes), {
+    const master = await makeTransparentMasterSketch(sketch, {
       cropBelowJaw: category === 'face',
     });
     const base64 = master.buffer.toString('base64');

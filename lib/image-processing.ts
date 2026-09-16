@@ -16,9 +16,9 @@
  * so there is no rectangle for any transform to ever reveal.
  *
  * `MasterSketchOptions.cropBelowJaw` (Face Pendant only) additionally
- * shortens that crop to end at the jaw, as a deterministic backstop for
- * when Gemini's framing prompt alone doesn't keep the neck out — see
- * `computeFaceCropBox` below.
+ * shortens that crop to end at the jaw — see `computeFaceCropBox` below,
+ * and `cropPhotoToHead`, which does the same measurement on the photo
+ * earlier in the pipeline.
  */
 
 import sharp from 'sharp';
@@ -43,13 +43,11 @@ export interface MasterSketch {
 
 export interface MasterSketchOptions {
   /**
-   * Face Pendant's prompt (lib/gemini.ts) asks Gemini to end the artwork at
-   * the jaw, but a prompt is a request, not a guarantee — some generations
-   * still include a neck (sometimes trailing into shoulders). This is the
-   * deterministic backstop: found and removed here, from the alpha mask's
-   * own geometry, rather than by asking Gemini again (which would break the
-   * "Gemini called exactly once" rule) or relying on the prompt alone (which
-   * verifiably isn't reliable enough by itself). See `computeFaceCropBox`.
+   * Face Pendant is cut to the head on the photo, before the drawing starts
+   * (`cropPhotoToHead`). This is the backstop for what is left: a neck the
+   * photo crop's plateau test did not catch, or one the finish step drew
+   * below the chin anyway. Measured from the alpha mask's own geometry, so
+   * it never costs another AI call. See `computeFaceCropBox`.
    */
   cropBelowJaw?: boolean;
 }
@@ -276,6 +274,126 @@ async function liftBackgroundToWhite(input: Buffer): Promise<Buffer> {
 }
 
 /**
+ * Cuts a white-background photo down to the head, using the same jaw
+ * geometry as the sketch crop above.
+ *
+ * Face Pendant used to get its framing from the photo-edit prompt ("paint
+ * everything below the chin white"). Verified on a real customer photo: that
+ * instruction makes the model stop editing and start re-rendering — it
+ * turned a man photographed at three-quarters to face the camera, twice out
+ * of two runs, which then flowed through the trace into the sketch. Asking
+ * only for a background removal keeps the pose, so the framing is done here
+ * instead, on pixels, where it cannot invent anything.
+ *
+ * Measured on the photo, where the subject is a solid silhouette against
+ * flat white, instead of on hatched line art.
+ *
+ * `computeFaceCropBox` above is not the right test here. It looks for a
+ * cylindrical neck plateau because it has to survive being handed a picture
+ * that is *already* head-only, where cutting at the jaw would shave the
+ * chin. This photo is different: it still has the body, and a neck that
+ * flares straight into shoulders never forms that plateau. So the rule here
+ * is the simpler one — cut at the jaw, but only once there is clearly a body
+ * below it to cut off.
+ */
+/** Shoulders have to be at least this much wider than the head to count as a body. */
+const SHOULDER_FLARE_RATIO = 1.1;
+/** The neck has to be at least this much narrower than the shoulders to count as a neck. */
+const NECK_PINCH_RATIO = 0.85;
+/** Rows within this much of the narrowest one are still "the neck". */
+const NECK_TOLERANCE = 1.05;
+
+export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
+  const { data, info } = await sharp(photo)
+    .flatten({ background: '#ffffff' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const width = new Int32Array(info.height);
+  for (let y = 0; y < info.height; y++) {
+    let minX = -1;
+    let maxX = -1;
+    for (let x = 0; x < info.width; x++) {
+      const i = (y * info.width + x) * info.channels;
+      const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (luminance < WHITE_THRESHOLD) {
+        if (minX === -1) minX = x;
+        maxX = x;
+      }
+    }
+    width[y] = minX === -1 ? 0 : maxX - minX + 1;
+  }
+
+  let topY = -1;
+  let bottomY = -1;
+  for (let y = 0; y < info.height; y++) {
+    if (width[y] > 0) {
+      if (topY === -1) topY = y;
+      bottomY = y;
+    }
+  }
+  if (topY === -1) return photo;
+
+  // The head's widest point (hair and ears), searched in the upper part of
+  // the subject so a pair of shoulders can never be taken for the head.
+  const peakSearchEnd = topY + Math.round((bottomY - topY + 1) * 0.5);
+  let peakWidth = 0;
+  let peakY = topY;
+  for (let y = topY; y <= peakSearchEnd; y++) {
+    if (width[y] > peakWidth) {
+      peakWidth = width[y];
+      peakY = y;
+    }
+  }
+  if (peakWidth === 0) return photo;
+
+  // The shoulders: the widest row low down. A picture that is already
+  // head-only has nothing wider than the head there, and is left alone.
+  let shoulderWidth = 0;
+  let shoulderY = -1;
+  for (let y = peakSearchEnd + 1; y <= bottomY; y++) {
+    if (width[y] > shoulderWidth) {
+      shoulderWidth = width[y];
+      shoulderY = y;
+    }
+  }
+  if (shoulderY === -1 || shoulderWidth < peakWidth * SHOULDER_FLARE_RATIO) return photo;
+
+  // The neck is the waist between the two: the narrowest row in between.
+  // Measured this way rather than as "the first row narrower than the jaw",
+  // because on a head turned to one side the neck is barely narrower than
+  // the head itself (measured: 259 px against a 290 px head), while it is
+  // always clearly narrower than the shoulders below it.
+  let neckWidth = Infinity;
+  for (let y = peakY + 1; y < shoulderY; y++) {
+    if (width[y] > 0 && width[y] < neckWidth) neckWidth = width[y];
+  }
+  if (neckWidth === Infinity || neckWidth > shoulderWidth * NECK_PINCH_RATIO) return photo;
+
+  // The LAST row of that waist, not the first: the first one can still be
+  // the bottom of a beard, and leaving a little neck behind costs nothing —
+  // `computeFaceCropBox` trims it off the finished artwork later.
+  let neckY = -1;
+  for (let y = peakY + 1; y < shoulderY; y++) {
+    if (width[y] > 0 && width[y] <= neckWidth * NECK_TOLERANCE) neckY = y;
+  }
+  if (neckY === -1) return photo;
+
+  // Painted white rather than cropped away, so the head keeps the natural
+  // silhouette of its own chin and beard instead of ending on a straight
+  // cut, exactly as it did when the photo-edit prompt still did this.
+  for (let y = neckY + 1; y < info.height; y++) {
+    data.fill(255, y * info.width * info.channels, (y + 1) * info.width * info.channels);
+  }
+
+  console.info(`[sketch] whited out the body below the neck (row ${neckY} of ${info.height})`);
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
+    .png()
+    .toBuffer();
+}
+
+/**
  * Crop the AI's generous white margin to the actual artwork, then convert
  * every near-white pixel to transparent, ramping alpha across the threshold
  * band so anti-aliased line edges don't get a hard, jagged cutout.
@@ -332,6 +450,12 @@ export async function makeTransparentMasterSketch(
         255 * (1 - (luminance - INK_THRESHOLD) / (WHITE_THRESHOLD - INK_THRESHOLD)),
       );
     }
+    // Ink is always pure black: the engraving is monochrome, and this stops
+    // any stray colour in the AI output (a red bindi, a tinted line) from
+    // showing up in previews or the production files.
+    data[i] = 0;
+    data[i + 1] = 0;
+    data[i + 2] = 0;
     data[i + 3] = alpha;
   }
 

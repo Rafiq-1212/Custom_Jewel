@@ -26,6 +26,19 @@ export interface PendantMaterial {
   flat: string;
   /** How the AI mockup prompt names this metal. */
   mockupDescription: string;
+  /**
+   * How the metal's surface should be lit in the mockup. Written per metal
+   * because they fail in opposite ways: asked for "polished silver" the model
+   * renders a white mirror, and the engraving washes out to thin grey lines
+   * on it. Gold has its own colour to sit against, so it never did that.
+   */
+  mockupFinish: string;
+  /**
+   * How the engraved lines look on this metal. Real engraved silver is
+   * oxidised dark in the cuts, which is both what the client's own photos
+   * show and what keeps the artwork readable against a bright surface.
+   */
+  mockupEngraving: string;
 }
 
 export const PENDANT_MATERIALS: Record<MaterialId, PendantMaterial> = {
@@ -36,7 +49,11 @@ export const PENDANT_MATERIALS: Record<MaterialId, PendantMaterial> = {
     rim: '#8d9298',
     swatch: '#c8ccd1',
     flat: '#c9cdd2',
-    mockupDescription: 'polished 925 sterling silver',
+    mockupDescription: '925 sterling silver',
+    mockupFinish:
+      'Bright white metal with a soft satin sheen, like a jeweller\'s lightly polished silver: gentle graduated reflections across the plate, a slightly darker tone towards the edges and a soft bevel catching the light. Do NOT render it as a blown-out white mirror, and keep the whole plate clearly darker than the cream background so the metal reads as metal.',
+    mockupEngraving:
+      'The cuts are oxidised almost black, the way engraved silver is antiqued, so every line reads as a deep dark stroke against the bright metal.',
   },
   gold: {
     id: 'gold',
@@ -46,6 +63,10 @@ export const PENDANT_MATERIALS: Record<MaterialId, PendantMaterial> = {
     swatch: '#d4af37',
     flat: '#d8ab3f',
     mockupDescription: 'polished 22k yellow gold',
+    mockupFinish:
+      'Warm yellow gold with realistic polished reflections, a slightly deeper tone towards the edges and a soft bevel catching the light.',
+    mockupEngraving:
+      'The cuts are dark brown-black, the way engraved gold is oxidised, so every line reads as a deep dark stroke against the warm metal.',
   },
 };
 
