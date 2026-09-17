@@ -349,9 +349,14 @@ const BEARD_MARGIN = 0.015;
  * side everything outside the beard's edge is neck. The band starts below
  * the ear (the lobe sits at about 55-58% of the head's height on the photo
  * edits measured; 62% leaves a margin), and only the side that has skin
- * beyond the beard is touched, so the far cheek is never nibbled.
+ * beyond the beard is touched, so the far cheek is never nibbled. The band
+ * starts as high as the ear allows: the lobe sat at 55-58% on every photo
+ * edit measured, and the strip of neck left under it at 62% was still
+ * coming back as a stroke hanging off the ear.
  */
-const NECK_BAND_START = 0.62;
+const NECK_BAND_START = 0.61;
+/** Going up, the beard's edge may move outward by at most this much per row (fraction of width); more is the hair behind the ear. */
+const EDGE_SLACK_PER_ROW = 0.002;
 /** The beard's edge is where the dark pixels are dense over this window (fraction of width), not the last stray hair. */
 const BEARD_EDGE_WINDOW = 0.012;
 /** The edge is median-smoothed over this many rows (fraction of head height), so it cannot leave streaks. */
@@ -360,9 +365,11 @@ const BEARD_EDGE_SMOOTHING = 0.02;
 const NECK_MARGIN = 0.008;
 /** The removal fades in sideways over this fraction of width, and downwards over this fraction of head height. */
 const NECK_FEATHER_X = 0.02;
-const NECK_FEATHER_Y = 0.06;
+const NECK_FEATHER_Y = 0.02;
 /** The neck side has to have at least this many times more skin beyond the beard than the other side. */
 const NECK_SIDE_RATIO = 1.5;
+/** Which side the neck is on is judged from this fraction of the head's height down (below the mouth). */
+const NECK_SIDE_DECIDE_FROM = 0.7;
 /**
  * A collar stands up beside the neck and survives the straight cut, joined
  * to the beard, so it cannot be separated as its own piece — measured: the
@@ -458,13 +465,15 @@ function removeNeckBesideBeard(data: Buffer, width: number, height: number, chan
   const bandTop = topY + Math.round(headHeight * NECK_BAND_START);
   if (bandTop >= cutY) return;
 
+  const searchTop = bandTop;
+
   // Per row, the beard's dense-dark extent.
   const window = Math.max(5, Math.round(width * BEARD_EDGE_WINDOW));
   const half = Math.floor(window / 2);
   const edgeLeft = new Int32Array(height).fill(-1);
   const edgeRight = new Int32Array(height).fill(-1);
   const dark = new Uint8Array(width);
-  for (let y = bandTop; y <= cutY; y++) {
+  for (let y = searchTop; y <= cutY; y++) {
     for (let x = 0; x < width; x++) dark[x] = luminanceAt(y * width + x) < BEARD_DARK_LUMINANCE ? 1 : 0;
     let run = 0;
     for (let x = 0; x < window && x < width; x++) run += dark[x];
@@ -484,7 +493,7 @@ function removeNeckBesideBeard(data: Buffer, width: number, height: number, chan
     const values: number[] = [];
     for (let k = -radius; k <= radius; k++) {
       const yy = y + k;
-      if (yy >= bandTop && yy <= cutY && edges[yy] >= 0) values.push(edges[yy]);
+      if (yy >= searchTop && yy <= cutY && edges[yy] >= 0) values.push(edges[yy]);
     }
     if (values.length === 0) return -1;
     values.sort((a, b) => a - b);
@@ -492,15 +501,17 @@ function removeNeckBesideBeard(data: Buffer, width: number, height: number, chan
   };
   const smoothLeft = new Int32Array(height).fill(-1);
   const smoothRight = new Int32Array(height).fill(-1);
-  for (let y = bandTop; y <= cutY; y++) {
+  for (let y = searchTop; y <= cutY; y++) {
     smoothLeft[y] = median(edgeLeft, y);
     smoothRight[y] = median(edgeRight, y);
   }
-
-  // The neck is on whichever side has skin beyond the beard.
+  // The neck is on whichever side has skin beyond the beard. Decided on the
+  // lower rows only: higher up, at the mouth, the far cheek also lies
+  // beyond the beard's edge and would make the two sides look even.
   let beyondLeft = 0;
   let beyondRight = 0;
-  for (let y = bandTop; y <= cutY; y++) {
+  const decideFrom = topY + Math.round(headHeight * NECK_SIDE_DECIDE_FROM);
+  for (let y = Math.max(bandTop, decideFrom); y <= cutY; y++) {
     if (smoothRight[y] < 0) continue;
     for (let x = 0; x < width; x++) {
       if (luminanceAt(y * width + x) >= WHITE_THRESHOLD) continue;
@@ -516,12 +527,31 @@ function removeNeckBesideBeard(data: Buffer, width: number, height: number, chan
   if (Math.max(beyondLeft, beyondRight) < Math.min(beyondLeft, beyondRight) * NECK_SIDE_RATIO) return;
   const rightSide = beyondRight >= beyondLeft;
 
+  // Up at ear level the dense dark run is no longer the beard but the hair
+  // behind the ear, so the edge leaps outward (measured: from ~551 to ~625
+  // on a 768 px frame, at 66% of the head) and those rows had "nothing
+  // beyond the edge". That left a strip of neck under the ear lobe with a
+  // hard straight bottom, traced as a mark hanging off the ear. So, on the
+  // neck side only, the edge is carried up from the cut and may only move
+  // outward a little per row: enough for the jaw widening gently towards
+  // the ear, not enough to follow the leap to the hair.
+  const decided = rightSide ? smoothRight : smoothLeft;
+  const carried = new Int32Array(height).fill(-1);
+  const slack = Math.max(1, width * EDGE_SLACK_PER_ROW);
+  let last = -1;
+  for (let y = cutY; y >= bandTop; y--) {
+    const e = decided[y];
+    if (last < 0) last = e;
+    else if (e >= 0) last = rightSide ? Math.min(e, last + slack) : Math.max(e, last - slack);
+    carried[y] = last;
+  }
+
   const margin = Math.round(width * NECK_MARGIN);
   const featherX = Math.max(2, Math.round(width * NECK_FEATHER_X));
   const featherY = Math.max(1, headHeight * NECK_FEATHER_Y);
   let touched = 0;
   for (let y = bandTop; y <= cutY; y++) {
-    const edge = rightSide ? smoothRight[y] : smoothLeft[y];
+    const edge = carried[y];
     if (edge < 0) continue;
     const fadeIn = Math.min(1, (y - bandTop) / featherY);
     for (let x = 0; x < width; x++) {
