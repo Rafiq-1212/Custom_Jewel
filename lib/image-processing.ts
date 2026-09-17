@@ -316,6 +316,113 @@ const SHOULDER_SUSTAIN = 0.04;
 const HEAD_TOLERANCE = 1.05;
 /** Never cut higher than this fraction of the subject: above it, something is wrong with the measurement. */
 const MIN_HEAD_FRACTION = 0.3;
+/**
+ * What is kept has to be at least this tall relative to the width measured
+ * as "the head", since a head is never a wide, flat strip. Verified on a
+ * group photo handed to Face Pendant by mistake: the band across three
+ * heads measured 577 px "wide" and the cut landed 254 px below the top,
+ * which would have sliced a strip off the tops of everyone's heads. With
+ * this check the picture is simply left alone instead.
+ */
+const MIN_HEAD_ASPECT = 0.6;
+/**
+ * The cut is faded to white over this fraction of the head's height rather
+ * than stopping dead. A hard edge is an edge like any other: the ink filter
+ * traces it and the finish step draws it, which on a long beard came back as
+ * a straight line ruled across the chin. Fading it means the beard simply
+ * runs out of ink at the bottom, the way the client's own artwork ends.
+ */
+const CUT_FEATHER = 0.08;
+/**
+ * The step to the shoulders sits below the neck, so on its own that cut
+ * keeps the neck. When there is a beard, its lowest row is the jaw: a row
+ * whose subject pixels are at least this dark, by this share, is beard.
+ */
+const BEARD_DARK_LUMINANCE = 90;
+const BEARD_ROW_SHARE = 0.4;
+/** Kept below the beard's last row so its tip is never shaved, as a fraction of the head's height. */
+const BEARD_MARGIN = 0.015;
+/**
+ * A collar stands up beside the neck and survives the straight cut, joined
+ * to the beard, so it cannot be separated as its own piece — measured: the
+ * head and the collar come back as one connected blob. Colour does separate
+ * them: in the band just above the cut, cloth is light and almost grey,
+ * while skin is much darker and clearly warm.
+ */
+const FABRIC_LUMINANCE = 200;
+const FABRIC_SATURATION = 0.25;
+/** How far above the cut the cloth is looked for, as a fraction of the subject's height. */
+const FABRIC_BAND = 0.2;
+/** If more than this share of that band would go, the measurement is wrong and nothing is removed. */
+const MAX_FABRIC_SHARE = 0.6;
+
+/**
+ * Whites out the cloth left standing beside the neck after the cut.
+ *
+ * Only cloth that runs down to the cut itself is removed, and only within a
+ * band above it: the flood starts on the cut row and travels up through
+ * light, colourless pixels. A bright highlight on a cheek is never reached,
+ * because it does not touch the cut row. Skin survives on colour: measured
+ * on a real photo edit, the band above the cut held about 12,000 pixels of
+ * light grey cloth against a face whose own pixels sit far darker and warmer.
+ *
+ * Light cloth only. A dark collar reads like hair or beard to this test and
+ * is left alone.
+ */
+function removeClothAtCut(data: Buffer, width: number, height: number, channels: number, topY: number, cutY: number): void {
+  const luminanceAt = (i: number) => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  const saturationAt = (i: number) => {
+    const max = Math.max(data[i], data[i + 1], data[i + 2]);
+    const min = Math.min(data[i], data[i + 1], data[i + 2]);
+    return max === 0 ? 0 : (max - min) / max;
+  };
+  const isCloth = (p: number) => {
+    const i = p * channels;
+    const luminance = luminanceAt(i);
+    return luminance < WHITE_THRESHOLD && luminance >= FABRIC_LUMINANCE && saturationAt(i) < FABRIC_SATURATION;
+  };
+
+  const bandTop = Math.max(topY, cutY - Math.round((cutY - topY) * FABRIC_BAND));
+  let bandSubject = 0;
+  for (let y = bandTop; y <= cutY; y++) {
+    for (let x = 0; x < width; x++) if (luminanceAt((y * width + x) * channels) < WHITE_THRESHOLD) bandSubject++;
+  }
+  if (bandSubject === 0) return;
+
+  const seen = new Uint8Array(width * height);
+  const stack: number[] = [];
+  for (let x = 0; x < width; x++) {
+    const p = cutY * width + x;
+    if (!seen[p] && isCloth(p)) {
+      seen[p] = 1;
+      stack.push(p);
+    }
+  }
+
+  const found: number[] = [];
+  while (stack.length) {
+    const p = stack.pop() as number;
+    found.push(p);
+    const x = p % width;
+    const y = (p - x) / width;
+    const visit = (q: number, qy: number) => {
+      if (qy < bandTop || qy > cutY || seen[q] || !isCloth(q)) return;
+      seen[q] = 1;
+      stack.push(q);
+    };
+    if (x > 0) visit(p - 1, y);
+    if (x < width - 1) visit(p + 1, y);
+    if (y > bandTop) visit(p - width, y - 1);
+    if (y < cutY) visit(p + width, y + 1);
+  }
+
+  if (found.length > bandSubject * MAX_FABRIC_SHARE) {
+    console.info(`[sketch] left the cloth beside the neck alone: it would have taken ${found.length} of ${bandSubject} pixels`);
+    return;
+  }
+  for (const p of found) data.fill(255, p * channels, p * channels + channels);
+  if (found.length > 0) console.info(`[sketch] removed ${found.length} pixels of cloth beside the neck`);
+}
 
 export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
   const { data, info } = await sharp(photo)
@@ -400,13 +507,57 @@ export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
   for (let y = bandTo; y < shoulderY; y++) if (smooth[y] <= headWidth * HEAD_TOLERANCE) cutY = y;
   if (cutY === -1) cutY = shoulderY;
   if (cutY - topY < content * MIN_HEAD_FRACTION) return photo;
+  if (cutY - topY < headWidth * MIN_HEAD_ASPECT) return photo;
   if (cutY >= bottomY) return photo;
+
+  // With a beard, the picture should end where the beard ends, not where
+  // the shoulders begin: the rows in between are neck. Measured on the
+  // photo edits: the beard rows are 60-80% dark right down to the jaw, the
+  // neck rows below them are skin. Scanning up from the cut, the first
+  // beard row found is the jaw. A face without a beard never triggers this
+  // and keeps the shoulder cut.
+  let jawY = -1;
+  for (let y = cutY; y > bandTo; y--) {
+    let subject = 0;
+    let dark = 0;
+    const row = y * info.width * info.channels;
+    for (let x = 0; x < info.width; x++) {
+      const i = row + x * info.channels;
+      const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (luminance >= WHITE_THRESHOLD) continue;
+      subject++;
+      if (luminance < BEARD_DARK_LUMINANCE) dark++;
+    }
+    if (subject > 0 && dark / subject >= BEARD_ROW_SHARE) {
+      jawY = y;
+      break;
+    }
+  }
+  if (jawY !== -1) {
+    const withMargin = Math.min(cutY, jawY + Math.round((cutY - topY) * BEARD_MARGIN));
+    if (withMargin < cutY) {
+      console.info(`[sketch] beard ends at row ${jawY}; cutting there instead of at the shoulders (row ${cutY})`);
+      cutY = withMargin;
+    }
+  }
 
   // Painted white rather than cropped away, so the head keeps the natural
   // silhouette of its own chin and beard instead of ending on a straight
   // cut, exactly as it did when the photo-edit prompt still did this.
   for (let y = cutY + 1; y < info.height; y++) {
     data.fill(255, y * info.width * info.channels, (y + 1) * info.width * info.channels);
+  }
+  // Cloth first: the fade below would turn the cut row white, and the cloth
+  // flood starts from that row.
+  removeClothAtCut(data, info.width, info.height, info.channels, topY, cutY);
+  const feather = Math.max(1, Math.round((cutY - topY) * CUT_FEATHER));
+  for (let y = Math.max(topY, cutY - feather); y <= cutY; y++) {
+    const toWhite = 1 - (cutY - y) / feather;
+    const row = y * info.width * info.channels;
+    for (let x = 0; x < info.width; x++) {
+      const i = row + x * info.channels;
+      for (let c = 0; c < 3; c++) data[i + c] = Math.round(data[i + c] + (255 - data[i + c]) * toWhite);
+    }
   }
 
   console.info(
