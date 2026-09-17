@@ -100,6 +100,17 @@ const RING_HOLE_RATIO = 0.55;
 const RING_ATTACH_DEPTH_RATIO = 0.35;
 /** The ring never sinks more than this far (fraction of radius) into the HIGHER side. */
 const RING_MAX_SINK_RATIO = 0.6;
+/**
+ * How far the ring may wander from the centre to find a high place to hang
+ * from, as a cost: moving it this many pixels sideways is worth one pixel of
+ * extra depth. The centre is not always the top of the piece — on a couple
+ * standing slightly apart it is the V between their heads, and a ring hung
+ * there sinks to the bottom of the V, which is halfway down the piece.
+ * Verified on a two-head sketch with a gap: the hole came out 39% of the way
+ * down the middle of the plate, where it reads as a second hole punched
+ * through the artwork.
+ */
+const RING_CENTRE_PULL = 0.35;
 /** Radius of the round close that fillets the two joins between ring and outline, as a fraction of the ring radius. */
 const RING_FILLET_RATIO = 0.6;
 const RING_SEGMENTS = 72;
@@ -194,7 +205,8 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
     mask[p] = data[i + 3] >= ALPHA_THRESHOLD ? 1 : 0;
   }
 
-  const bridgeRadius = Math.max(3, Math.round(Math.max(analysisWidth, analysisHeight) * 0.015));
+  const largerAnalysisDim = Math.max(analysisWidth, analysisHeight);
+  const bridgeRadius = Math.max(3, Math.round(largerAnalysisDim * 0.015));
 
   mask = roundDilate(mask, analysisWidth, analysisHeight, bridgeRadius);
   mask = sealBorderGaps(mask, analysisWidth, analysisHeight, bridgeRadius);
@@ -236,14 +248,39 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   // other side. The ring sinks until its bottom is below the LOWER of the
   // two tops, capped so it never disappears into the higher one.
   const ringOuter = Math.max(6, Math.round((box.maxX - box.minX + 1) * RING_OUTER_FRACTION_OF_WIDTH));
-  const ringCx = (box.minX + box.maxX + 1) / 2;
-  const topLeft = topOfBand(mask, paddedWidth, paddedHeight, ringCx - ringOuter, ringCx - ringOuter * 0.2);
-  const topRight = topOfBand(mask, paddedWidth, paddedHeight, ringCx + ringOuter * 0.2, ringCx + ringOuter);
-  const tops = [topLeft, topRight].filter((t): t is number => t !== null);
-  const lowerTop = tops.length ? Math.max(...tops) : box.minY;
-  const higherTop = tops.length ? Math.min(...tops) : box.minY;
+  const centreX = (box.minX + box.maxX + 1) / 2;
+  const sides = (x: number) => {
+    const left = topOfBand(mask, paddedWidth, paddedHeight, x - ringOuter, x - ringOuter * 0.2);
+    const right = topOfBand(mask, paddedWidth, paddedHeight, x + ringOuter * 0.2, x + ringOuter);
+    return left === null || right === null ? null : { lower: Math.max(left, right), higher: Math.min(left, right) };
+  };
+
+  // Where to hang it: the piece's own high ground, pulled back towards the
+  // centre. Both sides of the ring's footprint must have outline under them,
+  // so it is still attached on either side wherever it ends up.
+  let ringCx = centreX;
+  let attach = sides(centreX);
+  let bestScore = attach ? attach.lower + RING_CENTRE_PULL * 0 : Infinity;
+  const step = Math.max(2, Math.round(ringOuter / 3));
+  for (let x = box.minX + ringOuter; x <= box.maxX - ringOuter; x += step) {
+    const candidate = sides(x);
+    if (!candidate) continue;
+    const score = candidate.lower + RING_CENTRE_PULL * Math.abs(x - centreX);
+    if (score < bestScore) {
+      bestScore = score;
+      ringCx = x;
+      attach = candidate;
+    }
+  }
+
+  const lowerTop = attach ? attach.lower : box.minY;
+  const higherTop = attach ? attach.higher : box.minY;
   let ringCy = lowerTop + ringOuter * RING_ATTACH_DEPTH_RATIO - ringOuter;
-  ringCy = Math.max(ringCy, higherTop + ringOuter * RING_MAX_SINK_RATIO - ringOuter);
+  // Cap the sink. This was a Math.max, which is the opposite: it forced the
+  // ring at least that deep instead of stopping it there, so on a piece with
+  // a deep notch the ring sank until it was swallowed by the body, leaving
+  // only its hole showing in the middle of the artwork.
+  ringCy = Math.min(ringCy, higherTop + ringOuter * RING_MAX_SINK_RATIO - ringOuter);
 
   // Union the ring into the piece and fillet both joins, so the traced cut
   // path flows from the outline into the ring on either side as one curve;

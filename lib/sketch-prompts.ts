@@ -84,13 +84,17 @@ This artwork is cut into metal with a laser, one stroke at a time, so a stroke t
 
 DETAIL (the artwork is judged on this, but all of it on white skin — see FACES ARE LEFT CLEAN below):
 - Hair: dense and dark as described in the style, with individual strand texture visible along the edges, the parting and the highlights. Keep the real shape of curls, waves and messy tufts.
-- Eyes: bold upper lid and lash line, the crease above the eye, eyelashes, the iris with a solid black pupil and a small white catchlight, lower lid, and the under-eye lines where the photo shows them.
+- Eyes, the part everyone looks at first: bold upper lid and lash line, the crease above the eye, eyelashes, the iris drawn as a full circle with a solid black pupil inside it and a small white catchlight, the lower lid line, the inner corner, and the under-eye line where the photo shows one. THE TWO EYES MUST MATCH: same height on the face, same shape, same size and the same amount of detail in both. On a head turned to one side the far eye is narrower, but it is never higher, lower, simpler or emptier than the near one, and never left as a bare almond outline.
 - Eyebrows: dark, built from short hair strokes in the direction they grow.
-- Face: the real shape of the nose (its edge, the tip, the nostrils), the lips (upper lip shape, lower lip edge, corners), the chin and the jaw — as clean outlines on white skin, with no shading filled in behind them and no strokes on the chin or above the lip.
+- Nose: its real shape, not a pair of hooks. The line down the bridge where the photo shows one, the ball of the tip, BOTH nostril wings, the two nostril openings as small dark marks, and the line under the tip. A woman's or a child's nose is finer than a man's, but it gets the same parts.
+- Lips: the dip of the upper lip and its two peaks, the line between the lips carried right out to both corners, the lower lip's edge, and the shadow line under the lower lip if the photo shows one.
+- Face: the chin and the jaw as clean outlines on white skin, with no shading filled in behind them and no strokes on the chin or above the lip.
 - Ears: the inner folds, with a couple of strokes in the deepest part only.
 - Arms and hands: draw EVERY arm, hand and finger that is visible in image 1, with the fingernails, knuckles and the creases of the fingers. A hand resting on a shoulder, an arm around a back, a hand holding another hand: these are the point of the picture and must never be left out, merged into the clothing behind them or hidden under a dark area.
 - Jewellery: necklaces, chains, earrings, bangles, a watch, a maang tikka, drawn bead by bead and link by link as image 1 shows them.
 - Clothing: every fold, crinkle, seam, collar edge and button.
+
+NO STRAY LINES. Every line you draw has to be something real in image 1: an edge, a feature, a fold, a strand. Do not double an outline that is already there, do not run a line off into empty white, do not leave a stroke hanging in the air with nothing at either end, and do not sketch in a line that has no counterpart in the photo. Where a line ends, it ends cleanly on another line or on the white.
 
 ${FINISH_FAITHFUL}
 

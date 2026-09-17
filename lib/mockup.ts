@@ -160,7 +160,7 @@ function buildMockupPrompt(request: DesignRequest): string {
 
   const plate =
     request.designType === 'edge-cut'
-      ? `This is a SILHOUETTE-CUT pendant: the flat metal plate is cut a few millimetres outside the outline of the engraved artwork, following its shape — that irregular outline, with its small metal border, IS the edge of the pendant. Keep it exactly; do not put the artwork on a round, heart or any other backing plate, and do not add a frame. The plate already includes its own hanging ring at the top centre, cut from the same flat sheet with a round hole — keep that ring exactly as shown and do NOT add a separate bail.`
+      ? `This is a SILHOUETTE-CUT pendant: the flat metal plate is cut a few millimetres outside the outline of the engraved artwork, following its shape — that irregular outline, with its small metal border, IS the edge of the pendant. Keep it exactly; do not put the artwork on a round, heart or any other backing plate, and do not add a frame. The plate already includes its own hanging ring, cut from the same flat sheet with a round hole — keep that ring exactly where image 1 puts it and do NOT add a separate bail. THE PIECE HAS EXACTLY ONE HOLE, the one in image 1: never add a second hole, a second ring or a loop anywhere else, and never punch a hole through the portrait.`
       : `The plate is a ${PENDANT_SHAPES[request.shape].label.toLowerCase()} shape. Keep its exact outline and proportions. Add a small matching ${material.label.toLowerCase()} bail (hanging loop) attached at the top centre so it can hang on a chain.`;
 
   const rimHex =
