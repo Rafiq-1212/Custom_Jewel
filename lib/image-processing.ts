@@ -721,6 +721,54 @@ const JAW_CUT_FEATHER = 0.02;
 const HAIR_LUMINANCE = 90;
 
 /**
+ * A fall of hair is at least this wide, as a fraction of the head's width.
+ * Anything narrower is a sideburn, the strip in front of an ear or a shadow
+ * down the neck. Measured on two photos: the stray strips came out at 1% of
+ * the head and a woman's two hair falls at 19% and 11%, so the line sits
+ * well clear of both.
+ */
+const HAIR_MIN_WIDTH = 0.06;
+
+/** Clears every piece of `hair` narrower than `HAIR_MIN_WIDTH` of `headWidth`. */
+function keepOnlyWideHair(hair: Uint8Array, width: number, height: number, headWidth: number): void {
+  const minWidth = headWidth * HAIR_MIN_WIDTH;
+  const seen = new Uint8Array(width * height);
+  const stack: number[] = [];
+  for (let start = 0; start < hair.length; start++) {
+    if (!hair[start] || seen[start]) continue;
+    const piece: number[] = [];
+    let left = width;
+    let right = 0;
+    seen[start] = 1;
+    stack.push(start);
+    while (stack.length) {
+      const p = stack.pop() as number;
+      piece.push(p);
+      const x = p % width;
+      const y = (p - x) / width;
+      if (x < left) left = x;
+      if (x > right) right = x;
+      const visit = (q: number) => {
+        if (q < 0 || q >= hair.length || seen[q] || !hair[q]) return;
+        seen[q] = 1;
+        stack.push(q);
+      };
+      if (x > 0) visit(p - 1);
+      if (x < width - 1) visit(p + 1);
+      if (y > 0) visit(p - width);
+      if (y < height - 1) visit(p + width);
+    }
+    const pieceWidth = right - left + 1;
+    if (pieceWidth < minWidth) {
+      for (const p of piece) hair[p] = 0;
+    }
+    console.info(
+      `[sketch] hair below the cut: piece ${pieceWidth} px wide (${((100 * pieceWidth) / headWidth).toFixed(0)}% of the head) ${pieceWidth < minWidth ? 'removed' : 'kept'}`,
+    );
+  }
+}
+
+/**
  * Whites out everything below a jawline found by lib/jawline.ts, leaving
  * the head alone: face, ears, beard, earrings, and hair down to the chin.
  *
@@ -761,6 +809,19 @@ export async function cutBelowJawline(
   const margin = height * JAW_CUT_MARGIN;
   const feather = Math.max(1, height * JAW_CUT_FEATHER);
   const points = jaw.map((p) => ({ x: p.x * (width - 1), y: p.y * (height - 1) }));
+  let minX = width;
+  let maxX = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (luminanceAt(y * width + x) >= WHITE_THRESHOLD) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+  }
+  if (maxX <= minX) {
+    minX = 0;
+    maxX = width - 1;
+  }
   const firstX = points[0].x;
   const lastX = points[points.length - 1].x;
   const chinY = Math.max(...points.map((p) => p.y)) + margin;
@@ -821,6 +882,14 @@ export async function cutBelowJawline(
     visit(x, y + 1);
     visit(x, y - 1);
   }
+
+  // Only a real fall of hair is allowed to hang below the cut. Anything
+  // narrow that happens to be dark and joined to the hair — a sideburn, the
+  // strip in front of an ear, a shadow down the side of the neck — is not
+  // hair hanging down, and letting it through put a stray line beside the
+  // jaw on a face pendant, running from the ear to chin level. Each piece is
+  // measured and the narrow ones go.
+  keepOnlyWideHair(hair, width, height, maxX - minX + 1);
 
   for (let x = 0; x < width; x++) {
     for (let y = Math.max(0, Math.ceil(cutFrom[x])); y < height; y++) {
