@@ -713,6 +713,134 @@ export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
+/** Left under the jawline so the chin and the tip of a beard are never shaved, as a fraction of the photo's height. */
+const JAW_CUT_MARGIN = 0.012;
+/** The cut fades to white over this fraction of the photo's height, so it leaves no edge for the ink filter to trace. */
+const JAW_CUT_FEATHER = 0.02;
+/** Pixels darker than this are hair (or beard) for the purposes of the cut. */
+const HAIR_LUMINANCE = 90;
+
+/**
+ * Whites out everything below a jawline found by lib/jawline.ts, leaving
+ * the head alone: face, ears, beard, earrings, and hair down to the chin.
+ *
+ * Between the jawline's two ends the cut follows the line itself, so it
+ * curves round the chin or the bottom of the beard. Outside them it holds
+ * the height of the nearer end, which sits at the ear lobe: that takes the
+ * neck behind the jaw, the shoulders and the collar.
+ *
+ * Hair is the exception out there. Cut at the lobe it ends ruler-straight,
+ * and the finish step inks that as a black block beside the face. So hair
+ * that hangs down from the head (dark pixels connected to dark pixels above
+ * the cut) runs on to the level of the chin and fades out there. Only
+ * connected hair: a dark collar or a black T-shirt is not joined to the hair
+ * from above and goes with the rest, and nothing at all survives below the
+ * chin.
+ *
+ * `keep` boxes (earrings hanging below the lobe) keep what is in them,
+ * except dark pixels, which are hair and follow the hair rule instead.
+ *
+ * `jaw` and `keep` are in fractions of the photo; `jaw` is sorted left to right.
+ */
+export async function cutBelowJawline(
+  photo: Buffer,
+  jaw: { x: number; y: number }[],
+  keep: { left: number; top: number; right: number; bottom: number }[] = [],
+): Promise<Buffer> {
+  const { data, info } = await sharp(photo)
+    .flatten({ background: '#ffffff' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const luminanceAt = (p: number) => {
+    const i = p * channels;
+    return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  };
+
+  const margin = height * JAW_CUT_MARGIN;
+  const feather = Math.max(1, height * JAW_CUT_FEATHER);
+  const points = jaw.map((p) => ({ x: p.x * (width - 1), y: p.y * (height - 1) }));
+  const firstX = points[0].x;
+  const lastX = points[points.length - 1].x;
+  const chinY = Math.max(...points.map((p) => p.y)) + margin;
+
+  const pad = width * 0.01;
+  const kept = keep.map((b) => ({
+    left: b.left * (width - 1) - pad,
+    right: b.right * (width - 1) + pad,
+    top: b.top * (height - 1) - pad,
+    bottom: b.bottom * (height - 1) + pad,
+  }));
+
+  // Where the cut starts in each column.
+  const cutFrom = new Float64Array(width);
+  let segment = 0;
+  for (let x = 0; x < width; x++) {
+    let lineY: number;
+    if (x <= firstX) lineY = points[0].y;
+    else if (x >= lastX) lineY = points[points.length - 1].y;
+    else {
+      while (segment < points.length - 2 && points[segment + 1].x < x) segment++;
+      const a = points[segment];
+      const b = points[segment + 1];
+      lineY = a.y + (b.y - a.y) * (b.x === a.x ? 0 : (x - a.x) / (b.x - a.x));
+    }
+    cutFrom[x] = lineY + margin;
+  }
+
+  // Hair hanging down outside the jaw: dark pixels reached from dark pixels
+  // just above the cut, down to the chin and no further.
+  const hair = new Uint8Array(width * height);
+  const stack: number[] = [];
+  const outside = (x: number) => x < firstX || x > lastX;
+  for (let x = 0; x < width; x++) {
+    if (!outside(x)) continue;
+    const y = Math.floor(cutFrom[x]) - 1;
+    if (y < 0 || y >= height) continue;
+    const p = y * width + x;
+    if (luminanceAt(p) < HAIR_LUMINANCE) {
+      hair[p] = 1;
+      stack.push(p);
+    }
+  }
+  while (stack.length) {
+    const p = stack.pop() as number;
+    const x = p % width;
+    const y = (p - x) / width;
+    const visit = (qx: number, qy: number) => {
+      if (qx < 0 || qx >= width || qy < 0 || qy >= height || !outside(qx)) return;
+      if (qy < cutFrom[qx] - 1 || qy > chinY) return;
+      const q = qy * width + qx;
+      if (hair[q] || luminanceAt(q) >= HAIR_LUMINANCE) return;
+      hair[q] = 1;
+      stack.push(q);
+    };
+    visit(x - 1, y);
+    visit(x + 1, y);
+    visit(x, y + 1);
+    visit(x, y - 1);
+  }
+
+  for (let x = 0; x < width; x++) {
+    for (let y = Math.max(0, Math.ceil(cutFrom[x])); y < height; y++) {
+      const p = y * width + x;
+      let toWhite = Math.min(1, (y - cutFrom[x]) / feather);
+      if (hair[p]) {
+        // Connected hair fades out at the chin instead of at the lobe.
+        toWhite = Math.max(0, Math.min(1, (y - (chinY - feather)) / feather));
+      } else if (luminanceAt(p) >= HAIR_LUMINANCE && kept.some((b) => x >= b.left && x <= b.right && y >= b.top && y <= b.bottom)) {
+        continue;
+      }
+      if (toWhite <= 0) continue;
+      const i = p * channels;
+      for (let c = 0; c < 3; c++) data[i + c] = Math.round(data[i + c] + (255 - data[i + c]) * toWhite);
+    }
+  }
+
+  return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
+}
+
 /**
  * Crop the AI's generous white margin to the actual artwork, then convert
  * every near-white pixel to transparent, ramping alpha across the threshold

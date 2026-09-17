@@ -3,8 +3,9 @@
  *
  *   1. Enhance (AI photo edit): remove the background, paint out anything
  *      that is not the subject, correct colour and exposure and sharpen
- *      facial detail. No drawing, and no re-posing. Face Pendant's framing
- *      is then cut on pixels (`cropPhotoToHead`), never by the model.
+ *      facial detail. No drawing, and no re-posing. Face Pendant is then
+ *      cut to the head on pixels, along a jawline located by a text call
+ *      (lib/jawline.ts), never by asking the image model to do it.
  *   2. Rough trace (lib/ink-filter.ts, no AI): a comic ink filter on the
  *      enhanced photo, so every line sits on the photo's real edges.
  *   3. Finish (AI): detailed line art from the rough trace, keeping its line
@@ -25,7 +26,8 @@ import {
   type GenerateImageFromImageInput,
   type GenerateImageResult,
 } from './gemini';
-import { cropPhotoToHead } from './image-processing';
+import { cropPhotoToHead, cutBelowJawline } from './image-processing';
+import { findJawline } from './jawline';
 import { roughInkTrace } from './ink-filter';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
@@ -134,6 +136,22 @@ async function enhance(input: SketchInput, retry: boolean): Promise<GenerateImag
   return { bytes: checked.image, mimeType: 'image/png' };
 }
 
+/**
+ * Face Pendant: the head alone. The jawline is asked of a text model
+ * (lib/jawline.ts), which works whatever the photo looks like; only if that
+ * fails are the pixel heuristics used, which need shoulders in the frame
+ * and a full beard to find anything.
+ */
+async function cutToHead(edited: Buffer, mimeType: string): Promise<Buffer> {
+  const jaw = await findJawline(edited, mimeType);
+  if (jaw) {
+    console.info(`[sketch] face: jawline found (${jaw.points.length} points, ${jaw.keep.length} earrings kept), cutting below it`);
+    return cutBelowJawline(edited, jaw.points, jaw.keep);
+  }
+  console.info('[sketch] face: no usable jawline, using the pixel cut');
+  return cropPhotoToHead(edited);
+}
+
 export async function createSketch(input: SketchInput): Promise<Buffer> {
   let enhanced = await enhance(input, false);
   if (HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(enhanced))) {
@@ -142,7 +160,7 @@ export async function createSketch(input: SketchInput): Promise<Buffer> {
   }
 
   const edited = Buffer.from(enhanced.bytes);
-  const photo = CROP_TO_HEAD_CATEGORIES.has(input.category) ? await cropPhotoToHead(edited) : edited;
+  const photo = CROP_TO_HEAD_CATEGORIES.has(input.category) ? await cutToHead(edited, enhanced.mimeType) : edited;
 
   const rough = await roughInkTrace(photo);
 

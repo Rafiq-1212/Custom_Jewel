@@ -5,6 +5,14 @@ if (typeof window !== 'undefined') {
 }
 
 const MODEL_ID = 'gemini-3.1-flash-image';
+/**
+ * Text model for questions about a photo whose answer is data, not a picture
+ * (lib/jawline.ts). Thinking is switched off: measured on the jawline
+ * question it made no visible difference to the answer and took the call
+ * from about 8 seconds to about 3.
+ */
+const TEXT_MODEL_ID = 'gemini-3.6-flash';
+const TEXT_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Per request. A 4K finish from the sketch pipeline takes around a minute, sometimes longer. */
 const REQUEST_TIMEOUT_MS = 150_000;
@@ -178,4 +186,56 @@ export async function generateImageFromImage(
     bytes: Buffer.from(imagePart.inlineData.data, 'base64'),
     mimeType: imagePart.inlineData.mimeType || 'image/png',
   };
+}
+
+export interface GenerateJsonFromImageInput {
+  prompt: string;
+  image: { bytes: Uint8Array; mimeType: string };
+  /** A response schema in the SDK's own format; the answer is parsed JSON that follows it. */
+  schema: Record<string, unknown>;
+}
+
+/**
+ * One image in, JSON out. Never returns a picture, so it cannot alter the
+ * photo it is asked about. Throws the same typed errors as the image call.
+ */
+export async function generateJsonFromImage(input: GenerateJsonFromImageInput): Promise<unknown> {
+  const ai = getClient();
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: TEXT_MODEL_ID,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: input.prompt },
+            { inlineData: { mimeType: input.image.mimeType, data: Buffer.from(input.image.bytes).toString('base64') } },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: input.schema,
+        temperature: 0,
+        thinkingConfig: { thinkingBudget: 0 },
+        httpOptions: { timeout: TEXT_REQUEST_TIMEOUT_MS },
+      },
+    });
+  } catch (error) {
+    throw classifyThrown(error);
+  }
+
+  const usage = response.usageMetadata;
+  if (usage) {
+    console.info(`[gemini] usage input=${usage.promptTokenCount ?? 0} output=${usage.candidatesTokenCount ?? 0} (TEXT) thinking=${usage.thoughtsTokenCount ?? 0} model=${TEXT_MODEL_ID}`);
+  }
+
+  const text = response.text;
+  if (!text) throw new GeminiGenerationError('EMPTY_RESPONSE', 'The text model returned nothing.');
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new GeminiGenerationError('REQUEST_FAILED', 'The text model did not return valid JSON.');
+  }
 }
