@@ -71,8 +71,27 @@ async function rasterizePlate(
   return sharp(Buffer.from(svg)).resize(width, height).png().toBuffer();
 }
 
-/** Bounding box of every pixel whose alpha is above zero, padded, and clamped to the canvas. */
-async function paddedAlphaBox(png: Buffer): Promise<{ left: number; top: number; width: number; height: number }> {
+interface CropBox {
+  /** The crop, in the coordinates of a canvas that has been extended by `pad` on all four sides. */
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  pad: number;
+}
+
+/**
+ * Bounding box of every pixel whose alpha is above zero, with the same
+ * padding on all four sides.
+ *
+ * The padding used to be clamped to the canvas, which quietly made it
+ * lopsided: a tall Cut to shape piece runs to the bottom of the viewBox, so
+ * its design came out with 204 px of cream above and beside it and 70 px
+ * below. The model treated that as a picture that was already cropped and
+ * cropped it further, cutting the beard off the bottom of the pendant. So
+ * the canvas is extended instead of the padding being trimmed.
+ */
+async function paddedAlphaBox(png: Buffer): Promise<CropBox> {
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let minX = info.width;
   let minY = info.height;
@@ -88,16 +107,32 @@ async function paddedAlphaBox(png: Buffer): Promise<{ left: number; top: number;
       }
     }
   }
-  if (maxX < 0) return { left: 0, top: 0, width: info.width, height: info.height };
+  if (maxX < 0) return { left: 0, top: 0, width: info.width, height: info.height, pad: 0 };
   const pad = Math.round(Math.max(maxX - minX, maxY - minY) * CROP_PADDING);
-  const left = Math.max(0, minX - pad);
-  const top = Math.max(0, minY - pad);
+  // In the extended canvas every coordinate shifts by `pad`, so the crop
+  // starts at the bounding box's own minimum and is 2 * pad larger.
   return {
-    left,
-    top,
-    width: Math.min(info.width, maxX + pad + 1) - left,
-    height: Math.min(info.height, maxY + pad + 1) - top,
+    left: minX,
+    top: minY,
+    width: maxX - minX + 1 + pad * 2,
+    height: maxY - minY + 1 + pad * 2,
+    pad,
   };
+}
+
+/** Grows `png` by `box.pad` on every side with `background`, then takes the crop. */
+async function padAndCrop(png: Buffer, box: CropBox, background: string): Promise<Buffer> {
+  const extended =
+    box.pad === 0
+      ? png
+      : await sharp(png)
+          .extend({ top: box.pad, bottom: box.pad, left: box.pad, right: box.pad, background })
+          .png()
+          .toBuffer();
+  return sharp(extended)
+    .extract({ left: box.left, top: box.top, width: box.width, height: box.height })
+    .png()
+    .toBuffer();
 }
 
 export interface MockupImages {
@@ -144,8 +179,8 @@ export async function buildMockupImages(request: DesignRequest): Promise<MockupI
     .flatten({ background: BACKGROUND })
     .png()
     .toBuffer();
-  const composite = await sharp(fullComposite).extract(box).png().toBuffer();
-  const engraving = await sharp(artwork.png).flatten({ background: '#ffffff' }).extract(box).png().toBuffer();
+  const composite = await padAndCrop(fullComposite, box, BACKGROUND);
+  const engraving = await padAndCrop(await sharp(artwork.png).flatten({ background: '#ffffff' }).png().toBuffer(), box, '#ffffff');
   return { composite, engraving };
 }
 
@@ -184,6 +219,7 @@ ${rim ? `- ${rim}\n` : ''}- Nothing else may be added to the piece.
 - ENGRAVING DETAIL (most important): reproduce the engraving line for line from image 2. ${material.mockupEngraving} Every black area in image 2 is deeply engraved and must look DARK in the photo: hair, beards, eyebrows, eyes, shading and clothing patterns keep all their dark strokes and dark masses, at the same thickness and the same density as image 2. A mass of hair stays a mass, not a few loose strands. Never lighten, thin out, fade or polish over any engraved area, and never replace a dark hair area with plain shiny metal. Only the white areas of image 2 are bare metal.
 - The engraving must remain EXACTLY as shown: the same faces, the same line-art, the same position and size on the plate. Do not redraw, restyle, beautify, sharpen or move the portrait. Do not add any text, dates, names, hallmarks, purity stamps (no "925", no "22k"), gems or extra decoration anywhere on the piece.
 - Present it front-facing and centred, lying flat on a plain, soft, light cream studio background with a gentle shadow, like a catalogue product shot.
+- Show the WHOLE piece, with clear background all the way around it. Never crop it, never let any part of it run off an edge of the picture, and never zoom in on it: the top of the bail and the very bottom of the plate both have to be inside the frame with room to spare.
 
 Output only the rendered image.`;
 }
