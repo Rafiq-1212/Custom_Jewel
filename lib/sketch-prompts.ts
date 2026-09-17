@@ -76,6 +76,8 @@ const FINISH_FAITHFUL = `FAITHFULNESS (most important):
 
 export const FINISH_PROMPT = `You are given two images of the same people. Image 1 is the photograph. Image 2 is a rough automatic ink trace of that exact photograph; its lines and dark areas are in the correct positions but they are blotchy and broken. Small isolated specks, dots and speckled skin texture in image 2 are noise from the automatic trace: ignore them, keep skin clean, and never draw them as pores, moles, dots or marks.
 
+If the body has been cut away and only a head is left, this is a HEAD-ONLY portrait: draw the hair, face, ears, beard and neck, and nothing else. Any scrap of clothing still showing beside the neck — the corner of a collar, a strip of shoulder, a piece of a T-shirt with nothing above it — is left over from that removal, not part of the portrait, and you leave it out completely rather than drawing it.
+
 Produce the finished ink artwork for laser engraving on a metal pendant: redraw image 2, using image 1 to understand what each line and dark area is. Keep every line and every dark area in the SAME position as image 2 and the same overall composition and crop. Image 2 shows WHERE the ink goes, not how it is drawn: its solid blotches are a defect of the automatic trace, and each one becomes a patch of separate strokes with white between them. DO NOT SIMPLIFY and DO NOT DROP DETAIL, but never fill an area in solid.
 
 This artwork is cut into metal with a laser, one stroke at a time, so a stroke that cannot be followed by eye cannot be cut either: thin, separate, evenly weighted strokes everywhere.

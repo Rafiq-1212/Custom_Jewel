@@ -288,20 +288,34 @@ async function liftBackgroundToWhite(input: Buffer): Promise<Buffer> {
  * Measured on the photo, where the subject is a solid silhouette against
  * flat white, instead of on hatched line art.
  *
- * `computeFaceCropBox` above is not the right test here. It looks for a
- * cylindrical neck plateau because it has to survive being handed a picture
- * that is *already* head-only, where cutting at the jaw would shave the
- * chin. This photo is different: it still has the body, and a neck that
- * flares straight into shoulders never forms that plateau. So the rule here
- * is the simpler one — cut at the jaw, but only once there is clearly a body
- * below it to cut off.
+ * `computeFaceCropBox` above is not the right test here: it looks for a
+ * cylindrical neck plateau, because it has to survive being handed a picture
+ * that is *already* head-only, where cutting at the jaw would shave the chin.
+ *
+ * Nor is a narrow neck the right thing to look for on a photo. Measured on
+ * six different photo edits of the same portrait: on a head turned to one
+ * side, with hair and a beard, the silhouette does not pinch at the neck at
+ * all — it holds the head's own width and then simply STEPS OUT into the
+ * shoulders. An earlier version hunted for the narrowest row between head
+ * and shoulders and, on a frame where the head sat high and small, found a
+ * dip inside the chest instead and cut the man in half.
+ *
+ * So what is measured here is that step. The head is a run of roughly
+ * constant width near the top; the body is where the silhouette leaves that
+ * width behind and stays out. The cut goes at the last row still at head
+ * width. A picture that is already head-only never steps out — its width
+ * only tapers away below the chin — so it is returned untouched.
  */
-/** Shoulders have to be at least this much wider than the head to count as a body. */
-const SHOULDER_FLARE_RATIO = 1.1;
-/** The neck has to be at least this much narrower than the shoulders to count as a neck. */
-const NECK_PINCH_RATIO = 0.85;
-/** Rows within this much of the narrowest one are still "the neck". */
-const NECK_TOLERANCE = 1.05;
+/** The head's own width, taken as the median over this band of the subject. */
+const HEAD_BAND = { from: 0.1, to: 0.35 };
+/** Wider than the head by this much, and the silhouette has reached the shoulders. */
+const SHOULDER_STEP_RATIO = 1.25;
+/** The step has to hold for this fraction of the subject's height to count (not a stray bulge). */
+const SHOULDER_SUSTAIN = 0.04;
+/** Rows within this much of the head's width still count as the head. */
+const HEAD_TOLERANCE = 1.05;
+/** Never cut higher than this fraction of the subject: above it, something is wrong with the measurement. */
+const MIN_HEAD_FRACTION = 0.3;
 
 export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
   const { data, info } = await sharp(photo)
@@ -334,60 +348,70 @@ export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
     }
   }
   if (topY === -1) return photo;
+  const content = bottomY - topY + 1;
+  if (content < 40) return photo;
 
-  // The head's widest point (hair and ears), searched in the upper part of
-  // the subject so a pair of shoulders can never be taken for the head.
-  const peakSearchEnd = topY + Math.round((bottomY - topY + 1) * 0.5);
-  let peakWidth = 0;
-  let peakY = topY;
-  for (let y = topY; y <= peakSearchEnd; y++) {
-    if (width[y] > peakWidth) {
-      peakWidth = width[y];
-      peakY = y;
+  // Smoothed, so a stray wisp of hair or an earring cannot be read as a step.
+  const span = Math.max(1, Math.round(content * 0.01));
+  const smooth = new Float64Array(info.height);
+  for (let y = topY; y <= bottomY; y++) {
+    let sum = 0;
+    let count = 0;
+    for (let i = -span; i <= span; i++) {
+      const yy = y + i;
+      if (yy < topY || yy > bottomY) continue;
+      sum += width[yy];
+      count++;
     }
+    smooth[y] = sum / count;
   }
-  if (peakWidth === 0) return photo;
 
-  // The shoulders: the widest row low down. A picture that is already
-  // head-only has nothing wider than the head there, and is left alone.
-  let shoulderWidth = 0;
+  // The head's width: the median of the band below the crown (where the
+  // silhouette is still ramping up) and above the shoulders.
+  const bandFrom = topY + Math.round(content * HEAD_BAND.from);
+  const bandTo = topY + Math.round(content * HEAD_BAND.to);
+  const band: number[] = [];
+  for (let y = bandFrom; y <= bandTo; y++) band.push(smooth[y]);
+  if (band.length === 0) return photo;
+  band.sort((a, b) => a - b);
+  const headWidth = band[Math.floor(band.length / 2)];
+  if (headWidth <= 0) return photo;
+
+  // Where the silhouette steps out to the shoulders and stays out.
+  const step = headWidth * SHOULDER_STEP_RATIO;
+  const sustain = Math.max(4, Math.round(content * SHOULDER_SUSTAIN));
   let shoulderY = -1;
-  for (let y = peakSearchEnd + 1; y <= bottomY; y++) {
-    if (width[y] > shoulderWidth) {
-      shoulderWidth = width[y];
+  for (let y = bandTo + 1; y <= bottomY - sustain; y++) {
+    if (smooth[y] <= step) continue;
+    let held = true;
+    for (let i = 1; i <= sustain && held; i++) if (smooth[y + i] <= step) held = false;
+    if (held) {
       shoulderY = y;
+      break;
     }
   }
-  if (shoulderY === -1 || shoulderWidth < peakWidth * SHOULDER_FLARE_RATIO) return photo;
+  // No step out: this picture is already head-only (its width just tapers
+  // below the chin), so there is nothing to remove.
+  if (shoulderY === -1) return photo;
 
-  // The neck is the waist between the two: the narrowest row in between.
-  // Measured this way rather than as "the first row narrower than the jaw",
-  // because on a head turned to one side the neck is barely narrower than
-  // the head itself (measured: 259 px against a 290 px head), while it is
-  // always clearly narrower than the shoulders below it.
-  let neckWidth = Infinity;
-  for (let y = peakY + 1; y < shoulderY; y++) {
-    if (width[y] > 0 && width[y] < neckWidth) neckWidth = width[y];
-  }
-  if (neckWidth === Infinity || neckWidth > shoulderWidth * NECK_PINCH_RATIO) return photo;
-
-  // The LAST row of that waist, not the first: the first one can still be
-  // the bottom of a beard, and leaving a little neck behind costs nothing —
-  // `computeFaceCropBox` trims it off the finished artwork later.
-  let neckY = -1;
-  for (let y = peakY + 1; y < shoulderY; y++) {
-    if (width[y] > 0 && width[y] <= neckWidth * NECK_TOLERANCE) neckY = y;
-  }
-  if (neckY === -1) return photo;
+  // Back up to the last row that is still at head width — the jaw, above
+  // where the shoulders start to appear.
+  let cutY = -1;
+  for (let y = bandTo; y < shoulderY; y++) if (smooth[y] <= headWidth * HEAD_TOLERANCE) cutY = y;
+  if (cutY === -1) cutY = shoulderY;
+  if (cutY - topY < content * MIN_HEAD_FRACTION) return photo;
+  if (cutY >= bottomY) return photo;
 
   // Painted white rather than cropped away, so the head keeps the natural
   // silhouette of its own chin and beard instead of ending on a straight
   // cut, exactly as it did when the photo-edit prompt still did this.
-  for (let y = neckY + 1; y < info.height; y++) {
+  for (let y = cutY + 1; y < info.height; y++) {
     data.fill(255, y * info.width * info.channels, (y + 1) * info.width * info.channels);
   }
 
-  console.info(`[sketch] whited out the body below the neck (row ${neckY} of ${info.height})`);
+  console.info(
+    `[sketch] cut the body off below the head (row ${cutY} of ${info.height}, head width ${Math.round(headWidth)}, shoulders at ${shoulderY})`,
+  );
   return sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
     .png()
     .toBuffer();
