@@ -39,13 +39,13 @@ export function buildEnhancePrompt(category: CategoryId): string {
   const keep = KEEP_BY_CATEGORY[category] ?? KEEP_DEFAULT;
   return `Edit this photograph. This is a PHOTO EDIT, not an illustration: the result must still be a real photograph.
 
-1. Remove the background completely and replace it with flat pure white (#FFFFFF). That includes walls, furniture, vehicles, car doors, windows, plants, sky and any other object that is not part of the people (or pet).
+1. Remove the background completely and replace it with flat pure white (#FFFFFF): walls, furniture, vehicles, car doors, windows, plants, sky, and anything else BEHIND or BESIDE the people (or pet). Anything a person is wearing, holding or carrying counts as part of them and STAYS exactly as it is: a handbag, a clutch, a purse, a bag strap across a shoulder, glasses, a watch, a phone, a bouquet, a garland, a walking stick, a baby. Do not tidy the picture by removing them.
 2. ${keep}
 3. Enhance what remains like a professional retoucher: even out the exposure, correct the colour and white balance, lift the shadows on the faces, and bring out facial detail (eyes, eyebrows, lips, beard and hair texture) with crisp natural sharpening and good local contrast.
 4. OPEN UP THE DARK AREAS, and raise the fine detail everywhere. Nothing in the picture may stay crushed to black: a navy blouse, a dark saree, a black jacket, a shadowed sleeve and dark hair must all show what they are made of — the weave, the folds, the embroidery, the print, the individual strands. Lift those shadows until that texture is plainly visible, while keeping the colours natural. At the same time raise the micro-contrast on fine things (embroidery, lace, jewellery, chains, fabric pattern, eyelashes, hair strands, stubble) so each one is separate and sharp rather than a smudge. This picture is about to be traced line by line: every detail that is not visible here is lost for good.
 5. Do NOT change anyone's face, expression, pose, head angle or tilt, gaze direction, proportions, hairstyle, skin marks or clothing. Do not beautify, smooth skin, slim, reshape or restyle. Do not move, resize or re-crop what you keep; it must stay exactly where it is in the frame.
 6. NEVER re-pose anyone. A head photographed at an angle stays at that angle: do not turn a face towards the camera, do not straighten a tilted head, do not re-render the head from another viewpoint. If you cannot retouch a part without redrawing it, leave that part exactly as it is.
-7. Never remove or hide a part of a person you are keeping — an arm, a hand, a finger, an ear, a piece of jewellery.
+7. Never remove or hide a part of a person you are keeping — an arm, a hand, a finger, an ear, a piece of jewellery, or anything they are wearing, holding or carrying. Where you take the background away, leave plain white in its place: never paint clothing, skin, fabric or pattern over the gap to tidy it up.
 8. Do not draw, sketch, cartoonise or add anything. No text, no watermark.
 
 Output only the edited photograph.`;
@@ -92,7 +92,10 @@ DETAIL (the artwork is judged on this, but all of it on white skin — see FACES
 - Ears: the inner folds, with a couple of strokes in the deepest part only.
 - Arms and hands: draw EVERY arm, hand and finger that is visible in image 1, with the fingernails, knuckles and the creases of the fingers. A hand resting on a shoulder, an arm around a back, a hand holding another hand: these are the point of the picture and must never be left out, merged into the clothing behind them or hidden under a dark area.
 - Jewellery: necklaces, chains, earrings, bangles, a watch, a maang tikka, drawn bead by bead and link by link as image 1 shows them.
+- Anything held or worn: a handbag with its handles and clasp, a clutch, a bag strap running over a shoulder, glasses, a garland, a bouquet, a shawl over an arm. These are part of the picture and often the point of it. Draw every one of them as image 1 shows it, and never let the clothing behind one close over its place.
 - Clothing: every fold, crinkle, seam, collar edge and button.
+
+NEVER INVENT ANYTHING. Draw only what image 1 actually shows. No pattern, embroidery, weave, print, jewellery, buttons, straps or folds that are not in the photograph, and nothing added to fill an area you are unsure about — an area drawn plain is right, an area filled with something made up is not. If a person is holding or wearing something, that is what goes there: never replace it with fabric or pattern of your own.
 
 NO STRAY LINES. Every line you draw has to be something real in image 1: an edge, a feature, a fold, a strand. Do not double an outline that is already there, do not run a line off into empty white, do not leave a stroke hanging in the air with nothing at either end, and do not sketch in a line that has no counterpart in the photo. Where a line ends, it ends cleanly on another line or on the white.
 
