@@ -19,7 +19,6 @@
  */
 
 import { PENDANT_SHAPES, type PendantTransform, type ShapeId } from './pendant-shapes';
-import { flattenPath } from './svg-path-flatten';
 
 export interface Point {
   x: number;
@@ -216,13 +215,6 @@ export interface PendantGeometry {
    * doesn't have — the traced boundary itself is the cutting boundary.
    */
   hasDecorativeRim: boolean;
-  /**
-   * The plate without its hanging ring: what the artwork is clipped to and
-   * what a decorative rim band follows. `outerPath` is what gets CUT, ring
-   * and hole included, so clipping the engraving to it would let the
-   * portrait run up into the hanging tab.
-   */
-  bodyPath: string;
   label: string;
 }
 
@@ -241,151 +233,16 @@ export interface ResolvePendantGeometryInput {
  * all call this and then differ only in *how* they rasterize the same paths
  * — never in what the paths are.
  */
-/* -------------------------------------------------------------------------- */
-/* Hanging ring for the catalogue shapes                                      */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Outer radius of the hanging ring, in viewBox units. Fixed rather than a
- * fraction of the plate, because it is a physical feature: every catalogue
- * pendant is cut from the same sheet at roughly the same size and hangs on
- * the same chain. As a fraction of the WIDTH (which is what Cut to shape
- * uses, its outline having no fixed size) a Bar pendant's ring came out
- * 2.5 units across with a hole under a millimetre wide — too small to thread
- * anything through. At the export's default 25 mm width this is a 3 mm tab
- * with a 1.65 mm hole, the same as Cut to shape gives a piece that size, and
- * it fits inside the 21 units of headroom every shape leaves above itself.
- */
-const SHAPE_RING_OUTER = 6;
-/** The ring's hole, as a fraction of its outer radius. */
-const SHAPE_RING_HOLE_RATIO = 0.55;
-/** How far the ring's bottom sinks below the plate's edge, as a fraction of its radius, so the two are one piece. */
-const SHAPE_RING_ATTACH_DEPTH = 0.35;
-const SHAPE_RING_SEGMENTS = 72;
-/** Columns across the ring's footprint tested for where it first touches the plate. */
-const SHAPE_RING_CONTACT_SAMPLES = 64;
-
-/** The highest point of the outline on the vertical line at `x`, or null if it does not reach there. */
-function topOfOutlineAt(polylines: Point[][], x: number): number | null {
-  let top: number | null = null;
-  const consider = (y: number) => {
-    if (top === null || y < top) top = y;
-  };
-  for (const line of polylines) {
-    for (let i = 0; i < line.length; i++) {
-      const a = line[i];
-      const b = line[(i + 1) % line.length];
-      if (a.x === b.x) {
-        if (a.x === x) {
-          consider(a.y);
-          consider(b.y);
-        }
-        continue;
-      }
-      const from = Math.min(a.x, b.x);
-      const to = Math.max(a.x, b.x);
-      if (x < from || x > to) continue;
-      consider(a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x));
-    }
-  }
-  return top;
-}
-
-/** Twice the area enclosed, signed: positive and negative wind opposite ways. */
-function signedAreaOf(polylines: Point[][]): number {
-  let total = 0;
-  for (const line of polylines) {
-    for (let i = 0; i < line.length; i++) {
-      const a = line[i];
-      const b = line[(i + 1) % line.length];
-      total += a.x * b.y - b.x * a.y;
-    }
-  }
-  return total;
-}
-
-function circleSubpath(cx: number, cy: number, r: number, clockwise: boolean): string {
-  const points: Point[] = [];
-  for (let i = 0; i < SHAPE_RING_SEGMENTS; i++) {
-    const theta = ((clockwise ? i : -i) / SHAPE_RING_SEGMENTS) * Math.PI * 2;
-    points.push({ x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) });
-  }
-  return pointsToPath(points);
-}
-
-/**
- * A hanging ring for a catalogue shape: a round tab at the top centre with a
- * hole in it, cut from the same sheet, exactly like the one Cut to shape
- * gets. Returned as two subpaths to append to the shape's own path.
- *
- * Until this existed the shaped pendants had no hanging feature in the
- * geometry at all — the bail in the product photo was invented by the image
- * model, and the SVG, DXF and 3DM that go to the workshop came out as a bare
- * plate with nowhere to put a chain.
- *
- * The ring is sunk until its bottom is inside the plate, so the two are one
- * piece. On a heart that puts it in the cleft between the lobes, which is
- * where a heart hangs from anyway.
- */
-function hangingRingPath(shapePath: string): string {
-  const outline = flattenPath(shapePath);
-  if (outline.length === 0) return '';
-  let minX = Infinity;
-  let maxX = -Infinity;
-  for (const line of outline) {
-    for (const p of line) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-    }
-  }
-  if (!Number.isFinite(minX) || maxX <= minX) return '';
-
-  const cx = (minX + maxX) / 2;
-  const outer = SHAPE_RING_OUTER;
-
-  // Rest the ring on the outline, then sink it. Where a circle first touches
-  // a shape is not under its centre unless the shape's top is flat: on a
-  // heart the plate's high ground is the inner slope of the two lobes, and
-  // the circle meets those with its SIDES, while its lowest point hangs over
-  // the cleft with nothing under it. Placing it by the top point alone (in
-  // either direction, the cleft or the lobes) left the ring hanging clear of
-  // the heart — a loose washer on the cutting bed, which the product photo
-  // then quietly drew as attached.
-  //
-  // So for each column across the ring's footprint, work out the centre
-  // height at which the circle would just touch the plate there, and take
-  // the first contact. The outline is intersected rather than searched for
-  // corner points: a straight edge is stored as its two ends, so a bar or an
-  // octagon has no point anywhere near the middle of its top at all.
-  let resting: number | null = null;
-  for (let i = 0; i <= SHAPE_RING_CONTACT_SAMPLES; i++) {
-    const dx = -outer + (2 * outer * i) / SHAPE_RING_CONTACT_SAMPLES;
-    const top = topOfOutlineAt(outline, cx + dx);
-    if (top === null) continue;
-    const touch = top - Math.sqrt(Math.max(0, outer * outer - dx * dx));
-    if (resting === null || touch < resting) resting = touch;
-  }
-  if (resting === null) return '';
-
-  const cy = resting + outer * SHAPE_RING_ATTACH_DEPTH;
-  // Nonzero winding: the tab must wind with the plate to join it, the hole
-  // against the tab to be a hole. The shape paths are hand-written arcs, so
-  // their direction is measured rather than assumed.
-  const clockwise = signedAreaOf(outline) > 0;
-  return `${circleSubpath(cx, cy, outer, clockwise)} ${circleSubpath(cx, cy, outer * SHAPE_RING_HOLE_RATIO, !clockwise)}`;
-}
-
 export function resolvePendantGeometry(input: ResolvePendantGeometryInput): PendantGeometry {
   const { designType, shape, engravingArea, contour, transform } = input;
 
   if (designType === 'standard') {
     const shapeDef = PENDANT_SHAPES[shape];
     return {
-      outerPath: `${shapeDef.path} ${hangingRingPath(shapeDef.path)}`.trim(),
+      outerPath: shapeDef.path,
       engravingArea,
       fitMode: 'cover',
       hasDecorativeRim: true,
-      bodyPath: shapeDef.path,
       label: shapeDef.label,
     };
   }
@@ -412,9 +269,6 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
     engravingArea: EDGE_CUT_AREA,
     fitMode: 'contain',
     hasDecorativeRim: false,
-    // Cut to shape has no separate body: its outline already includes the
-    // ring, and the artwork has always been clipped to the whole thing.
-    bodyPath: outerPath,
     label: 'Cut to shape',
   };
 }

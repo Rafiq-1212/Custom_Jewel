@@ -199,7 +199,7 @@ export async function renderTransformedArtwork(
 
   // Multiply alpha by the shape mask: this is the actual clip. Nothing here
   // depends on SVG image embedding, so the bug above cannot recur.
-  const mask = await rasterizeShapeMask(geometry.bodyPath, canvasWidth, canvasHeight);
+  const mask = await rasterizeShapeMask(geometry.outerPath, canvasWidth, canvasHeight);
   const pixels = placed.data;
   const channels = placed.info.channels;
   for (let i = 0, m = 0; i < pixels.length; i += channels, m++) {

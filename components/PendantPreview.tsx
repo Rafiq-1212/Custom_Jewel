@@ -116,9 +116,6 @@ function paintDimensionalPendant(
 ): void {
   const materialDef = PENDANT_MATERIALS[material];
   const shapePath = new Path2D(geometry.outerPath);
-  // The artwork and the rim band stop at the plate's edge; the hanging ring
-  // is bare metal with a hole in it.
-  const bodyPath = new Path2D(geometry.bodyPath);
   const metalGradient = buildMetalGradient(ctx, materialDef);
 
   // Plate, with a soft drop shadow for depth.
@@ -153,7 +150,7 @@ function paintDimensionalPendant(
   // `engravingArea` is only ever a *target box* for the fit maths below —
   // where and how big to draw by default — never a clip boundary.
   ctx.save();
-  ctx.clip(bodyPath);
+  ctx.clip(shapePath);
 
   const { cx, cy, scale: finalScale } = placeArtwork(
     geometry,
@@ -200,10 +197,10 @@ function paintDimensionalPendant(
   const rimHex = RIM_COLORS[rimColor].hex;
   if (rimHex) {
     ctx.save();
-    ctx.clip(bodyPath);
+    ctx.clip(shapePath);
     ctx.strokeStyle = rimHex;
     ctx.lineWidth = RIM_BAND_WIDTH * 2;
-    ctx.stroke(bodyPath);
+    ctx.stroke(shapePath);
     ctx.restore();
   }
 
