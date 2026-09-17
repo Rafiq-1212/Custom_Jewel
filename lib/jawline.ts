@@ -51,22 +51,53 @@ export interface Jawline {
   keep: KeepBox[];
 }
 
-const JAW_PROMPT = `This photo shows one person's head. Trace the lower outline of the HEAD, the line where the head ends and the neck begins: start just under one ear lobe, follow the edge of the jaw (or the bottom edge of the beard, if the beard hangs lower than the jaw) down around the chin, and up to just under the other ear lobe. If an ear is hidden, start where the jaw meets the hairline on that side.
-Return 9 to 15 points in order from the left side of the image to the right, as [y, x] pairs normalised to 0-1000 (y down, x right).
+const JAW_PROMPT = `This photo shows one person's head. Everything below is on a 0-1000 scale (y down, x right).
+
+Return "head": the bounding box [ymin, xmin, ymax, xmax] of the WHOLE head — the top of the hair down to the lowest point of the chin (or of the beard, if there is one), and the outer edge of one ear or cheek across to the other. Nothing below the chin goes in it.
+
+Return "jaw": 9 to 15 points, in order from the left side of the image to the right, tracing the lower outline of the head — the line where the head ends and the neck begins. Start just under one ear lobe, follow the edge of the jaw (or the bottom edge of the beard, if the beard hangs lower than the jaw) down around the chin, and back up to just under the other ear lobe. If an ear is hidden, start where the jaw meets the hairline on that side. The line has to reach out to BOTH sides of the head: it runs from ear to ear, not from cheek to cheek, and its lowest point is the bottom of the chin, not the crease under the lip. On a baby, a child or a face seen from above the chin is soft and tucked in — follow the bottom edge of the cheeks and chin all the same.
 Also return "ear_lobes": the lowest point [y, x] of each ear lobe that is visible (zero, one or two points).
 Also return "earrings": one bounding box [ymin, xmin, ymax, xmax] on the same 0-1000 scale for each earring that hangs below the ear lobe, or an empty list if there are none.`;
 
 const JAW_SCHEMA = {
   type: Type.OBJECT,
   properties: {
+    head: { type: Type.ARRAY, items: { type: Type.NUMBER } },
     jaw: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
     ear_lobes: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
     earrings: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
   },
-  required: ['jaw', 'ear_lobes', 'earrings'],
+  required: ['head', 'jaw', 'ear_lobes', 'earrings'],
 };
 
 const MIN_POINTS = 5;
+/**
+ * The traced line has to reach across this much of the head's own width, or
+ * it is not a jawline. Verified on a baby photographed from above: the model
+ * traced a curve from one cheek to the other, under the lower lip, covering
+ * less than half the head. Cutting below that took the chin and both sides
+ * of the face off — the whole jaw, as reported. The head's box, asked for in
+ * the same breath, was accurate on every photo tried, so it is used both to
+ * catch a line like that and to cut in its place.
+ *
+ * The bar is set against the head's box, which includes the HAIR, and no
+ * jawline spans a head's hair: measured, a good line on a woman with her
+ * hair down covered 64% of the box and a good one on a bearded man 80%,
+ * against the bad line's 45%.
+ */
+const MIN_HEAD_SPAN = 0.35;
+/** The line's lowest point has to be at least this far down the head, or it is across the face rather than under it. */
+const MIN_CHIN_DEPTH = 0.6;
+/**
+ * How far down the head the line's two ENDS are pushed if they sit higher.
+ * Outside the line's span the cut holds the height of the nearer end, so an
+ * end up at eye level takes the side of the head off with it — that is what
+ * removed a baby's whole jaw. Clamped rather than rejected, because the
+ * depth is borderline on a baby (its ears sit low on a big cranium) and a
+ * line that flips between accepted and rejected from one run to the next is
+ * worse than one that is always nudged into a safe place.
+ */
+const MIN_END_DEPTH = 0.6;
 /** A jaw narrower than this fraction of the photo is not a jaw. */
 const MIN_SPAN = 0.08;
 /** The chin cannot sit in the top fifth of the photo. */
@@ -105,6 +136,49 @@ export async function findJawline(photo: Uint8Array, mimeType: string): Promise<
   if (points.length < MIN_POINTS) return null;
   if (points[points.length - 1].x - points[0].x < MIN_SPAN) return null;
   if (Math.max(...points.map((p) => p.y)) < MIN_CHIN_Y) return null;
+
+  // The head's box, used to judge the traced line and to replace it when it
+  // is wrong. A line that does not reach across the head, or whose lowest
+  // point is not near the bottom of it, is a line drawn across the face.
+  const box = (answer as { head?: unknown }).head;
+  const head =
+    Array.isArray(box) && box.length === 4 && box.every((n) => typeof n === 'number' && Number.isFinite(n))
+      ? { top: box[0] / 1000, left: box[1] / 1000, bottom: box[2] / 1000, right: box[3] / 1000 }
+      : null;
+  if (head && head.bottom > head.top && head.right > head.left) {
+    const headWidth = head.right - head.left;
+    const headHeight = head.bottom - head.top;
+    const span = points[points.length - 1].x - points[0].x;
+    const depth = (Math.max(...points.map((p) => p.y)) - head.top) / headHeight;
+    const ends = (Math.min(points[0].y, points[points.length - 1].y) - head.top) / headHeight;
+    console.info(
+      `[sketch] jawline covers ${((100 * span) / headWidth).toFixed(0)}% of the head's width, reaches ${(100 * depth).toFixed(0)}% down it, ends at ${(100 * ends).toFixed(0)}%`,
+    );
+
+    // Outside the line's span the cut holds the height of the nearer end, so
+    // an end that sits high takes the side of the head with it. Rather than
+    // throw the whole line away for that, the ends are pushed down to a
+    // depth that cannot cut into the head. A line that already ends under
+    // the ear lobes is untouched; one that ends up on a cheek is pulled
+    // down to the jaw's level, which still clears the neck beside it.
+    const floor = head.bottom - headHeight * (1 - MIN_END_DEPTH);
+    for (const end of [points[0], points[points.length - 1]]) {
+      if (end.y < floor) end.y = floor;
+    }
+
+    if (span < headWidth * MIN_HEAD_SPAN || depth < MIN_CHIN_DEPTH) {
+      console.info(
+        `[sketch] the traced jawline covers ${((100 * span) / headWidth).toFixed(0)}% of the head and sits ${(100 * depth).toFixed(0)}% down it; cutting straight under the head instead`,
+      );
+      return {
+        points: [
+          { x: head.left, y: head.bottom },
+          { x: head.right, y: head.bottom },
+        ],
+        keep: [],
+      };
+    }
+  }
 
   // "Just under the ear lobe" is the vaguest part of the traced line: asked
   // twice about one photo, its ends moved by 7-11% of the photo's height,

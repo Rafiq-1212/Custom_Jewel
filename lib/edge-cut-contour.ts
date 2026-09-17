@@ -109,8 +109,15 @@ const RING_MAX_SINK_RATIO = 0.6;
  * Verified on a two-head sketch with a gap: the hole came out 39% of the way
  * down the middle of the plate, where it reads as a second hole punched
  * through the artwork.
+ *
+ * Kept small on purpose. At 0.35 the ring still preferred the middle on two
+ * people standing close together, and the middle of two heads is the dip
+ * between them: the tab came out as a flat bar bridging the gap, which is
+ * the awkward thing the client noticed. At 0.12 it moves onto one of the
+ * heads (measured: from the centre to 26% of the width), where the fillet
+ * has a crown to taper into, and a single head still keeps it centred.
  */
-const RING_CENTRE_PULL = 0.35;
+const RING_CENTRE_PULL = 0.12;
 /** Radius of the round close that fillets the two joins between ring and outline, as a fraction of the ring radius. */
 const RING_FILLET_RATIO = 0.6;
 const RING_SEGMENTS = 72;
