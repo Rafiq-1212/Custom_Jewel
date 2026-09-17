@@ -343,6 +343,27 @@ const BEARD_ROW_SHARE = 0.4;
 /** Kept below the beard's last row so its tip is never shaved, as a fraction of the head's height. */
 const BEARD_MARGIN = 0.015;
 /**
+ * On a head turned to one side, the neck also shows BESIDE the beard, in the
+ * same rows as it, where no row cut can reach it. In the lower part of the
+ * head the beard runs along the jaw from the chin to the ear, so on that
+ * side everything outside the beard's edge is neck. The band starts below
+ * the ear (the lobe sits at about 55-58% of the head's height on the photo
+ * edits measured; 62% leaves a margin), and only the side that has skin
+ * beyond the beard is touched, so the far cheek is never nibbled.
+ */
+const NECK_BAND_START = 0.62;
+/** The beard's edge is where the dark pixels are dense over this window (fraction of width), not the last stray hair. */
+const BEARD_EDGE_WINDOW = 0.012;
+/** The edge is median-smoothed over this many rows (fraction of head height), so it cannot leave streaks. */
+const BEARD_EDGE_SMOOTHING = 0.02;
+/** Left untouched beyond the edge so the beard's outline survives, as a fraction of width. */
+const NECK_MARGIN = 0.008;
+/** The removal fades in sideways over this fraction of width, and downwards over this fraction of head height. */
+const NECK_FEATHER_X = 0.02;
+const NECK_FEATHER_Y = 0.06;
+/** The neck side has to have at least this many times more skin beyond the beard than the other side. */
+const NECK_SIDE_RATIO = 1.5;
+/**
  * A collar stands up beside the neck and survives the straight cut, joined
  * to the beard, so it cannot be separated as its own piece — measured: the
  * head and the collar come back as one connected blob. Colour does separate
@@ -422,6 +443,99 @@ function removeClothAtCut(data: Buffer, width: number, height: number, channels:
   }
   for (const p of found) data.fill(255, p * channels, p * channels + channels);
   if (found.length > 0) console.info(`[sketch] removed ${found.length} pixels of cloth beside the neck`);
+}
+
+/**
+ * Whites out the neck showing beside the beard on the turned side. Only
+ * called when a beard was found. See NECK_BAND_START for the reasoning.
+ */
+function removeNeckBesideBeard(data: Buffer, width: number, height: number, channels: number, topY: number, cutY: number): void {
+  const luminanceAt = (p: number) => {
+    const i = p * channels;
+    return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  };
+  const headHeight = cutY - topY;
+  const bandTop = topY + Math.round(headHeight * NECK_BAND_START);
+  if (bandTop >= cutY) return;
+
+  // Per row, the beard's dense-dark extent.
+  const window = Math.max(5, Math.round(width * BEARD_EDGE_WINDOW));
+  const half = Math.floor(window / 2);
+  const edgeLeft = new Int32Array(height).fill(-1);
+  const edgeRight = new Int32Array(height).fill(-1);
+  const dark = new Uint8Array(width);
+  for (let y = bandTop; y <= cutY; y++) {
+    for (let x = 0; x < width; x++) dark[x] = luminanceAt(y * width + x) < BEARD_DARK_LUMINANCE ? 1 : 0;
+    let run = 0;
+    for (let x = 0; x < window && x < width; x++) run += dark[x];
+    for (let x = half; x < width - half; x++) {
+      if (x > half) run += dark[x + half] - dark[x - half - 1];
+      if (run >= window * 0.5) {
+        if (edgeLeft[y] < 0) edgeLeft[y] = x;
+        edgeRight[y] = x;
+      }
+    }
+  }
+
+  // Median over neighbouring rows: a stray hair or a shadow on one row must
+  // not move the edge, or the removal comes out as horizontal streaks.
+  const radius = Math.max(2, Math.round(headHeight * BEARD_EDGE_SMOOTHING));
+  const median = (edges: Int32Array, y: number) => {
+    const values: number[] = [];
+    for (let k = -radius; k <= radius; k++) {
+      const yy = y + k;
+      if (yy >= bandTop && yy <= cutY && edges[yy] >= 0) values.push(edges[yy]);
+    }
+    if (values.length === 0) return -1;
+    values.sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
+  };
+  const smoothLeft = new Int32Array(height).fill(-1);
+  const smoothRight = new Int32Array(height).fill(-1);
+  for (let y = bandTop; y <= cutY; y++) {
+    smoothLeft[y] = median(edgeLeft, y);
+    smoothRight[y] = median(edgeRight, y);
+  }
+
+  // The neck is on whichever side has skin beyond the beard.
+  let beyondLeft = 0;
+  let beyondRight = 0;
+  for (let y = bandTop; y <= cutY; y++) {
+    if (smoothRight[y] < 0) continue;
+    for (let x = 0; x < width; x++) {
+      if (luminanceAt(y * width + x) >= WHITE_THRESHOLD) continue;
+      if (x > smoothRight[y]) beyondRight++;
+      if (x < smoothLeft[y]) beyondLeft++;
+    }
+  }
+  if (beyondLeft === 0 && beyondRight === 0) return;
+  // Only when one side is clearly the neck side. On the four photo edits
+  // measured the ratio was 3 to 1 or better; anything close to even means
+  // the picture is not the turned head this is written for, and nothing is
+  // safer than guessing at a cheek.
+  if (Math.max(beyondLeft, beyondRight) < Math.min(beyondLeft, beyondRight) * NECK_SIDE_RATIO) return;
+  const rightSide = beyondRight >= beyondLeft;
+
+  const margin = Math.round(width * NECK_MARGIN);
+  const featherX = Math.max(2, Math.round(width * NECK_FEATHER_X));
+  const featherY = Math.max(1, headHeight * NECK_FEATHER_Y);
+  let touched = 0;
+  for (let y = bandTop; y <= cutY; y++) {
+    const edge = rightSide ? smoothRight[y] : smoothLeft[y];
+    if (edge < 0) continue;
+    const fadeIn = Math.min(1, (y - bandTop) / featherY);
+    for (let x = 0; x < width; x++) {
+      const beyond = rightSide ? x - (edge + margin) : edge - margin - x;
+      if (beyond <= 0) continue;
+      const p = y * width + x;
+      if (luminanceAt(p) >= WHITE_THRESHOLD) continue;
+      const toWhite = Math.min(1, beyond / featherX) * fadeIn;
+      const i = p * channels;
+      for (let c = 0; c < 3; c++) data[i + c] = Math.round(data[i + c] + (255 - data[i + c]) * toWhite);
+      touched++;
+    }
+  }
+  if (touched > 0) console.info(`[sketch] removed ${touched} pixels of neck beside the beard (${rightSide ? 'right' : 'left'} side)`);
 }
 
 export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
@@ -550,6 +664,7 @@ export async function cropPhotoToHead(photo: Buffer): Promise<Buffer> {
   // Cloth first: the fade below would turn the cut row white, and the cloth
   // flood starts from that row.
   removeClothAtCut(data, info.width, info.height, info.channels, topY, cutY);
+  if (jawY !== -1) removeNeckBesideBeard(data, info.width, info.height, info.channels, topY, cutY);
   const feather = Math.max(1, Math.round((cutY - topY) * CUT_FEATHER));
   for (let y = Math.max(topY, cutY - feather); y <= cutY; y++) {
     const toWhite = 1 - (cutY - y) / feather;
