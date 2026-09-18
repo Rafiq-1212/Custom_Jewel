@@ -120,6 +120,8 @@ const RING_MAX_SINK_RATIO = 0.6;
 const RING_CENTRE_PULL = 0.12;
 /** Radius of the round close that fillets the two joins between ring and outline, as a fraction of the ring radius. */
 const RING_FILLET_RATIO = 0.6;
+/** How much wider than the ring the taper is where it meets the piece. */
+const RING_TAPER_WIDTH = 2.2;
 const RING_SEGMENTS = 72;
 /**
  * Curve simplification for the final trace: light, so the line keeps
@@ -185,6 +187,34 @@ function decodeImage(src: string): Promise<HTMLImageElement> {
     image.onerror = () => reject(new Error('Could not decode the sketch image.'));
     image.src = src;
   });
+}
+
+/**
+ * A tapered shoulder under the ring, so the tab flares down into the piece
+ * instead of meeting it as a flat-topped block. Widens from the ring's own
+ * radius at its centre to `RING_TAPER_WIDTH` times that at `baseY`, where it
+ * joins the outline — the shape a bail has on the catalogue pendants.
+ */
+function stampTaper(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  baseY: number,
+): void {
+  const from = Math.max(0, Math.round(cy));
+  const to = Math.min(height - 1, Math.round(baseY));
+  if (to <= from) return;
+  for (let y = from; y <= to; y++) {
+    const t = (y - from) / (to - from);
+    const half = radius * (1 + (RING_TAPER_WIDTH - 1) * t);
+    const minX = Math.max(0, Math.round(cx - half));
+    const maxX = Math.min(width - 1, Math.round(cx + half));
+    const row = y * width;
+    for (let x = minX; x <= maxX; x++) mask[row + x] = 1;
+  }
 }
 
 export async function extractSilhouetteContour(sketchDataUrl: string): Promise<SilhouetteContour> {
@@ -293,6 +323,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   // path flows from the outline into the ring on either side as one curve;
   // the hole is the only separate cut.
   stampDisc(mask, paddedWidth, paddedHeight, ringCx, ringCy, ringOuter);
+  stampTaper(mask, paddedWidth, paddedHeight, ringCx, ringCy, ringOuter, lowerTop + ringOuter * RING_ATTACH_DEPTH_RATIO);
   mask = roundClose(mask, paddedWidth, paddedHeight, Math.round(ringOuter * RING_FILLET_RATIO));
   mask = largestComponentMask(mask, paddedWidth, paddedHeight);
 
