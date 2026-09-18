@@ -12,12 +12,12 @@
  * anything is drawn. When the answer is "nobody", the drawing step is handed
  * a flat statement of fact instead of a rule to apply, which it follows.
  *
- * Used ONLY to forbid, never to require. A wrong "nobody" costs a missing
- * dot; a wrong "somebody" would put one on a face that should not have it,
- * and that is the failure worth avoiding. Two independent answers have to
- * agree before the prohibition is used — measured on four photographs, the
- * count was right and steady on three and wobbled on one, which is exactly
- * the case the agreement rule covers.
+ * The count is used in both directions, because the drawing step gets it
+ * wrong in both: it put a bindi on two women who wear none, and it dropped
+ * the one a baby really does wear. Two independent answers have to agree
+ * before anything is said at all — measured on four photographs the count
+ * was right and steady on three and wobbled on the fourth, and on a
+ * disagreement the drawing step is simply told nothing.
  *
  * A text call, so it costs a fraction of a cent: a hundredth of the price of
  * the drawing it protects.
@@ -53,10 +53,16 @@ async function countWearers(photo: Uint8Array, mimeType: string): Promise<number
   }
 }
 
-/** True only when two separate looks both say nobody in the photo wears one. */
-export async function noOneWearsAForeheadMark(photo: Uint8Array, mimeType: string): Promise<boolean> {
+/**
+ * How many people wear one, when two separate looks agree; null when they
+ * disagree or the check could not be made, in which case the drawing step is
+ * told nothing and falls back on its own judgement.
+ */
+export async function countForeheadMarks(photo: Uint8Array, mimeType: string): Promise<number | null> {
   const [first, second] = await Promise.all([countWearers(photo, mimeType), countWearers(photo, mimeType)]);
-  const nobody = first === 0 && second === 0;
-  console.info(`[sketch] forehead marks counted: ${first ?? '?'} and ${second ?? '?'}${nobody ? ' — telling the drawing step there are none' : ''}`);
-  return nobody;
+  const agreed = first !== null && first === second ? first : null;
+  console.info(
+    `[sketch] forehead marks counted: ${first ?? '?'} and ${second ?? '?'}${agreed === null ? ' — no agreement, saying nothing' : ` — telling the drawing step there ${agreed === 1 ? 'is 1' : `are ${agreed}`}`}`,
+  );
+  return agreed;
 }

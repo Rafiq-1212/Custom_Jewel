@@ -61,7 +61,7 @@ const FINISH_STYLE = `STYLE: a detailed pen-and-ink portrait in the Comica line-
 - Hair: as dark as the hair is in the photo, but always TEXTURED and always readable: built from many fine strands drawn one by one, with white gaps between them running through the whole mass, scratchy flyaways around the outside, and white highlight strands where light hits. Never a flat solid black fill, never a merged black mass, and never outlined white shapes.
 - Beards and moustaches, ONLY on a face that visibly has one in image 1: fine short strokes following the growth direction, with white gaps between the strokes everywhere so the texture of the hair stays visible even in the darkest part, and a scratchy edge. Never a flat solid black shape.
 - On every face WITHOUT facial hair in image 1 — a woman, a child, a clean-shaven man — the chin, the jaw, the upper lip and the area under the lower lip are left completely white and EMPTY. Not one short stroke, not one stipple, not one patch of hatching anywhere around the mouth or on the chin: on a woman's face those strokes read as stubble and ruin the piece. Draw only the outline of the lips, the crease between them and the line of the jaw.
-- FACES ARE LEFT CLEAN. The skin of the face and neck is bare white paper. Draw the features and nothing else: the eyes, the eyebrows, the line of the nose and the nostrils, the lips, the ears, the hairline, the edge of the jaw and chin, and the line where one face or a chin overlaps something behind it. Leave the cheeks, the forehead, the temples, the nose itself, the upper lip and the neck completely white and empty. No hatching on a cheek or a forehead, no strokes down the neck, no shading beside the nose, no lines to suggest a cheekbone. The only place a few short strokes are allowed is a deep, obvious shadow in the eye socket or in the shadow the chin casts on the neck below it — never on the skin of the face itself.
+- FACES ARE LEFT CLEAN. The skin of the face and neck is bare white paper. Draw the features and nothing else: the eyes, the eyebrows, the line of the nose and the nostrils, the lips, the ears, the hairline, the edge of the jaw and chin, and the line where one face or a chin overlaps something behind it. Leave the cheeks, the forehead, the temples, the nose itself, the upper lip and the neck completely white and empty — except for a bindi or pottu, if that person is wearing one. No hatching on a cheek or a forehead, no strokes down the neck, no shading beside the nose, no lines to suggest a cheekbone. The only place a few short strokes are allowed is a deep, obvious shadow in the eye socket or in the shadow the chin casts on the neck below it — never on the skin of the face itself.
 - A BINDI OR POTTU IS DRAWN ONLY IF THAT PERSON IS ACTUALLY WEARING ONE in image 1. Look at each face separately: if you can clearly see the mark on her forehead, draw it as a small solid mark in the same place and size; if you cannot, her forehead stays completely blank. The same goes for sindoor in a parting, a tilak or a religious mark of any kind. Never add one, never copy one from another face in the picture, and never leave out one that is there. These marks say something about a person's religion and whether she is married, and putting one on someone who does not wear it gives offence.
 - Never age anyone. Draw a wrinkle, a smile line or an under-eye line only where image 1 shows a clear crease; a smooth young face is drawn smooth. Only draw a mole if it is clearly visible in image 1; never add dots or marks that are not there. Do NOT draw acne, pores or skin blemishes.
 - Clothing: outline, collar, buttons, and MANY folds. Crinkled or creased fabric gets lots of short fold and crinkle strokes that follow the fabric, so it looks textured, not empty. If the fabric has a pattern (stripes, checks, a print, embroidery), draw that pattern across the whole garment, following the folds. Crinkles and creases are not a pattern: they are drawn as fold strokes, never as stripes or checks.
@@ -82,7 +82,7 @@ const FINISH_FAITHFUL = `FAITHFULNESS (most important):
  */
 const NO_FOREHEAD_MARKS = `IMPORTANT, AND CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND: not one person in this picture is wearing a bindi, a pottu, a tilak or sindoor. Every forehead in your drawing stays completely blank and every hair parting stays plain. Do not put a dot, a mark or a line on any forehead for any reason.`;
 
-const FINISH_PROMPT_BODY = `You are given two images of the same people. Image 1 is the photograph. Image 2 is a rough automatic ink trace of that exact photograph; its lines and dark areas are in the correct positions but they are blotchy and broken. Small isolated specks, dots and speckled skin texture in image 2 are noise from the automatic trace: ignore them, keep skin clean, and never draw them as pores, moles, dots or marks.
+const FINISH_PROMPT_BODY = `You are given two images of the same people. Image 1 is the photograph. Image 2 is a rough automatic ink trace of that exact photograph; its lines and dark areas are in the correct positions but they are blotchy and broken. Small isolated specks, dots and speckled skin texture in image 2 are noise from the automatic trace: ignore them, keep skin clean, and never draw them as pores, moles, dots or marks. The one exception is a bindi or pottu between the eyebrows, which is a real mark, not a speck.
 
 If the body has been cut away and only a head is left, this is a HEAD-ONLY portrait: draw the hair, the face, the ears and the beard, and NOTHING below the chin or the beard. No neck, no throat, no shoulders, no collar, no chain: the artwork simply ends where the chin or the beard ends, on white. On the turned side the outline of the face runs from the beard straight up into the ear, with no line hanging down below the ear. Do not continue the neck downwards to complete the figure, even if a little of it shows in image 1. Any scrap of clothing or skin still showing beside or below the beard is left over from that removal, not part of the portrait, and you leave it out completely.
 
@@ -113,13 +113,26 @@ ${FINISH_STYLE}
 
 Output only the finished line art.`;
 
+/**
+ * The mirror of the above, and just as necessary: a baby whose pottu is
+ * plainly there in the photo came back without it, because two other rules
+ * delete it first — the one that calls small isolated dots in the trace
+ * noise, and the one that keeps foreheads empty. Neither knows what a bindi
+ * is, so the fact has to arrive with authority over them.
+ */
+function foreheadMarksPresent(count: number): string {
+  const who = count === 1 ? 'ONE person in this picture is' : `${count} people in this picture are`;
+  return `IMPORTANT, AND CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND: ${who} wearing a bindi or pottu on the forehead. Find it in image 1 and draw it, as a small solid mark in the same place and the same size, on that person and on nobody else. It is not noise, not a speck and not a blemish, and this instruction comes above every rule below about ignoring small dots or keeping a forehead empty. Leaving it out is as wrong as adding one that is not there.`;
+}
+
 export interface FinishOptions {
-  /** True when the photo has been checked and nobody in it wears a bindi or similar mark. */
-  noForeheadMarks: boolean;
+  /** How many people the photo was found to have a forehead mark on, or null if it could not be settled. */
+  foreheadMarks: number | null;
 }
 
 export function buildFinishPrompt(options: FinishOptions): string {
-  return options.noForeheadMarks ? `${FINISH_PROMPT_BODY}
-
-${NO_FOREHEAD_MARKS}` : FINISH_PROMPT_BODY;
+  if (options.foreheadMarks === null) return FINISH_PROMPT_BODY;
+  const fact = options.foreheadMarks === 0 ? NO_FOREHEAD_MARKS : foreheadMarksPresent(options.foreheadMarks);
+  return [FINISH_PROMPT_BODY, fact].join('\n\n');
 }
+
