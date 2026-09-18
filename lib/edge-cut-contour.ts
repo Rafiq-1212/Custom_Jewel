@@ -128,6 +128,12 @@ const RING_CENTRE_PULL = 0.12;
  */
 const RING_FILLET_RATIO = 1.2;
 const RING_SEGMENTS = 72;
+/** The bail's neck, at the hole's own height, as a fraction of the ring's radius. */
+const RING_BAIL_NECK = 0.85;
+/** How far it flares by the time it meets the piece, as a fraction of the ring's radius. */
+const RING_BAIL_FLARE = 2.2;
+/** ...but never wider than this share of the outline it lands on, so it cannot stick out. */
+const RING_BAIL_INSET = 0.75;
 /**
  * Curve simplification for the final trace: light, so the line keeps
  * following the ink rather than being rounded into blobs — the round
@@ -192,6 +198,53 @@ function decodeImage(src: string): Promise<HTMLImageElement> {
     image.onerror = () => reject(new Error('Could not decode the sketch image.'));
     image.src = src;
   });
+}
+
+/**
+ * The tab under the ring, shaped like the bail on a catalogue pendant: narrow
+ * at the top around the hole and flaring down to where it meets the piece.
+ *
+ * Its base is capped to the width of the outline it lands on. A straight
+ * taper stamped without that cap was tried and reverted: wherever the piece
+ * beneath was narrower than the taper, its two bottom corners stuck out past
+ * the silhouette as points — fangs, as the client put it. Here the run of
+ * outline under the ring is measured first and the flare kept inside it, so
+ * there is nothing to stick out of.
+ */
+function stampBail(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  cx: number,
+  cy: number,
+  radius: number,
+  baseY: number,
+): void {
+  const top = Math.max(0, Math.round(cy));
+  const bottom = Math.min(height - 1, Math.round(baseY));
+  if (bottom <= top) return;
+
+  // How wide the piece is under the ring, at the row the bail lands on.
+  const row = bottom * width;
+  const centre = Math.round(cx);
+  if (centre < 0 || centre >= width) return;
+  let left = centre;
+  let right = centre;
+  while (left > 0 && mask[row + left - 1]) left--;
+  while (right < width - 1 && mask[row + right + 1]) right++;
+  const roomEachSide = Math.min(centre - left, right - centre);
+
+  const wanted = radius * RING_BAIL_FLARE;
+  const base = Math.max(radius, Math.min(wanted, roomEachSide * RING_BAIL_INSET));
+
+  for (let y = top; y <= bottom; y++) {
+    const t = (y - top) / (bottom - top);
+    const half = radius * RING_BAIL_NECK + (base - radius * RING_BAIL_NECK) * t;
+    const from = Math.max(0, Math.round(cx - half));
+    const to = Math.min(width - 1, Math.round(cx + half));
+    const start = y * width;
+    for (let x = from; x <= to; x++) mask[start + x] = 1;
+  }
 }
 
 export async function extractSilhouetteContour(sketchDataUrl: string): Promise<SilhouetteContour> {
@@ -300,6 +353,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   // path flows from the outline into the ring on either side as one curve;
   // the hole is the only separate cut.
   stampDisc(mask, paddedWidth, paddedHeight, ringCx, ringCy, ringOuter);
+  stampBail(mask, paddedWidth, paddedHeight, ringCx, ringCy, ringOuter, lowerTop + ringOuter * RING_ATTACH_DEPTH_RATIO);
   mask = roundClose(mask, paddedWidth, paddedHeight, Math.round(ringOuter * RING_FILLET_RATIO));
   mask = largestComponentMask(mask, paddedWidth, paddedHeight);
 

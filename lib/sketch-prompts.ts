@@ -75,7 +75,14 @@ const FINISH_FAITHFUL = `FAITHFULNESS (most important):
 - Never mirror or flip the image: every person faces exactly the same direction as in image 1 and image 2, and left stays left.
 - Do not rotate, symmetrise, beautify, slim, age or restyle anyone. Do not add or remove anything.`;
 
-export const FINISH_PROMPT = `You are given two images of the same people. Image 1 is the photograph. Image 2 is a rough automatic ink trace of that exact photograph; its lines and dark areas are in the correct positions but they are blotchy and broken. Small isolated specks, dots and speckled skin texture in image 2 are noise from the automatic trace: ignore them, keep skin clean, and never draw them as pores, moles, dots or marks.
+/**
+ * Stated as fact, not as a rule to apply, when the photo has been checked
+ * and nobody wears a mark (lib/face-marks.ts). Told only to draw one "if it
+ * is there", the model drew one anyway on two women who wear none.
+ */
+const NO_FOREHEAD_MARKS = `IMPORTANT, AND CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND: not one person in this picture is wearing a bindi, a pottu, a tilak or sindoor. Every forehead in your drawing stays completely blank and every hair parting stays plain. Do not put a dot, a mark or a line on any forehead for any reason.`;
+
+const FINISH_PROMPT_BODY = `You are given two images of the same people. Image 1 is the photograph. Image 2 is a rough automatic ink trace of that exact photograph; its lines and dark areas are in the correct positions but they are blotchy and broken. Small isolated specks, dots and speckled skin texture in image 2 are noise from the automatic trace: ignore them, keep skin clean, and never draw them as pores, moles, dots or marks.
 
 If the body has been cut away and only a head is left, this is a HEAD-ONLY portrait: draw the hair, the face, the ears and the beard, and NOTHING below the chin or the beard. No neck, no throat, no shoulders, no collar, no chain: the artwork simply ends where the chin or the beard ends, on white. On the turned side the outline of the face runs from the beard straight up into the ear, with no line hanging down below the ear. Do not continue the neck downwards to complete the figure, even if a little of it shows in image 1. Any scrap of clothing or skin still showing beside or below the beard is left over from that removal, not part of the portrait, and you leave it out completely.
 
@@ -105,3 +112,14 @@ ${FINISH_FAITHFUL}
 ${FINISH_STYLE}
 
 Output only the finished line art.`;
+
+export interface FinishOptions {
+  /** True when the photo has been checked and nobody in it wears a bindi or similar mark. */
+  noForeheadMarks: boolean;
+}
+
+export function buildFinishPrompt(options: FinishOptions): string {
+  return options.noForeheadMarks ? `${FINISH_PROMPT_BODY}
+
+${NO_FOREHEAD_MARKS}` : FINISH_PROMPT_BODY;
+}
