@@ -18,6 +18,18 @@ import { DEFAULT_DESIGN_TYPE, isDesignType, type DesignType } from './pendant-ge
 import { DEFAULT_CATEGORY_ID, isCategoryId, type CategoryId } from './pendant-categories';
 import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, isShapeId, type PendantTransform, type ShapeId } from './pendant-shapes';
 
+/**
+ * Which resolution the stored sketch was drawn at, so a reload still knows a
+ * draft is a draft and can offer to redraw it properly. Declared here rather
+ * than imported from lib/sketch-pipeline.ts, which is server-only and must
+ * never be pulled into the browser bundle.
+ */
+export type SketchQuality = 'draft' | 'final';
+
+function isSketchQuality(value: string): value is SketchQuality {
+  return value === 'draft' || value === 'final';
+}
+
 const SKETCH_KEY = 'pendant-designer:sketch';
 const PREFS_KEY = 'pendant-designer:prefs';
 
@@ -28,6 +40,7 @@ export interface StoredPrefs {
   transform: PendantTransform;
   designType: DesignType;
   rimColor: RimColorId;
+  sketchQuality: SketchQuality;
 }
 
 function getStorage(): Storage | null {
@@ -110,6 +123,8 @@ export function loadPrefs(): StoredPrefs | null {
       transform: isPendantTransform(parsed.transform) ? parsed.transform : DEFAULT_TRANSFORM,
       designType: pick(parsed.designType, isDesignType, DEFAULT_DESIGN_TYPE),
       rimColor: pick(parsed.rimColor, isRimColorId, DEFAULT_RIM_COLOR_ID),
+      // A session saved before draft mode existed holds a 4K sketch.
+      sketchQuality: pick(parsed.sketchQuality, isSketchQuality, 'final'),
     };
   } catch {
     return null;

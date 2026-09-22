@@ -43,13 +43,14 @@ import { PendantControls } from '@/components/PendantControls';
 import { PendantDesignPicker } from '@/components/PendantDesignPicker';
 import { PendantPreview } from '@/components/PendantPreview';
 import { PendantShapePicker } from '@/components/PendantShapePicker';
+import { QualityPicker } from '@/components/QualityPicker';
 import { RimColorPicker } from '@/components/RimColorPicker';
 import { extractSilhouetteContour } from '@/lib/edge-cut-contour';
 import { DEFAULT_MATERIAL_ID, DEFAULT_RIM_COLOR_ID, PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
 import { DEFAULT_DESIGN_TYPE, type DesignType, type SilhouetteContour } from '@/lib/pendant-geometry';
 import { DEFAULT_CATEGORY_ID, GENERATION_CATEGORY_LIST, PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
-import { clearPendantSession, loadPrefs, loadSketch, savePrefs, saveSketch } from '@/lib/pendant-storage';
+import { clearPendantSession, loadPrefs, loadSketch, savePrefs, saveSketch, type SketchQuality } from '@/lib/pendant-storage';
 
 type Status = 'idle' | 'generating' | 'done' | 'error';
 
@@ -78,6 +79,12 @@ export default function Home() {
   const [transform, setTransform] = React.useState<PendantTransform>(DEFAULT_TRANSFORM);
   const [selectedDesignType, setSelectedDesignType] = React.useState<DesignType>(DEFAULT_DESIGN_TYPE);
   const [rimColor, setRimColor] = React.useState<RimColorId>(DEFAULT_RIM_COLOR_ID);
+
+  // Draft or final. A draft finishes the drawing at 2K instead of 4K: about a
+  // fifth cheaper and noticeably quicker, enough to judge framing and likeness
+  // before paying for the detailed one. Holds the quality of the sketch on
+  // screen once there is one, so the page knows whether to offer the redraw.
+  const [quality, setQuality] = React.useState<SketchQuality>('final');
 
   // Non-null for every consumer downstream of generation; the fallback is
   // defensive only, since `hasSketch` requires `selectedCategory` to be set.
@@ -125,6 +132,7 @@ export default function Home() {
       setTransform(prefs.transform);
       setSelectedDesignType(prefs.designType);
       setRimColor(prefs.rimColor);
+      setQuality(prefs.sketchQuality);
     }
     setIsHydrated(true);
   }, []);
@@ -146,8 +154,9 @@ export default function Home() {
       transform,
       designType: selectedDesignType,
       rimColor,
+      sketchQuality: quality,
     });
-  }, [isHydrated, masterSketch, activeCategoryId, selectedShape, selectedMaterial, transform, selectedDesignType, rimColor]);
+  }, [isHydrated, masterSketch, activeCategoryId, selectedShape, selectedMaterial, transform, selectedDesignType, rimColor, quality]);
 
   // The traced boundary is stale the moment `masterSketch` changes — reset
   // synchronously during render (the "compare against state" pattern).
@@ -192,13 +201,14 @@ export default function Home() {
    * only place `masterSketch` is ever set from a network response. Guarded
    * against double-clicks, a missing category, and superseded responses.
    */
-  const generateSketch = async () => {
+  const generateSketch = async (wanted: SketchQuality = quality) => {
     if (!file || status === 'generating') return;
     if (!selectedCategory) {
       setErrorMessage('Pick a pendant style first, then create the sketch.');
       return;
     }
     const requestId = ++requestIdRef.current;
+    setQuality(wanted);
     setStatus('generating');
     setErrorMessage(null);
     setMasterSketch(null);
@@ -216,6 +226,7 @@ export default function Home() {
       const formData = new FormData();
       formData.set('file', cropped);
       formData.set('category', selectedCategory);
+      formData.set('quality', wanted);
       const response = await fetch('/api/generate-image', { method: 'POST', body: formData });
       const body = (await response.json().catch(() => null)) as
         | { success: true; image: string }
@@ -334,10 +345,11 @@ export default function Home() {
             <p className="text-xs text-slate-400">
               This decides how much of the photo goes into the sketch. You can choose the pendant shape afterwards.
             </p>
+            <QualityPicker value={quality} onChange={setQuality} disabled={isGenerating} />
             <div className="flex flex-col items-center gap-3">
               <button
                 type="button"
-                onClick={generateSketch}
+                onClick={() => generateSketch()}
                 disabled={isGenerating || !selectedCategory}
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -359,14 +371,33 @@ export default function Home() {
               <div className="mx-auto w-full max-w-xs">
                 <GeneratedImage image={masterSketch} />
               </div>
-              <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700">
-                <span aria-hidden>✓</span> Your {PENDANT_CATEGORIES[activeCategoryId].label} sketch is ready. Everything below uses
-                this same drawing.
-              </p>
+              {quality === 'draft' ? (
+                <div className="flex flex-col items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-center">
+                  <p className="text-sm font-medium text-amber-800">
+                    This is a quick draft of your {PENDANT_CATEGORIES[activeCategoryId].label.toLowerCase()}. Check the framing and
+                    the likeness, then draw it in full detail before ordering.
+                  </p>
+                  {file && (
+                    <button
+                      type="button"
+                      onClick={() => generateSketch('final')}
+                      disabled={isGenerating}
+                      className="inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Draw it in full detail
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700">
+                  <span aria-hidden>✓</span> Your {PENDANT_CATEGORIES[activeCategoryId].label} sketch is ready. Everything below uses
+                  this same drawing.
+                </p>
+              )}
               {file && (
                 <button
                   type="button"
-                  onClick={generateSketch}
+                  onClick={() => generateSketch()}
                   disabled={isGenerating}
                   className="mx-auto text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                 >

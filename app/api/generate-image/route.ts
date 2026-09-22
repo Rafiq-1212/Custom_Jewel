@@ -19,7 +19,7 @@
 import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId } from '@/lib/pendant-categories';
-import { createSketch } from '@/lib/sketch-pipeline';
+import { createSketch, type SketchQuality } from '@/lib/sketch-pipeline';
 import { validateImageBytes } from '@/lib/validation';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
@@ -65,6 +65,12 @@ export async function POST(request: Request): Promise<Response> {
   }
   const category = categoryRaw;
 
+  // Draft mode finishes the drawing at 2K instead of 4K: cheaper and quicker,
+  // for judging a photo before paying for the real thing. Anything other than
+  // the word "draft" — including nothing at all — is a final sketch, so an
+  // older client that sends no quality field still gets full quality.
+  const quality: SketchQuality = formData.get('quality') === 'draft' ? 'draft' : 'final';
+
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(await file.arrayBuffer());
@@ -82,7 +88,7 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     // Enhance, rough ink trace, finish. See lib/sketch-pipeline.ts.
-    const sketch = await createSketch({ imageBytes: bytes, mimeType: file.type, category });
+    const sketch = await createSketch({ imageBytes: bytes, mimeType: file.type, category, quality });
 
     // Deterministic post-processing, not AI: crop the AI's white margin and
     // turn the remaining background transparent. See lib/image-processing.ts

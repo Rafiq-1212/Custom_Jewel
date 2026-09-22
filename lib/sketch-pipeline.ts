@@ -52,6 +52,19 @@ if (typeof window !== 'undefined') {
  */
 const FINISH_IMAGE_SIZE = '4K';
 /**
+ * Draft mode draws the finish at 2K instead. Image output is billed per
+ * image, not per pixel, and the 2K image is the cheaper of the two: measured
+ * end to end, a draft sketch costs $0.176 against $0.226 for the final one,
+ * so previewing a photo costs about a fifth less than finishing it.
+ *
+ * What it costs in quality is real and was measured side by side: teeth stop
+ * being drawn as separate teeth, eyelashes come back as a solid lash line
+ * and hair goes back to chunky masses instead of strands. It is a preview —
+ * good enough to judge framing, pose, whether the right people are in it and
+ * whether anything was invented — and not the file that goes to the laser.
+ */
+const DRAFT_IMAGE_SIZE = '2K';
+/**
  * The 4K drawing is scaled back down to this longest side before anything
  * else sees it — the same size the 2K finish used to produce, so the master
  * sketch, the stored data URL and the vector exports stay exactly as heavy
@@ -94,10 +107,14 @@ async function generateImageFromImage(input: GenerateImageFromImageInput): Promi
   }
 }
 
+/** 'draft' finishes at 2K for a cheap preview; 'final' at 4K. */
+export type SketchQuality = 'draft' | 'final';
+
 export interface SketchInput {
   imageBytes: Uint8Array;
   mimeType: string;
   category: CategoryId;
+  quality?: SketchQuality;
 }
 
 /**
@@ -177,7 +194,7 @@ export async function createSketch(input: SketchInput): Promise<Buffer> {
       { bytes: photo, mimeType: 'image/png' },
       { bytes: rough, mimeType: 'image/png' },
     ],
-    imageSize: FINISH_IMAGE_SIZE,
+    imageSize: input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE,
   });
 
   const scaled = await sharp(Buffer.from(finished.bytes))
