@@ -184,6 +184,21 @@ function round(value: number): number {
  */
 export const EDGE_CUT_AREA: Rect = { x: 9, y: 21, width: 82, height: 90 };
 
+/**
+ * The centre and radius of a traced closed curve that is meant to be a
+ * circle. The hole is stamped as a circle and then carried through the same
+ * transform as everything else, so it stays a circle; the average is taken
+ * rather than a fitted circle because a few points of tracing wobble cannot
+ * move a mean, and nothing here needs more precision than that.
+ */
+function measureCircle(points: Point[]): { cx: number; cy: number; r: number } | null {
+  if (points.length < 3) return null;
+  const cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+  const cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+  const r = points.reduce((sum, p) => sum + Math.hypot(p.x - cx, p.y - cy), 0) / points.length;
+  return r > 0 ? { cx, cy, r } : null;
+}
+
 /** Shown in place of a traced silhouette while one hasn't been computed yet (or failed to). */
 function placeholderPath(area: Rect): string {
   const cx = area.x + area.width / 2;
@@ -215,6 +230,15 @@ export interface PendantGeometry {
    * doesn't have — the traced boundary itself is the cutting boundary.
    */
   hasDecorativeRim: boolean;
+  /**
+   * The hanging hole, in viewBox coordinates, when the design has one — a
+   * Silhouette Cut, whose tab is cut with a hole for the jump ring. The cut
+   * paths already contain it; this is the same circle measured, so the
+   * mockup can draw the ring that hangs through it (lib/mockup.ts) without
+   * re-deriving where it went. Null for a catalogue shape, which is hung
+   * from a soldered bail instead and has no hole at all.
+   */
+  hangingHole: { cx: number; cy: number; r: number } | null;
   label: string;
 }
 
@@ -243,6 +267,7 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
       engravingArea,
       fitMode: 'cover',
       hasDecorativeRim: true,
+      hangingHole: null,
       label: shapeDef.label,
     };
   }
@@ -252,23 +277,25 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
   // artwork. Winding is normalised here so the nonzero rule unions body and
   // ring and subtracts the hole regardless of how each was traced.
   let outerPath = placeholderPath(EDGE_CUT_AREA);
+  let hangingHole: PendantGeometry['hangingHole'] = null;
   if (contour) {
     const { imageWidth, imageHeight } = contour;
-    const place = (points: Point[], positive: boolean) =>
-      pointsToPath(
-        windTo(transformPoints(points, imageWidth, imageHeight, EDGE_CUT_AREA, transform, 'contain'), positive),
-      );
+    const move = (points: Point[]) => transformPoints(points, imageWidth, imageHeight, EDGE_CUT_AREA, transform, 'contain');
+    const place = (points: Point[], positive: boolean) => pointsToPath(windTo(move(points), positive));
+    const placedHoles = contour.holes.map(move);
     outerPath = [
       place(contour.points, true),
       ...contour.rings.map((ring) => place(ring, true)),
-      ...contour.holes.map((hole) => place(hole, false)),
+      ...placedHoles.map((hole) => pointsToPath(windTo(hole, false))),
     ].join(' ');
+    hangingHole = measureCircle(placedHoles[0] ?? []);
   }
   return {
     outerPath,
     engravingArea: EDGE_CUT_AREA,
     fitMode: 'contain',
     hasDecorativeRim: false,
+    hangingHole,
     label: 'Cut to shape',
   };
 }

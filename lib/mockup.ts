@@ -44,6 +44,32 @@ const MOCKUP_RASTER_SCALE = 25;
 /** White space kept around the pendant when cropping, as a fraction of its larger side. */
 const CROP_PADDING = 0.08;
 
+/**
+ * The jump ring that hangs through a Silhouette Cut's hole, as multiples of
+ * that hole's radius: the wire's inner and outer circles, and how far above
+ * the hole's centre the ring sits.
+ *
+ * The rise puts the bottom of the wire just inside the TOP of the hole, not
+ * across its middle. That is where a real jump ring sits — the pendant hangs
+ * from it, so the top edge of the hole rests on the wire — and it is also
+ * the only arrangement that reads clearly: a wire drawn across the centre
+ * splits the hole into two white crescents, and the eye stops being able to
+ * tell which circle is the hole and which is the ring.
+ *
+ * It is drawn into the flat design rather than asked for in words because
+ * asking failed, repeatedly and in the same way: told to add a hanging loop,
+ * the model put it at the top centre of the plate however the prompt was
+ * worded, while the real hole sits off to one side above someone's head. A
+ * ring that is already in the picture cannot be put in the wrong place.
+ *
+ * It is a bought component threaded through the hole, not metal cut from the
+ * sheet, so it belongs only here: the cut layout, the laser exports and the
+ * on-screen preview all still show the plate and its hole alone.
+ */
+const JUMP_RING_INNER = 1.1;
+const JUMP_RING_OUTER = 1.6;
+const JUMP_RING_RISE = 1.8;
+
 function escapeAttr(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
@@ -67,8 +93,27 @@ async function rasterizePlate(
   <defs><clipPath id="plate"><path d="${d}"/></clipPath></defs>
   <path d="${d}" fill="${fill}"/>
   ${band}
+  ${jumpRingSvg(geometry, fill)}
 </svg>`;
   return sharp(Buffer.from(svg)).resize(width, height).png().toBuffer();
+}
+
+/**
+ * The ring hanging through the hole, drawn as a wire annulus in the same
+ * metal. Sits on top of the plate: at the bottom it crosses the hole, which
+ * is exactly where the wire of a real jump ring is.
+ */
+function jumpRingSvg(geometry: PendantGeometry, fill: string): string {
+  const hole = geometry.hangingHole;
+  if (!hole) return '';
+  const cy = hole.cy - hole.r * JUMP_RING_RISE;
+  // An even-odd pair of circles: the wire is the space between them, so the
+  // plate and the hole stay visible through the middle of the ring.
+  return `<path fill="${fill}" fill-rule="evenodd" d="${circlePath(hole.cx, cy, hole.r * JUMP_RING_OUTER)} ${circlePath(hole.cx, cy, hole.r * JUMP_RING_INNER)}"/>`;
+}
+
+function circlePath(cx: number, cy: number, r: number): string {
+  return `M${cx - r} ${cy} A${r} ${r} 0 1 0 ${cx + r} ${cy} A${r} ${r} 0 1 0 ${cx - r} ${cy} Z`;
 }
 
 interface CropBox {
@@ -195,7 +240,7 @@ function buildMockupPrompt(request: DesignRequest): string {
 
   const plate =
     request.designType === 'edge-cut'
-      ? `This is a SILHOUETTE-CUT pendant: the flat metal plate is cut a few millimetres outside the outline of the engraved artwork, following its shape — that irregular outline, with its small metal border, IS the edge of the pendant. Keep it exactly; do not put the artwork on a round, heart or any other backing plate, and do not add a frame. The plate already includes its own hanging tab, cut from the same flat sheet with a round hole through it — keep that tab and its hole exactly where image 1 puts them. That tab and its hole ARE the hanging feature: do NOT add a bail, a jump ring or any other loop. Asked for one, the model drew it at the top centre of the plate whatever the prompt said, while the real hole sits off to one side above a head — a second ring floating on the metal beside a hole it does not pass through. The workshop threads a bail through the real hole afterwards. THE METAL PLATE HAS EXACTLY ONE HOLE, the one in image 1: never cut a second hole anywhere, and never punch one through the portrait.`
+      ? `This is a SILHOUETTE-CUT pendant: the flat metal plate is cut a few millimetres outside the outline of the engraved artwork, following its shape — that irregular outline, with its small metal border, IS the edge of the pendant. Keep it exactly; do not put the artwork on a round, heart or any other backing plate, and do not add a frame. The plate includes its own hanging tab, cut from the same flat sheet with a round hole through it, and a plain round jump ring threaded through that hole. Both are already drawn in image 1, in their exact places. Render the ring as what it is: a loop of round ${material.label.toLowerCase()} wire, thicker and rounder than the flat plate, catching the light along its curve, passing through the hole so that the bottom of the wire is inside the hole and the rest of the loop stands clear above the tab. It stays exactly where image 1 puts it, which is directly above that hole and NOT at the top centre of the plate: the hole sits off to one side, above a head, and that is where the pendant hangs from. Add no second ring, no bail and no loop anywhere else on the metal. THE METAL PLATE HAS EXACTLY ONE HOLE, the one in image 1: never cut a second hole anywhere, and never punch one through the portrait.`
       : `The plate is a ${PENDANT_SHAPES[request.shape].label.toLowerCase()} shape. Keep its exact outline and proportions. Add a small matching ${material.label.toLowerCase()} bail (a hanging loop) at the top centre so it can hang on a chain. Do not cut any hole through the plate itself.`;
 
   const rimHex =
