@@ -10,6 +10,7 @@
  * mockup and the manufacturing files always describe the same pendant.
  */
 
+import { withCostLog } from '@/lib/cost';
 import { parseDesignRequest } from '@/lib/design-request';
 import { GeminiGenerationError } from '@/lib/gemini';
 import { renderPendantMockup } from '@/lib/mockup';
@@ -34,7 +35,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!parsed.ok) return fail(parsed.error, 400);
 
   try {
-    const result = await renderPendantMockup(parsed.value);
+    const result = await withCostLog(`mockup ${parsed.value.material}`, () => renderPendantMockup(parsed.value));
     return Response.json({ success: true, ...result });
   } catch (error) {
     if (error instanceof GeminiGenerationError) {

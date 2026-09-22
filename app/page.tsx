@@ -201,7 +201,7 @@ export default function Home() {
    * only place `masterSketch` is ever set from a network response. Guarded
    * against double-clicks, a missing category, and superseded responses.
    */
-  const generateSketch = async (wanted: SketchQuality = quality) => {
+  const generateSketch = async (wanted: SketchQuality = quality, redoPhotoEdit = false) => {
     if (!file || status === 'generating') return;
     if (!selectedCategory) {
       setErrorMessage('Pick a pendant style first, then create the sketch.');
@@ -227,6 +227,10 @@ export default function Home() {
       formData.set('file', cropped);
       formData.set('category', selectedCategory);
       formData.set('quality', wanted);
+      // A plain redraw reuses the touched-up photo the server still has for
+      // this photograph and re-rolls only the drawing — the same result for a
+      // third less. 'redo' is for when the photo edit itself went wrong.
+      if (redoPhotoEdit) formData.set('photoEdit', 'redo');
       const response = await fetch('/api/generate-image', { method: 'POST', body: formData });
       const body = (await response.json().catch(() => null)) as
         | { success: true; image: string }
@@ -395,14 +399,24 @@ export default function Home() {
                 </p>
               )}
               {file && (
-                <button
-                  type="button"
-                  onClick={() => generateSketch()}
-                  disabled={isGenerating}
-                  className="mx-auto text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Not quite right? Draw it again from the same photo
-                </button>
+                <div className="flex flex-col items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => generateSketch()}
+                    disabled={isGenerating}
+                    className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Not quite right? Draw it again from the same photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => generateSketch(quality, true)}
+                    disabled={isGenerating}
+                    className="text-xs text-slate-400 underline-offset-4 hover:text-slate-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Something wrong with the photo itself? Clean it up again too
+                  </button>
+                </div>
               )}
             </div>
           </Section>

@@ -17,6 +17,11 @@
  * Two AI calls per sketch (steps 1 and 3), occasionally three (see
  * `leftObjectsBehind`). After each AI step the result is checked for an
  * accidental left-right mirror and flipped back if needed (lib/orientation.ts).
+ *
+ * Step 1 and the questions about the faces are about the PHOTOGRAPH, so a
+ * second attempt at the same photo reuses them (lib/photo-cache.ts) and pays
+ * only for step 3 — a third less, for an identical result. Pass
+ * `redoPhotoEdit` when it is the photo edit itself that went wrong.
  */
 
 import sharp from 'sharp';
@@ -33,6 +38,8 @@ import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, buildFinishPrompt, ENHANCE_RETRY_NOTE } from './sketch-prompts';
 import { lookAtFaces } from './face-marks';
+import { getPreparedPhoto, preparedPhotoKey, setPreparedPhoto, type PreparedPhoto } from './photo-cache';
+import { recordSaving, TYPICAL_COST } from './cost';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/sketch-pipeline.ts was imported into a browser bundle. This module is server-only.');
@@ -115,6 +122,14 @@ export interface SketchInput {
   mimeType: string;
   category: CategoryId;
   quality?: SketchQuality;
+  /**
+   * Redo the photo edit instead of reusing the one from an earlier attempt on
+   * this same photograph (lib/photo-cache.ts). A plain redraw leaves the
+   * photo alone and re-rolls only the drawing, which is what "draw it again"
+   * usually means and costs a third less; this is for the other case, where
+   * the photo edit itself went wrong — an arm painted out, an object left in.
+   */
+  redoPhotoEdit?: boolean;
 }
 
 /**
@@ -170,7 +185,13 @@ async function cutToHead(edited: Buffer, mimeType: string): Promise<Buffer> {
   return cropPhotoToHead(edited);
 }
 
-export async function createSketch(input: SketchInput): Promise<Buffer> {
+/**
+ * Everything that depends on the photograph rather than on the drawing: the
+ * photo edit, the Face Pendant jaw cut, and the questions about the faces.
+ * Cached per photograph, so a second attempt at the same photo pays only for
+ * the drawing.
+ */
+async function preparePhoto(input: SketchInput): Promise<PreparedPhoto> {
   let enhanced = await enhance(input, false);
   if (HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(enhanced))) {
     console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
@@ -185,6 +206,23 @@ export async function createSketch(input: SketchInput): Promise<Buffer> {
     CROP_TO_HEAD_CATEGORIES.has(input.category) ? cutToHead(edited, enhanced.mimeType) : Promise.resolve(edited),
     lookAtFaces(input.imageBytes, input.mimeType),
   ]);
+  return { photo, faces };
+}
+
+export async function createSketch(input: SketchInput): Promise<Buffer> {
+  const key = preparedPhotoKey(input.imageBytes, input.category);
+  const cached = input.redoPhotoEdit ? null : getPreparedPhoto(key);
+  if (cached) {
+    console.info(`[sketch] ${input.category}: reusing the touched-up photo from an earlier attempt, drawing only`);
+    recordSaving(
+      'the photo edit and the face checks',
+      TYPICAL_COST.touchUp +
+        TYPICAL_COST.faceCheck +
+        (CROP_TO_HEAD_CATEGORIES.has(input.category) ? TYPICAL_COST.jawline : 0),
+    );
+  }
+  const { photo, faces } = cached ?? (await preparePhoto(input));
+  if (!cached) setPreparedPhoto(key, { photo, faces });
 
   const rough = await roughInkTrace(photo);
 

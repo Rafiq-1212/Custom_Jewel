@@ -1,4 +1,5 @@
 import { ApiError, FinishReason, GoogleGenAI, Modality } from '@google/genai';
+import { priceImageCall, priceTextCall, recordCall } from './cost';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/gemini.ts was imported into a browser bundle. This module is server-only.');
@@ -147,12 +148,15 @@ export async function generateImageFromImage(
   }
 
   // One line per call in the server log, so the real cost of a design can be
-  // read straight from Google's own token counts.
+  // read straight from Google's own token counts — and added to this
+  // request's running total for the summary line (lib/cost.ts).
   const usage = response.usageMetadata;
   if (usage) {
     const details = (usage.candidatesTokensDetails ?? []).map((d) => `${d.modality}=${d.tokenCount}`).join(' ');
+    const usd = priceImageCall(usage);
+    recordCall(`image ${input.imageSize ?? '1K'}`, usd);
     console.info(
-      `[gemini] usage input=${usage.promptTokenCount ?? 0} output=${usage.candidatesTokenCount ?? 0} (${details}) thinking=${usage.thoughtsTokenCount ?? 0} size=${input.imageSize ?? 'default'}`,
+      `[gemini] usage input=${usage.promptTokenCount ?? 0} output=${usage.candidatesTokenCount ?? 0} (${details}) thinking=${usage.thoughtsTokenCount ?? 0} size=${input.imageSize ?? 'default'} cost=$${usd.toFixed(4)}`,
     );
   }
 
@@ -228,7 +232,9 @@ export async function generateJsonFromImage(input: GenerateJsonFromImageInput): 
 
   const usage = response.usageMetadata;
   if (usage) {
-    console.info(`[gemini] usage input=${usage.promptTokenCount ?? 0} output=${usage.candidatesTokenCount ?? 0} (TEXT) thinking=${usage.thoughtsTokenCount ?? 0} model=${TEXT_MODEL_ID}`);
+    const usd = priceTextCall(usage);
+    recordCall('text', usd);
+    console.info(`[gemini] usage input=${usage.promptTokenCount ?? 0} output=${usage.candidatesTokenCount ?? 0} (TEXT) thinking=${usage.thoughtsTokenCount ?? 0} model=${TEXT_MODEL_ID} cost=$${usd.toFixed(4)}`);
   }
 
   const text = response.text;

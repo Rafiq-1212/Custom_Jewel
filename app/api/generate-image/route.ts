@@ -16,6 +16,7 @@
  * appears in any response.
  */
 
+import { withCostLog } from '@/lib/cost';
 import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId } from '@/lib/pendant-categories';
@@ -71,6 +72,10 @@ export async function POST(request: Request): Promise<Response> {
   // older client that sends no quality field still gets full quality.
   const quality: SketchQuality = formData.get('quality') === 'draft' ? 'draft' : 'final';
 
+  // A redraw reuses the touched-up photo from the earlier attempt unless the
+  // operator asked for the photo itself to be done again (lib/photo-cache.ts).
+  const redoPhotoEdit = formData.get('photoEdit') === 'redo';
+
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(await file.arrayBuffer());
@@ -87,8 +92,11 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    // Enhance, rough ink trace, finish. See lib/sketch-pipeline.ts.
-    const sketch = await createSketch({ imageBytes: bytes, mimeType: file.type, category, quality });
+    // Enhance, rough ink trace, finish. See lib/sketch-pipeline.ts. The
+    // wrapper adds up what this request spent and logs one line for it.
+    const sketch = await withCostLog(`sketch ${category}/${quality}${redoPhotoEdit ? '/redo' : ''}`, () =>
+      createSketch({ imageBytes: bytes, mimeType: file.type, category, quality, redoPhotoEdit }),
+    );
 
     // Deterministic post-processing, not AI: crop the AI's white margin and
     // turn the remaining background transparent. See lib/image-processing.ts

@@ -3,10 +3,19 @@
 /**
  * Photorealistic product mockups — the images that go on the e-commerce
  * listing. One button per metal; each click is one deliberate call to
- * `/api/render-mockup` (the app's second Gemini use, see lib/mockup.ts).
- * Results are kept until the design itself changes — then they're stale by
- * definition and are cleared rather than shown next to a pendant they no
- * longer match.
+ * `/api/render-mockup` (the app's second Gemini use, see lib/mockup.ts), and
+ * each call costs about six rupees.
+ *
+ * A photo belongs to one exact pendant, so it is stored under a key made of
+ * the whole design — sketch, shape, cut, rim, position — and shown only
+ * beside that design. Changing anything therefore hides it, as it always
+ * did, but it is now KEPT rather than thrown away: nudging the position and
+ * nudging it back shows the photo already paid for instead of charging for
+ * it a second time. That undo is the common case, and it used to cost money
+ * every time.
+ *
+ * The store is in memory and holds the last few renders, so a reload or a
+ * long session of sliding still ends in a fresh call.
  */
 
 import * as React from 'react';
@@ -17,6 +26,22 @@ import type { DesignType, SilhouetteContour } from '@/lib/pendant-geometry';
 import { PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
 
 type MockupState = { status: 'loading' } | { status: 'done'; dataUrl: string } | { status: 'error'; error: string };
+
+/**
+ * Each finished photo is a data URL of a megabyte or two, so the store is
+ * capped. Object keys keep their insertion order, so the oldest go first —
+ * far enough back that an operator trying settings and returning to one still
+ * finds it.
+ */
+const MAX_KEPT = 8;
+
+function keepRecent(mockups: Record<string, MockupState>): Record<string, MockupState> {
+  const keys = Object.keys(mockups);
+  if (keys.length <= MAX_KEPT) return mockups;
+  const kept = { ...mockups };
+  for (const key of keys.slice(0, keys.length - MAX_KEPT)) delete kept[key];
+  return kept;
+}
 
 export function MockupPanel({
   sketch,
@@ -36,24 +61,16 @@ export function MockupPanel({
   transform: PendantTransform;
 }) {
   const engravingArea = PENDANT_CATEGORIES[category].engravingArea;
-  const [mockups, setMockups] = React.useState<Partial<Record<MaterialId, MockupState>>>({});
-  const requestKeyRef = React.useRef<Partial<Record<MaterialId, string>>>({});
-
-  // Anything that changes the pendant invalidates every rendered mockup —
-  // React's documented "reset state when a derived value changes" pattern.
+  // Keyed by design AND metal, so a photo is only ever shown beside the
+  // pendant it was made for; see the note at the top of this file.
+  const [mockups, setMockups] = React.useState<Record<string, MockupState>>({});
   const designKey = JSON.stringify({ sketch: sketch.length, shape, category, designType, contour, rimColor, transform });
-  const [renderedKey, setRenderedKey] = React.useState(designKey);
-  if (designKey !== renderedKey) {
-    setRenderedKey(designKey);
-    if (Object.keys(mockups).length) setMockups({});
-  }
 
   const silhouettePending = designType === 'edge-cut' && !contour;
 
   const render = async (material: MaterialId) => {
     const key = `${designKey}:${material}`;
-    requestKeyRef.current[material] = key;
-    setMockups((m) => ({ ...m, [material]: { status: 'loading' } }));
+    setMockups((m) => ({ ...m, [key]: { status: 'loading' } }));
     try {
       const response = await fetch('/api/render-mockup', {
         method: 'POST',
@@ -64,18 +81,19 @@ export function MockupPanel({
         | { success: true; dataUrl: string }
         | { success: false; error: string }
         | null;
-      if (requestKeyRef.current[material] !== key) return; // superseded
+      // Stored under its own key whatever the operator changed while it was
+      // being made: the photo is valid for the design it was asked for, and
+      // going back to that design should find it waiting.
       if (!body || !response.ok || !body.success) {
         const error = body && !body.success ? body.error : 'We couldn\'t make the product photo. Please try again.';
-        setMockups((m) => ({ ...m, [material]: { status: 'error', error } }));
+        setMockups((m) => ({ ...m, [key]: { status: 'error', error } }));
         return;
       }
-      setMockups((m) => ({ ...m, [material]: { status: 'done', dataUrl: body.dataUrl } }));
+      setMockups((m) => keepRecent({ ...m, [key]: { status: 'done', dataUrl: body.dataUrl } }));
     } catch {
-      if (requestKeyRef.current[material] !== key) return;
       setMockups((m) => ({
         ...m,
-        [material]: { status: 'error', error: 'We couldn\'t connect. Check your internet and try again.' },
+        [key]: { status: 'error', error: 'We couldn\'t connect. Check your internet and try again.' },
       }));
     }
   };
@@ -91,7 +109,7 @@ export function MockupPanel({
 
       <div className="grid gap-6 sm:grid-cols-2">
         {PENDANT_MATERIAL_LIST.map((material) => {
-          const state = mockups[material.id];
+          const state = mockups[`${designKey}:${material.id}`];
           return (
             <div key={material.id} className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
