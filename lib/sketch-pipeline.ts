@@ -32,7 +32,7 @@ import { roughInkTrace } from './ink-filter';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, buildFinishPrompt, ENHANCE_RETRY_NOTE } from './sketch-prompts';
-import { countForeheadMarks } from './face-marks';
+import { lookAtFaces } from './face-marks';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/sketch-pipeline.ts was imported into a browser bundle. This module is server-only.');
@@ -164,15 +164,15 @@ export async function createSketch(input: SketchInput): Promise<Buffer> {
   // Asked of the ORIGINAL photograph, not the edited one: the edit can lose a
   // small mark, and a mark the check misses is one the drawing will be told
   // nothing about, which is the safe way round.
-  const [photo, foreheadMarks] = await Promise.all([
+  const [photo, faces] = await Promise.all([
     CROP_TO_HEAD_CATEGORIES.has(input.category) ? cutToHead(edited, enhanced.mimeType) : Promise.resolve(edited),
-    countForeheadMarks(input.imageBytes, input.mimeType),
+    lookAtFaces(input.imageBytes, input.mimeType),
   ]);
 
   const rough = await roughInkTrace(photo);
 
   const finished = await generateImageFromImage({
-    prompt: buildFinishPrompt({ foreheadMarks }),
+    prompt: buildFinishPrompt(faces),
     images: [
       { bytes: photo, mimeType: 'image/png' },
       { bytes: rough, mimeType: 'image/png' },

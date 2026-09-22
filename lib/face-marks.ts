@@ -32,37 +32,52 @@ if (typeof window !== 'undefined') {
 
 const PROMPT = `Look at each person's forehead in this photograph, one by one, and at the parting of their hair.
 Count how many of them are ACTUALLY wearing a visible mark there right now: a bindi or pottu (a dot or shape between the eyebrows), a tilak, or sindoor in the parting. Look for a mark that is really on the skin in this photograph. Do not assume anyone wears one because of their clothes, their jewellery or where they seem to be from.
-Return "people": how many people are in the photograph, and "wearing": how many of them have such a mark clearly visible.`;
+Return "people": how many people are in the photograph, "wearing": how many of them have such a mark clearly visible, and "women": how many of the people are women or girls.`;
 
 const SCHEMA = {
   type: Type.OBJECT,
-  properties: { people: { type: Type.NUMBER }, wearing: { type: Type.NUMBER } },
-  required: ['people', 'wearing'],
+  properties: { people: { type: Type.NUMBER }, wearing: { type: Type.NUMBER }, women: { type: Type.NUMBER } },
+  required: ['people', 'wearing', 'women'],
 };
 
-async function countWearers(photo: Uint8Array, mimeType: string): Promise<number | null> {
+interface Counts {
+  wearing: number;
+  women: number;
+}
+
+async function countPeople(photo: Uint8Array, mimeType: string): Promise<Counts | null> {
   try {
     const answer = await generateJsonFromImage({ prompt: PROMPT, image: { bytes: photo, mimeType }, schema: SCHEMA });
-    const { people, wearing } = (answer ?? {}) as { people?: unknown; wearing?: unknown };
+    const { people, wearing, women } = (answer ?? {}) as { people?: unknown; wearing?: unknown; women?: unknown };
     if (typeof people !== 'number' || typeof wearing !== 'number') return null;
     if (!Number.isFinite(people) || !Number.isFinite(wearing) || people < 1 || wearing < 0) return null;
-    return wearing;
+    const womenCount = typeof women === 'number' && Number.isFinite(women) && women >= 0 ? women : 0;
+    return { wearing, women: womenCount };
   } catch (error) {
-    console.info(`[sketch] could not check for forehead marks: ${error instanceof Error ? error.message : String(error)}`);
+    console.info(`[sketch] could not look at the faces: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
 
+export interface FaceCounts {
+  /** People wearing a bindi, when two looks agree; null when they do not. */
+  foreheadMarks: number | null;
+  /** True when either look saw a woman or a girl — the drawing step is then told to spend more on those faces. */
+  anyWomen: boolean;
+}
+
 /**
- * How many people wear one, when two separate looks agree; null when they
- * disagree or the check could not be made, in which case the drawing step is
- * told nothing and falls back on its own judgement.
+ * Both answers come from the same two calls, so asking about women costs
+ * nothing on top of the bindi check. The bindi count still needs the two to
+ * agree, since acting on it either way can spoil a portrait; the women flag
+ * does not, because all it buys is extra care on a face.
  */
-export async function countForeheadMarks(photo: Uint8Array, mimeType: string): Promise<number | null> {
-  const [first, second] = await Promise.all([countWearers(photo, mimeType), countWearers(photo, mimeType)]);
-  const agreed = first !== null && first === second ? first : null;
+export async function lookAtFaces(photo: Uint8Array, mimeType: string): Promise<FaceCounts> {
+  const [first, second] = await Promise.all([countPeople(photo, mimeType), countPeople(photo, mimeType)]);
+  const foreheadMarks = first !== null && second !== null && first.wearing === second.wearing ? first.wearing : null;
+  const anyWomen = (first?.women ?? 0) > 0 || (second?.women ?? 0) > 0;
   console.info(
-    `[sketch] forehead marks counted: ${first ?? '?'} and ${second ?? '?'}${agreed === null ? ' — no agreement, saying nothing' : ` — telling the drawing step there ${agreed === 1 ? 'is 1' : `are ${agreed}`}`}`,
+    `[sketch] faces: bindis ${first?.wearing ?? '?'} and ${second?.wearing ?? '?'}${foreheadMarks === null ? ' (no agreement, saying nothing)' : ''}; women ${first?.women ?? '?'} and ${second?.women ?? '?'}${anyWomen ? ' — asking for extra detail on them' : ''}`,
   );
-  return agreed;
+  return { foreheadMarks, anyWomen };
 }

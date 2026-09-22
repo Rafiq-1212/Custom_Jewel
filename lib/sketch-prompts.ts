@@ -68,7 +68,9 @@ const FINISH_STYLE = `STYLE: a detailed pen-and-ink portrait in the Comica line-
 - SOMETHING OUT OF FOCUS IN THE PHOTOGRAPH IS DRAWN SIMPLY: its outline and the few forms you can actually make out, nothing more. A blurred hand close to the lens has no visible skin texture, so it gets none — inventing detail there is guessing, and it draws the eye away from the faces, which are the point of the piece.
 - FACES CARRY NO SHADING, BUT THEY ARE FULLY DRAWN. These two are different things and the difference is the whole style. SHADING is tone — hatching, strokes laid side by side to darken an area — and there is none of it on skin: no hatching on a cheek or a forehead, no strokes down the neck, no shaded patch beside the nose. DRAWING is a line where one form really ends and another begins, and every one of those is drawn, firmly: the edge of the nose down one side and the curve of its tip, both nostril wings and the two nostril openings, the line under the tip, the dip of the philtrum, the full shape of both lips and the crease beneath the lower one, the curve of the cheek where it meets the mouth, the outer line of the cheek and the jaw, the chin's own curve, the fold of the upper eyelid, the line under the eye, the ear's inner folds. A face with the shading left off is right; a face with the features left off is a blank oval, and that is the mistake to avoid. On a baby or a small child these lines are soft and few, but they are there: draw the round of the cheeks, the little chin, the shape of the nose.
 - A BINDI OR POTTU IS DRAWN ONLY IF THAT PERSON IS ACTUALLY WEARING ONE in image 1. Look at each face separately: if you can clearly see the mark on her forehead, draw it as a small solid mark in the same place and size; if you cannot, her forehead stays completely blank. The same goes for sindoor in a parting, a tilak or a religious mark of any kind. Never add one, never copy one from another face in the picture, and never leave out one that is there. These marks say something about a person's religion and whether she is married, and putting one on someone who does not wear it gives offence.
-- Never age anyone. Draw a wrinkle, a smile line or an under-eye line only where image 1 shows a clear crease; a smooth young face is drawn smooth. Only draw a mole if it is clearly visible in image 1; never add dots or marks that are not there. Do NOT draw acne, pores or skin blemishes.
+- A SMILE HAS TO READ AS A SMILE. When someone is smiling in image 1, draw what the smile actually does to the face: the mouth curving up and its corners pulled back and deepened, the fold that runs from beside the nose down past the corner of the mouth, the cheek lifted into a fuller round with its own curved edge, the lower lids pushed up a little and the crease at the outer corner of the eye if the photo has one. Draw the teeth if they show, as separate teeth with the line of the gum above them. A mouth drawn as a flat closed line on a smiling face is wrong, and so is a cheek left as empty paper when the smile has raised it.
+- The CHEEKS are drawn on every adult face: the line where the cheek's roundness turns away towards the ear or the jaw, and the soft fold beside the mouth. One clean line each, never a patch of shading.
+- Never age anyone. The lines above are the ones the photograph actually shows; do not add wrinkles, eye bags or slack skin on top of them, and a smooth young face stays smooth. Only draw a mole if it is clearly visible in image 1; never add dots or marks that are not there. Do NOT draw acne, pores or skin blemishes.
 - Clothing: outline, collar, buttons, and MANY folds. Crinkled or creased fabric gets lots of short fold and crinkle strokes that follow the fabric, so it looks textured, not empty. If the fabric has a pattern (stripes, checks, a print, embroidery), draw that pattern across the whole garment, following the folds. Crinkles and creases are not a pattern: they are drawn as fold strokes, never as stripes or checks.
 - NEVER cover a garment in a repeating fine texture — dots, mesh, crosshatch, weave, tiny checks, scribble shading. If a fabric's own print is that fine (a shirt of tiny dots, a woven texture), the garment is drawn PLAIN: only its folds, seams, collar, cuffs, buttons and pocket. Hint at the print in one small area at most, and leave the rest of the cloth empty white. A plain shirt drawn with its folds is right; a shirt filled edge to edge with thousands of little marks is wrong, and each of those marks is a separate cut for the laser.
 - DARK CLOTHING IS NEVER FILLED IN BLACK, no matter how dark it is in the photo. A navy blouse, a black jacket, a dark saree border: the fabric itself stays white, and you draw what is on it — its folds, its weave, its embroidery, its border pattern — as lines, exactly as a jeweller's engraving template does. Deep creases may get a few close parallel strokes, nothing more. This is not a style choice: a filled area has to be burned away in full by the laser, which costs far more than following lines.
@@ -130,14 +132,37 @@ function foreheadMarksPresent(count: number): string {
   return `IMPORTANT, AND CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND: ${who} wearing a bindi or pottu on the forehead. Find it in image 1 and draw it, as a small solid mark in the same place and the same size, on that person and on nobody else. It is not noise, not a speck and not a blemish, and this instruction comes above every rule below about ignoring small dots or keeping a forehead empty. Leaving it out is as wrong as adding one that is not there.`;
 }
 
+/**
+ * Asked for whenever there is a woman or a girl in the photograph. The
+ * client's judgement, from a run of real orders: the men come out well and
+ * the women come out short — the cheeks and the smile in particular. A man's
+ * face carries beard, stubble and heavier brows that give the drawing
+ * something to hold on to; a woman's face is mostly smooth skin, and smooth
+ * skin under a no-shading rule can end up as empty paper.
+ */
+const WOMENS_FACES = `THE WOMEN'S FACES IN THIS PICTURE NEED THE MOST WORK OF ANYTHING HERE. A man's face has a beard, stubble and heavy brows to describe it; a woman's is mostly smooth skin, and smooth skin is where this drawing tends to go empty. Give every woman's and girl's face its full structure, drawn as clean lines and never as shading:
+- The cheeks: the curve where the roundness of the cheek turns away towards the ear, the fold that runs beside the mouth, and the fuller round a smile lifts them into.
+- The smile: the exact curve of the mouth, its corners pulled back and deepened, the teeth drawn separately if they show, the lower lids pushed up by it.
+- The mouth closed or open, its real shape: the two peaks of the upper lip, the dip between them, the fullness of the lower lip and the line beneath it.
+- The eyes: the lid crease, the lashes as separate strokes, the iris a full circle with its pupil and catchlight, the line under the eye.
+- The eyebrows stroke by stroke, following the way they grow and thinning towards the outer end.
+- The nose, which on a softer face is easy to lose: the line of one side, the tip, both nostril wings, the openings.
+- The hairline, the ear, the jaw and the chin, each as a real edge.
+Judge the finished face against image 1: if you could not tell from your drawing what this woman's smile and cheeks look like, it is not finished.`;
+
 export interface FinishOptions {
   /** How many people the photo was found to have a forehead mark on, or null if it could not be settled. */
   foreheadMarks: number | null;
+  /** True when the photo has a woman or a girl in it. */
+  anyWomen: boolean;
 }
 
 export function buildFinishPrompt(options: FinishOptions): string {
-  if (options.foreheadMarks === null) return FINISH_PROMPT_BODY;
-  const fact = options.foreheadMarks === 0 ? NO_FOREHEAD_MARKS : foreheadMarksPresent(options.foreheadMarks);
-  return [FINISH_PROMPT_BODY, fact].join('\n\n');
+  const parts = [FINISH_PROMPT_BODY];
+  if (options.foreheadMarks !== null) {
+    parts.push(options.foreheadMarks === 0 ? NO_FOREHEAD_MARKS : foreheadMarksPresent(options.foreheadMarks));
+  }
+  if (options.anyWomen) parts.push(WOMENS_FACES);
+  return parts.join('\n\n');
 }
 
