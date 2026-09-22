@@ -17,7 +17,7 @@
 
 import { DEFAULT_TRANSFORM, PENDANT_VIEWBOX, type PendantTransform } from './pendant-shapes';
 
-export type CategoryId = 'face' | 'half-size' | 'couple' | 'family' | 'pet' | 'heart' | 'round' | 'oval';
+export type CategoryId = 'face' | 'half-size' | 'full-size' | 'couple' | 'family' | 'pet' | 'heart' | 'round' | 'oval';
 
 export interface PendantCategory {
   id: CategoryId;
@@ -49,6 +49,19 @@ export const PENDANT_CATEGORIES: Record<CategoryId, PendantCategory> = {
     description: 'Head and shoulders, down to the chest.',
     engravingArea: { x: VB * 0.26, y: VH * 0.28, width: VB * 0.48, height: VH * 0.5 },
     defaultTransform: { ...DEFAULT_TRANSFORM, zoom: 1.1 },
+  },
+  'full-size': {
+    id: 'full-size',
+    label: 'Full Size Pendant',
+    description: 'The whole person, head to feet.',
+    // Tall and narrow, the shape a standing person actually is. Half Size
+    // was being chosen for full-length photos and cutting them off at the
+    // chest, which is the complaint this category answers. The zoom was
+    // picked by rendering a full-length sketch on a round plate at 0.9, 1.05
+    // and 1.2: at 1.2 the heads and feet touch the edge, at 0.9 the figures
+    // swim in metal, and 1.05 fills the plate with both inside it.
+    engravingArea: { x: VB * 0.33, y: VH * 0.14, width: VB * 0.34, height: VH * 0.76 },
+    defaultTransform: { ...DEFAULT_TRANSFORM, zoom: 1.05 },
   },
   couple: {
     id: 'couple',
@@ -114,7 +127,7 @@ export function isCategoryId(value: string): value is CategoryId {
  * `CategoryId`s — `PENDANT_CATEGORIES` still has entries for them — purely so
  * a session saved before this change still loads correctly.
  */
-export const GENERATION_CATEGORY_IDS: CategoryId[] = ['face', 'half-size', 'couple', 'family', 'pet'];
+export const GENERATION_CATEGORY_IDS: CategoryId[] = ['face', 'half-size', 'full-size', 'couple', 'family', 'pet'];
 
 export const GENERATION_CATEGORY_LIST: PendantCategory[] = GENERATION_CATEGORY_IDS.map(
   (id) => PENDANT_CATEGORIES[id],
