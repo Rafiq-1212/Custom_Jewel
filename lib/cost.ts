@@ -43,10 +43,14 @@ const TEXT_MODEL = {
 
 /**
  * Only for the rupee figure in the log line, so the number reads the way the
- * shop thinks about it. Set INR_PER_USD in the environment to keep it
- * current; the dollar figure beside it is the one that is exact.
+ * shop thinks about it. INR_PER_USD in the environment is what actually sets
+ * it (see .env.example; it is set on Vercel for all three environments) —
+ * this constant is the fallback for a machine that has not set it, and is
+ * the rate on the day it was last touched. The dollar figure beside it is
+ * the one that is exact, so a drifted rate costs nothing but a rupee or two
+ * of reading accuracy.
  */
-const DEFAULT_INR_PER_USD = 95.8;
+const DEFAULT_INR_PER_USD = 95.6;
 
 function inrPerUsd(): number {
   const configured = Number(process.env.INR_PER_USD);
