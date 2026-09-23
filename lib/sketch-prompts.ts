@@ -13,6 +13,7 @@
  */
 
 import type { CategoryId } from './pendant-categories';
+import type { MarkedFace } from './face-marks';
 
 /**
  * What to keep in the photo for each pendant style. Applied during the
@@ -42,8 +43,8 @@ export function buildEnhancePrompt(category: CategoryId): string {
 
 1. Remove the background completely and replace it with flat pure white (#FFFFFF): walls, furniture, vehicles, car doors, windows, plants, sky, and anything else BEHIND or BESIDE the people (or pet). Anything a person is wearing, holding or carrying counts as part of them and STAYS exactly as it is: a handbag, a clutch, a purse, a bag strap across a shoulder, glasses, a watch, a phone, a bouquet, a garland, a walking stick, a baby. Do not tidy the picture by removing them. Furniture and equipment are the other way round: a chair, a sofa, a bed, a baby walker, a pram, a car seat, a high chair or a cot is background and goes, even where the person is sitting in it and touching it on all sides.
 2. ${keep}
-3. Enhance what remains like a professional retoucher: even out the exposure, correct the colour and white balance, lift the shadows on the faces, and bring out facial detail (eyes, eyebrows, lips, beard and hair texture) with crisp natural sharpening and good local contrast.
-4. OPEN UP THE DARK AREAS, and raise the fine detail everywhere. Nothing in the picture may stay crushed to black: a navy blouse, a dark saree, a black jacket, a shadowed sleeve and dark hair must all show what they are made of — the weave, the folds, the embroidery, the print, the individual strands. Lift those shadows until that texture is plainly visible, while keeping the colours natural. At the same time raise the micro-contrast on fine things (embroidery, lace, jewellery, chains, fabric pattern, eyelashes, hair strands, stubble) so each one is separate and sharp rather than a smudge. This picture is about to be traced line by line: every detail that is not visible here is lost for good.
+3. Correct the photograph like a printer preparing it, not like a retoucher improving it: even out the exposure, correct the colour and white balance, and lift the shadows on the faces so the features in them can be SEEN. Those are tonal corrections to a photograph and nothing more. Do not sharpen, redraw, re-render or repaint a face, an eye, a lip or an eyebrow. If a feature is soft in this photograph it stays soft: a soft real eye is worth more here than a crisp invented one, because whatever you put in its place is what will be engraved into the metal.
+4. OPEN UP THE DARK AREAS. Nothing in the picture may stay crushed to black: a navy blouse, a dark saree, a black jacket, a shadowed sleeve and dark hair must all show what they are made of — the weave, the folds, the embroidery, the print, the individual strands. Lift those shadows until that texture is plainly visible, while keeping the colours natural, and raise the micro-contrast on the fine things a garment carries (embroidery, lace, jewellery, chains, fabric pattern) so each is separate rather than a smudge. This is about revealing what the photograph already recorded in the dark, NOT about adding detail: it applies to cloth, hair and jewellery, and it never becomes a licence to sharpen or rebuild a face. This picture is about to be traced line by line, and a detail that was never in the photograph is a detail that will be engraved as a lie.
 5. Do NOT change anyone's face, expression, pose, head angle or tilt, gaze direction, proportions, hairstyle, skin marks or clothing. Do not beautify, smooth skin, slim, reshape or restyle. Do not move, resize or re-crop what you keep; it must stay exactly where it is in the frame.
 6. NEVER re-pose anyone. A head photographed at an angle stays at that angle: do not turn a face towards the camera, do not straighten a tilted head, do not re-render the head from another viewpoint. If you cannot retouch a part without redrawing it, leave that part exactly as it is.
 7. Never remove or hide a part of a person you are keeping — an arm, a hand, a finger, an ear, a piece of jewellery, or anything they are wearing, holding or carrying. Where you take the background away, leave plain white in its place: never paint clothing, skin, fabric or pattern over the gap to tidy it up.
@@ -70,7 +71,7 @@ const FINISH_STYLE = `STYLE: a detailed pen-and-ink portrait in the Comica line-
 - FACES CARRY NO SHADING, BUT THEY ARE FULLY DRAWN. These two are different things and the difference is the whole style. SHADING is tone — hatching, strokes laid side by side to darken an area — and there is none of it on skin: no hatching on a cheek or a forehead, no strokes down the neck, no shaded patch beside the nose. DRAWING is a line where one form really ends and another begins, and every one of those is drawn, firmly: the edge of the nose down one side and the curve of its tip, both nostril wings and the two nostril openings, the line under the tip, the dip of the philtrum, the full shape of both lips and the crease beneath the lower one, the curve of the cheek where it meets the mouth, the outer line of the cheek and the jaw, the chin's own curve, the fold of the upper eyelid, the line under the eye, the ear's inner folds. A face with the shading left off is right; a face with the features left off is a blank oval, and that is the mistake to avoid. On a baby or a small child these lines are soft and few, but they are there: draw the round of the cheeks, the little chin, the shape of the nose.
 - A BINDI OR POTTU IS DRAWN ONLY IF THAT PERSON IS ACTUALLY WEARING ONE in image 1. Look at each face separately: if you can clearly see the mark on her forehead, draw it as a small solid mark in the same place and size; if you cannot, her forehead stays completely blank. The same goes for sindoor in a parting, a tilak or a religious mark of any kind. Never add one, never copy one from another face in the picture, and never leave out one that is there. These marks say something about a person's religion and whether she is married, and putting one on someone who does not wear it gives offence.
 - A SMILE HAS TO READ AS A SMILE. When someone is smiling in image 1, draw what the smile actually does to the face: the mouth curving up and its corners pulled back and deepened, the fold that runs from beside the nose down past the corner of the mouth, the cheek lifted into a fuller round with its own curved edge, the lower lids pushed up a little and the crease at the outer corner of the eye if the photo has one. If the teeth show, keep them simple: the shape of the row as a whole and the line where the upper lip crosses it, with at most a hint of the join between the two front teeth. Do not outline every tooth, do not darken the gum line and do not lay strokes between the teeth — a mouth drawn tooth by tooth stops looking like this person's smile. A mouth drawn as a flat closed line on a smiling face is wrong, and so is a cheek left as empty paper when the smile has raised it.
-- The CHEEKS are drawn on every adult face: the line where the cheek's roundness turns away towards the ear or the jaw, and the soft fold beside the mouth. One clean line each, never a patch of shading.
+- The CHEEKS: where image 1 shows the cheek's roundness turning away towards the ear or the jaw, or a fold beside the mouth, draw it — one clean line each, never a patch of shading. Where the photograph shows a smooth cheek with no edge in it, the cheek stays white. A pair of curved lines added to a face that has none of its own is an invention, and it changes who the person is.
 - Never age anyone. The lines above are the ones the photograph actually shows; do not add wrinkles, eye bags or slack skin on top of them, and a smooth young face stays smooth. Only draw a mole if it is clearly visible in image 1; never add dots or marks that are not there. Do NOT draw acne, pores or skin blemishes.
 - Clothing: outline, collar, buttons, and MANY folds. Crinkled or creased fabric gets lots of short fold and crinkle strokes that follow the fabric, so it looks textured, not empty. If the fabric has a pattern (stripes, checks, a print, embroidery), draw that pattern across the whole garment, following the folds. Crinkles and creases are not a pattern: they are drawn as fold strokes, never as stripes or checks.
 - NEVER cover a garment in a repeating fine texture — dots, mesh, crosshatch, weave, tiny checks, scribble shading. If a fabric's own print is that fine (a shirt of tiny dots, a woven texture), the garment is drawn PLAIN: only its folds, seams, collar, cuffs, buttons and pocket. Hint at the print in one small area at most, and leave the rest of the cloth empty white. A plain shirt drawn with its folds is right; a shirt filled edge to edge with thousands of little marks is wrong, and each of those marks is a separate cut for the laser.
@@ -98,20 +99,24 @@ Produce the finished ink artwork for laser engraving on a metal pendant: redraw 
 
 This artwork is cut into metal with a laser, one stroke at a time, so a stroke that cannot be followed by eye cannot be cut either: thin, separate, evenly weighted strokes everywhere.
 
-DETAIL (the artwork is judged on this, and it is drawn with lines, not shading — see FACES CARRY NO SHADING below):
+DETAIL (the artwork is judged on this, and it is drawn with lines, not shading — see FACES CARRY NO SHADING below).
+
+EVERYTHING IN THIS LIST IS SOMETHING TO LOOK FOR IN IMAGE 1, NOT SOMETHING TO PUT ON A FACE. Find it in the photograph first, then draw the shape the photograph shows. Where the photograph does not show it — the light is flat, the face is small, the feature is soft — it does not go into the drawing, and the paper is left white instead. A face assembled from parts you know a face has will come out looking like a stranger with this person's hairstyle, and that is the single worst thing this drawing can do. This is a portrait of one particular person, judged by whether their own family recognises them.
+
+Image 2 is your guide to where the real edges are. It was made from the photograph by machine, with no idea of what a face is, so it has no opinions to add: where it shows nothing, there was nothing to see.
 - Hair: dense and dark as described in the style, with individual strand texture visible along the edges, the parting and the highlights. Keep the real shape of curls, waves and messy tufts.
-- Eyes, the part everyone looks at first: bold upper lid and lash line, the crease above the eye, eyelashes, the iris drawn as a full circle with a solid black pupil inside it and a small white catchlight, the lower lid line, the inner corner, and the under-eye line where the photo shows one. THE TWO EYES MUST MATCH: same height on the face, same shape, same size and the same amount of detail in both. On a head turned to one side the far eye is narrower, but it is never higher, lower, simpler or emptier than the near one, and never left as a bare almond outline.
+- Eyes, the part everyone looks at first, and the part that most often comes back looking false. Draw THIS PERSON'S eyes, at the size, shape, angle and openness image 1 shows them, however ordinary or asymmetric that is: the upper lid and lash line, the crease above the eye if this face has a visible one, the lashes as the photo shows them, the iris with its pupil, the lower lid line, the inner corner, and the under-eye line where the photo shows one. A catchlight goes in only where the photograph has one. Do not enlarge or open the eyes, do not lift the outer corners, do not add a crease or a lash line that is not there, and do not give a small or soft eye a full round iris it never had — a large, bright, perfectly drawn eye on a face that does not have one is the exact thing that makes these portraits look fake. THE TWO EYES GET THE SAME CARE: neither is left as a bare almond outline while the other is finished. On a head turned to one side the far eye is narrower and partly hidden, and it is drawn that way, not straightened to match.
 - Eyebrows: dark, built from short hair strokes in the direction they grow.
 - Nose: its real shape, not a pair of hooks. The line down the bridge where the photo shows one, the ball of the tip, BOTH nostril wings, the two nostril openings as small dark marks, and the line under the tip. A woman's or a child's nose is finer than a man's, but it gets the same parts.
 - Lips, drawn with a LIGHT HAND — this is the one place where more detail makes the drawing worse: the dip of the upper lip and its two peaks, the line between the lips carried out to both corners, the edge of the lower lip, and the shadow line beneath it if the photo shows one. That is all of it. The lips themselves are never darkened, filled or shaded, whatever colour the lipstick is, and they get no vertical creases, no texture strokes and no doubled outlines. An over-drawn mouth is the fastest way to make a real person look like someone else.
-- Face: the chin, the jaw and the round of the cheeks as clean outlines on white skin, with no shading filled in behind them. The face must have its own structure — someone should be able to see the shape of this person's nose, mouth and cheeks from the drawing alone.
+- Face: the chin, the jaw and the round of the cheeks as clean outlines on white skin, with no shading filled in behind them. Every one of those lines is a line the photograph shows: this person's own jaw, their own chin, the edge their own cheek makes. Someone should be able to see the shape of THIS person's face from the drawing alone — which means copying it, not completing it.
 - Ears: the inner folds, with a couple of strokes in the deepest part only.
 - Arms and hands: draw EVERY arm, hand and finger that is visible in image 1, with the fingernails, knuckles and the creases of the fingers. A hand resting on a shoulder, an arm around a back, a hand holding another hand: these are the point of the picture and must never be left out, merged into the clothing behind them or hidden under a dark area.
 - Jewellery: necklaces, chains, earrings, bangles, a watch, a maang tikka, drawn bead by bead and link by link as image 1 shows them.
 - Anything held or worn: a handbag with its handles and clasp, a clutch, a bag strap running over a shoulder, glasses, a garland, a bouquet, a shawl over an arm. These are part of the picture and often the point of it. Draw every one of them as image 1 shows it, and never let the clothing behind one close over its place.
 - Clothing: every fold, crinkle, seam, collar edge and button.
 
-NEVER INVENT ANYTHING. Draw only what image 1 actually shows. No pattern, embroidery, weave, print, jewellery, buttons, straps or folds that are not in the photograph, and nothing added to fill an area you are unsure about — an area drawn plain is right, an area filled with something made up is not. If a person is holding or wearing something, that is what goes there: never replace it with fabric or pattern of your own.
+NEVER INVENT ANYTHING, AND NOTHING ON A FACE IS DRAWN FROM MEMORY. Draw only what image 1 actually shows. No pattern, embroidery, weave, print, jewellery, buttons, straps or folds that are not in the photograph, and nothing added to fill an area you are unsure about — an area drawn plain is right, an area filled with something made up is not. If a person is holding or wearing something, that is what goes there: never replace it with fabric or pattern of your own.
 
 NO STRAY LINES. Every line you draw has to be something real in image 1: an edge, a feature, a fold, a strand. Do not double an outline that is already there, do not run a line off into empty white, do not leave a stroke hanging in the air with nothing at either end, and do not sketch in a line that has no counterpart in the photo. Where a line ends, it ends cleanly on another line or on the white.
 
@@ -128,9 +133,27 @@ Output only the finished line art.`;
  * noise, and the one that keeps foreheads empty. Neither knows what a bindi
  * is, so the fact has to arrive with authority over them.
  */
-function foreheadMarksPresent(count: number): string {
-  const who = count === 1 ? 'ONE person in this picture is' : `${count} people in this picture are`;
-  return `IMPORTANT, AND CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND: ${who} wearing a bindi or pottu on the forehead. Find it in image 1 and draw it, as a small solid mark in the same place and the same size, on that person and on nobody else. It is not noise, not a speck and not a blemish, and this instruction comes above every rule below about ignoring small dots or keeping a forehead empty. Leaving it out is as wrong as adding one that is not there.`;
+function foreheadMarksByPerson(faces: MarkedFace[]): string {
+  const wearing = faces.filter((face) => face.wears);
+  const bare = faces.filter((face) => !face.wears);
+  const lines = [
+    'IMPORTANT, AND CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND, ONE FOREHEAD AT A TIME. Each person below was looked at on their own, close up. Go through them one by one:',
+  ];
+  for (const face of wearing) {
+    lines.push(
+      `- ${face.where.toUpperCase()} IS WEARING a bindi or pottu. Find it in image 1 and draw it on that face, as a small solid mark in the same place and the same size. It is not noise, not a speck and not a blemish, and this comes above every rule below about ignoring small dots or keeping a forehead empty.`,
+    );
+  }
+  for (const face of bare) {
+    lines.push(`- ${face.where.toUpperCase()} is NOT wearing one. That forehead and that hair parting stay completely blank.`);
+  }
+  if (wearing.length > 1) {
+    lines.push(
+      `All ${wearing.length} of the people named as wearing one get their mark. Drawing it on the first of them and forgetting the rest is the mistake this list exists to stop.`,
+    );
+  }
+  lines.push('Leaving out a mark that is there is exactly as wrong as adding one that is not: both say something untrue about that person.');
+  return lines.join('\n');
 }
 
 /**
@@ -141,27 +164,36 @@ function foreheadMarksPresent(count: number): string {
  * something to hold on to; a woman's face is mostly smooth skin, and smooth
  * skin under a no-shading rule can end up as empty paper.
  */
-const WOMENS_FACES = `THE WOMEN'S FACES IN THIS PICTURE NEED THE MOST WORK OF ANYTHING HERE. A man's face has a beard, stubble and heavy brows to describe it; a woman's is mostly smooth skin, and smooth skin is where this drawing tends to go empty. Give every woman's and girl's face its full structure, drawn as clean lines and never as shading:
+const WOMENS_FACES = `THE WOMEN'S FACES IN THIS PICTURE NEED THE MOST LOOKING OF ANYTHING HERE. A man's face has a beard, stubble and heavy brows to describe it; a woman's is mostly smooth skin, and smooth skin is where this drawing tends to go empty — or, worse, where it gets filled in with a face out of your head instead of hers. The answer to both is the same: go back to image 1 and look harder at each of these, then draw exactly the shape it shows, as clean lines and never as shading. Where the photograph truly shows nothing, that part stays white; an empty patch is a smaller mistake than a pretty line that belongs to someone else.
 - The cheeks: the curve where the roundness of the cheek turns away towards the ear, the fold that runs beside the mouth, and the fuller round a smile lifts them into.
 - The smile: the exact curve of the mouth, its corners pulled back and deepened, the row of teeth kept simple if they show, the lower lids pushed up by it. The work here is the CURVE of the smile and what it does to the cheeks and the eyes, not detail inside the mouth.
 - The mouth closed or open, its real shape: the two peaks of the upper lip, the dip between them, the fullness of the lower lip and the line beneath it — clean lines only, with the lips left white and never darkened for lipstick.
-- The eyes: the lid crease, the lashes as separate strokes, the iris a full circle with its pupil and catchlight, the line under the eye.
+- The eyes exactly as they sit in image 1 — their size, their shape, how open they are: the lid crease if this face has one, the lashes as the photo shows them, the iris with its pupil, the line under the eye. Copy her eyes; do not improve them.
 - The eyebrows stroke by stroke, following the way they grow and thinning towards the outer end.
 - The nose, which on a softer face is easy to lose: the line of one side, the tip, both nostril wings, the openings.
 - The hairline, the ear, the jaw and the chin, each as a real edge.
-Judge the finished face against image 1: if you could not tell from your drawing what this woman's smile and cheeks look like, it is not finished.`;
+Judge the finished face against image 1, twice over: if you could not tell from your drawing what this woman's smile and cheeks look like, it is not finished — and if the drawing shows a smile or a cheek or an eye that is not hers, it is worse than unfinished. Her own family has to recognise her in it.`;
 
 export interface FinishOptions {
-  /** How many people the photo was found to have a forehead mark on, or null if it could not be settled. */
-  foreheadMarks: number | null;
+  /** Each person whose forehead was settled, left to right, or null to say nothing at all. */
+  faces: MarkedFace[] | null;
+  /** True when every person in the photo was settled — see FaceMarks. */
+  complete: boolean;
   /** True when the photo has a woman or a girl in it. */
   anyWomen: boolean;
 }
 
 export function buildFinishPrompt(options: FinishOptions): string {
   const parts = [FINISH_PROMPT_BODY];
-  if (options.foreheadMarks !== null) {
-    parts.push(options.foreheadMarks === 0 ? NO_FOREHEAD_MARKS : foreheadMarksPresent(options.foreheadMarks));
+  const faces = options.faces ?? [];
+  if (faces.length > 0) {
+    // Nobody wearing one at all is stated as a flat fact rather than as a
+    // list of denials: told only "draw one if it is there", the model drew
+    // one anyway on two women who wear none. That flat fact is only
+    // available when every face was settled, though — otherwise the denial
+    // is made person by person, and the unchecked faces are left unsaid.
+    const anyWearing = faces.some((face) => face.wears);
+    parts.push(!anyWearing && options.complete ? NO_FOREHEAD_MARKS : foreheadMarksByPerson(faces));
   }
   if (options.anyWomen) parts.push(WOMENS_FACES);
   return parts.join('\n\n');

@@ -25,7 +25,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { FaceCounts } from './face-marks';
+import type { FaceMarks } from './face-marks';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/photo-cache.ts was imported into a browser bundle. This module is server-only.');
@@ -35,7 +35,7 @@ if (typeof window !== 'undefined') {
 export interface PreparedPhoto {
   /** Touched up, and for Face Pendant already cut off below the jaw. */
   photo: Buffer;
-  faces: FaceCounts;
+  faces: FaceMarks;
 }
 
 const TTL_MS = 30 * 60_000;
