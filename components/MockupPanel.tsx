@@ -3,8 +3,10 @@
 /**
  * Photorealistic product mockups — the images that go on the e-commerce
  * listing. One button per metal; each click is one deliberate call to
- * `/api/render-mockup` (the app's second Gemini use, see lib/mockup.ts), and
- * each call costs about six rupees.
+ * `/api/render-mockup` (the app's second Gemini use, see lib/mockup.ts). It
+ * is queued as a batch job at half price, about three rupees instead of six,
+ * so the button submits the job and this panel polls until the picture is
+ * ready rather than holding one long request open.
  *
  * A photo belongs to one exact pendant, so it is stored under a key made of
  * the whole design — sketch, shape, cut, rim, position — and shown only
@@ -20,6 +22,7 @@
 
 import * as React from 'react';
 import { dataUrlToBlob, downloadFile, extensionForDataUrl } from '@/lib/download';
+import { MockupError, runMockup } from '@/lib/mockup-client';
 import { PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import type { DesignType, SilhouetteContour } from '@/lib/pendant-geometry';
@@ -72,28 +75,20 @@ export function MockupPanel({
     const key = `${designKey}:${material}`;
     setMockups((m) => ({ ...m, [key]: { status: 'loading' } }));
     try {
-      const response = await fetch('/api/render-mockup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sketch, shape, material, transform, engravingArea, designType, contour, rimColor, category }),
-      });
-      const body = (await response.json().catch(() => null)) as
-        | { success: true; dataUrl: string }
-        | { success: false; error: string }
-        | null;
-      // Stored under its own key whatever the operator changed while it was
-      // being made: the photo is valid for the design it was asked for, and
-      // going back to that design should find it waiting.
-      if (!body || !response.ok || !body.success) {
-        const error = body && !body.success ? body.error : 'We couldn\'t make the product photo. Please try again.';
-        setMockups((m) => ({ ...m, [key]: { status: 'error', error } }));
-        return;
-      }
-      setMockups((m) => keepRecent({ ...m, [key]: { status: 'done', dataUrl: body.dataUrl } }));
-    } catch {
+      // The wait happens in the browser (lib/mockup-client.ts): the picture
+      // is a batch job, answered when Google gets to it. The result is stored
+      // under its own key whatever the operator changed meanwhile — the photo
+      // is valid for the design it was asked for, and going back to that
+      // design should find it waiting rather than charging again.
+      const dataUrl = await runMockup({ sketch, shape, material, transform, engravingArea, designType, contour, rimColor, category });
+      setMockups((m) => keepRecent({ ...m, [key]: { status: 'done', dataUrl } }));
+    } catch (error) {
       setMockups((m) => ({
         ...m,
-        [key]: { status: 'error', error: 'We couldn\'t connect. Check your internet and try again.' },
+        [key]: {
+          status: 'error',
+          error: error instanceof MockupError ? error.message : 'We couldn\'t connect. Check your internet and try again.',
+        },
       }));
     }
   };
@@ -103,8 +98,8 @@ export function MockupPanel({
   return (
     <div className="flex flex-col gap-5">
       <p className="text-xs text-slate-500">
-        A realistic photo of this exact pendant, ready for your product page. Each one takes about 10 to 15 seconds to
-        make.
+        A realistic photo of this exact pendant, ready for your product page. Each one is queued at half price, so it
+        takes a few minutes — leave this page open while it comes back.
       </p>
 
       <div className="grid gap-6 sm:grid-cols-2">

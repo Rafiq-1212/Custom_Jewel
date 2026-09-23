@@ -18,19 +18,26 @@
  * `leftObjectsBehind`). After each AI step the result is checked for an
  * accidental left-right mirror and flipped back if needed (lib/orientation.ts).
  *
- * Step 1 and the questions about the faces are about the PHOTOGRAPH, so a
- * second attempt at the same photo reuses them (lib/photo-cache.ts) and pays
- * only for step 3 — a third less, for an identical result. Pass
- * `redoPhotoEdit` when it is the photo edit itself that went wrong.
+ * BOTH image calls go through the Batch API at half price (lib/gemini-batch.ts),
+ * which is what brings a finished piece from about 28 rupees to about 14. A
+ * batch job cannot be waited for inside one request — measured, the photo
+ * edit took 87 seconds and the 4K drawing 379 — so this module no longer runs
+ * the pipeline end to end. It exposes the three points where work actually
+ * happens, and the browser drives them by polling (app/api/sketch/route.ts):
+ *
+ *   startTouchUp   submit step 1
+ *   startFinish    read step 1's result, do step 2, submit step 3
+ *   collectSketch  read step 3's result and finish the artwork
+ *
+ * Nothing is stored between those calls. A finished batch job's result stays
+ * readable from Google, so the touched-up photo is simply read again when it
+ * is needed — which also makes a redraw cheap and certain: the same photo-edit
+ * job is reused and only the drawing is paid for again.
  */
 
 import sharp from 'sharp';
-import {
-  GeminiGenerationError,
-  generateImageFromImage as generateOnce,
-  type GenerateImageFromImageInput,
-  type GenerateImageResult,
-} from './gemini';
+import { type GenerateImageResult } from './gemini';
+import { readImageJob, submitImageJob } from './gemini-batch';
 import { cropPhotoToHead, cutBelowJawline } from './image-processing';
 import { findJawline } from './jawline';
 import { roughInkTrace } from './ink-filter';
@@ -38,8 +45,7 @@ import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, buildFinishPrompt, ENHANCE_RETRY_NOTE } from './sketch-prompts';
 import { lookAtFaces } from './face-marks';
-import { getPreparedPhoto, preparedPhotoKey, setPreparedPhoto, type PreparedPhoto } from './photo-cache';
-import { recordSaving, TYPICAL_COST } from './cost';
+import { TYPICAL_COST } from './cost';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/sketch-pipeline.ts was imported into a browser bundle. This module is server-only.');
@@ -96,24 +102,6 @@ const BOTTOM_BAND = 0.04;
 /** More than this share of non-white pixels in the bottom band means something was left behind. */
 const MAX_BOTTOM_INK = 0.12;
 
-/**
- * The model now and then refuses a perfectly ordinary family photo with the
- * catch-all reason "OTHER", and the identical request goes through on the
- * next try (seen while testing: one of two identical requests refused). One
- * retry for that specific refusal; any other safety reason is respected.
- */
-async function generateImageFromImage(input: GenerateImageFromImageInput): Promise<GenerateImageResult> {
-  try {
-    return await generateOnce(input);
-  } catch (error) {
-    if (error instanceof GeminiGenerationError && error.code === 'SAFETY_BLOCKED' && /\bOTHER\b/.test(error.detail ?? '')) {
-      console.info(`[sketch] refused with reason OTHER, retrying once`);
-      return generateOnce(input);
-    }
-    throw error;
-  }
-}
-
 /** 'draft' finishes at 2K for a cheap preview; 'final' at 4K. */
 export type SketchQuality = 'draft' | 'final';
 
@@ -158,15 +146,15 @@ async function leftObjectsBehind(image: GenerateImageResult): Promise<boolean> {
   return total > 0 && ink / total > MAX_BOTTOM_INK;
 }
 
-async function enhance(input: SketchInput, retry: boolean): Promise<GenerateImageResult> {
-  const edited = await generateImageFromImage({
-    prompt: retry ? `${buildEnhancePrompt(input.category)}\n\n${ENHANCE_RETRY_NOTE}` : buildEnhancePrompt(input.category),
-    images: [{ bytes: input.imageBytes, mimeType: input.mimeType }],
-  });
-  const checked = await unmirror(Buffer.from(input.imageBytes), Buffer.from(edited.bytes));
-  if (!checked.flipped) return edited;
-  console.info(`[sketch] ${input.category}: photo edit came back mirrored, flipped it back`);
-  return { bytes: checked.image, mimeType: 'image/png' };
+/** Submits the photo edit. `retry` adds the note for a pet photo that kept a car door. */
+export async function startTouchUp(input: SketchInput, retry = false): Promise<string> {
+  return submitImageJob(
+    {
+      prompt: retry ? `${buildEnhancePrompt(input.category)}\n\n${ENHANCE_RETRY_NOTE}` : buildEnhancePrompt(input.category),
+      images: [{ bytes: input.imageBytes, mimeType: input.mimeType }],
+    },
+    `touch-up ${input.category}`,
+  );
 }
 
 /**
@@ -186,54 +174,84 @@ async function cutToHead(edited: Buffer, mimeType: string): Promise<Buffer> {
 }
 
 /**
- * Everything that depends on the photograph rather than on the drawing: the
- * photo edit, the Face Pendant jaw cut, and the questions about the faces.
- * Cached per photograph, so a second attempt at the same photo pays only for
- * the drawing.
+ * The touched-up photo as the drawing step needs it: unmirrored against the
+ * original, and cut to the head for a Face Pendant. The edit itself is read
+ * from its job rather than stored anywhere, which costs one API read and no
+ * infrastructure.
  */
-async function preparePhoto(input: SketchInput): Promise<PreparedPhoto> {
-  let enhanced = await enhance(input, false);
-  if (HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(enhanced))) {
-    console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
-    enhanced = await enhance(input, true);
-  }
-
-  const edited = Buffer.from(enhanced.bytes);
-  // Asked of the ORIGINAL photograph, not the edited one: the edit can lose a
-  // small mark, and a mark the check misses is one the drawing will be told
-  // nothing about, which is the safe way round.
-  const [photo, faces] = await Promise.all([
-    CROP_TO_HEAD_CATEGORIES.has(input.category) ? cutToHead(edited, enhanced.mimeType) : Promise.resolve(edited),
-    lookAtFaces(input.imageBytes, input.mimeType),
-  ]);
-  return { photo, faces };
+async function touchedUpPhoto(edited: GenerateImageResult, original: Uint8Array, category: CategoryId): Promise<Buffer> {
+  const checked = await unmirror(Buffer.from(original), Buffer.from(edited.bytes));
+  if (checked.flipped) console.info(`[sketch] ${category}: photo edit came back mirrored, flipped it back`);
+  const photo = checked.image;
+  return CROP_TO_HEAD_CATEGORIES.has(category) ? cutToHead(photo, 'image/png') : photo;
 }
 
-export async function createSketch(input: SketchInput): Promise<Buffer> {
-  const key = preparedPhotoKey(input.imageBytes, input.category);
-  const cached = input.redoPhotoEdit ? null : getPreparedPhoto(key);
-  if (cached) {
-    console.info(`[sketch] ${input.category}: reusing the touched-up photo from an earlier attempt, drawing only`);
-    recordSaving(
-      'the photo edit and the face checks',
-      TYPICAL_COST.touchUp +
-        TYPICAL_COST.faceCheck +
-        (CROP_TO_HEAD_CATEGORIES.has(input.category) ? TYPICAL_COST.jawline : 0),
-    );
-  }
-  const { photo, faces } = cached ?? (await preparePhoto(input));
-  if (!cached) setPreparedPhoto(key, { photo, faces });
+export interface FinishStep {
+  /** A fresh photo-edit job, when the first edit left objects behind and has to be redone. */
+  touchUpJob?: string;
+  /** The drawing job, once the photo is good enough to draw from. */
+  finishJob?: string;
+}
 
+/**
+ * Reads the finished photo edit, does the free middle step on it, and submits
+ * the drawing. When a head-only edit came back with something still touching
+ * the bottom, this submits a second photo edit instead and says so, and the
+ * browser simply waits again.
+ */
+export async function startFinish(input: SketchInput & { touchUpJob: string; retried?: boolean }): Promise<FinishStep> {
+  // This is the step that pays for the photo edit: it is the one that reads
+  // it in order to move the sketch forward. Later reads of the same job cost
+  // nothing more and are not counted again.
+  const edited = await readImageJob(input.touchUpJob, `touch-up ${input.category}`, { count: true });
+  if (!input.retried && HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(edited))) {
+    console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
+    return { touchUpJob: await startTouchUp(input, true) };
+  }
+
+  // The faces are asked of the ORIGINAL photograph, not the edited one: the
+  // edit can lose a small mark, and a mark the check misses is one the
+  // drawing will be told nothing about, which is the safe way round.
+  const [photo, faces] = await Promise.all([
+    touchedUpPhoto(edited, input.imageBytes, input.category),
+    lookAtFaces(input.imageBytes, input.mimeType),
+  ]);
   const rough = await roughInkTrace(photo);
 
-  const finished = await generateImageFromImage({
-    prompt: buildFinishPrompt(faces),
-    images: [
-      { bytes: photo, mimeType: 'image/png' },
-      { bytes: rough, mimeType: 'image/png' },
-    ],
-    imageSize: input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE,
-  });
+  const finishJob = await submitImageJob(
+    {
+      prompt: buildFinishPrompt(faces),
+      images: [
+        { bytes: photo, mimeType: 'image/png' },
+        { bytes: rough, mimeType: 'image/png' },
+      ],
+      imageSize: input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE,
+    },
+    `finish ${input.category} ${input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE}`,
+  );
+  return { finishJob };
+}
+
+/**
+ * The finished drawing, scaled down and checked for a mirror. The rough trace
+ * is rebuilt here from the same photo edit rather than carried around: it is
+ * deterministic and takes a moment, where passing it between requests would
+ * mean storing a megabyte somewhere for the sake of it.
+ */
+export async function collectSketch(input: {
+  touchUpJob: string;
+  finishJob: string;
+  imageBytes: Uint8Array;
+  category: CategoryId;
+  quality?: SketchQuality;
+}): Promise<Buffer> {
+  const size = input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE;
+  const [finished, edited] = await Promise.all([
+    readImageJob(input.finishJob, `finish ${input.category} ${size}`, { count: true }),
+    readImageJob(input.touchUpJob, `touch-up ${input.category}`),
+  ]);
+  const photo = await touchedUpPhoto(edited, input.imageBytes, input.category);
+  const rough = await roughInkTrace(photo);
 
   const scaled = await sharp(Buffer.from(finished.bytes))
     .resize({ width: MASTER_MAX_DIM, height: MASTER_MAX_DIM, fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
@@ -243,4 +261,11 @@ export async function createSketch(input: SketchInput): Promise<Buffer> {
   const checked = await unmirror(rough, scaled);
   if (checked.flipped) console.info(`[sketch] ${input.category}: finished sketch came back mirrored, flipped it back`);
   return checked.image;
+}
+
+/** What a redraw saves by reusing the photo-edit job instead of paying for a new one. */
+export function redrawSaving(category: CategoryId): number {
+  return (
+    TYPICAL_COST.batchedTouchUp + TYPICAL_COST.faceCheck + (CROP_TO_HEAD_CATEGORIES.has(category) ? TYPICAL_COST.jawline : 0)
+  );
 }

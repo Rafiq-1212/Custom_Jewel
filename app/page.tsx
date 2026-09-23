@@ -51,6 +51,7 @@ import { DEFAULT_DESIGN_TYPE, type DesignType, type SilhouetteContour } from '@/
 import { DEFAULT_CATEGORY_ID, GENERATION_CATEGORY_LIST, PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
 import { clearPendantSession, loadPrefs, loadSketch, savePrefs, saveSketch, type SketchQuality } from '@/lib/pendant-storage';
+import { runSketch, SketchError, type SketchStage } from '@/lib/sketch-client';
 
 type Status = 'idle' | 'generating' | 'done' | 'error';
 
@@ -85,6 +86,15 @@ export default function Home() {
   // before paying for the detailed one. Holds the quality of the sketch on
   // screen once there is one, so the page knows whether to offer the redraw.
   const [quality, setQuality] = React.useState<SketchQuality>('final');
+  // Which of the three stages the run is at, and the photo-edit job it can be
+  // redrawn from. Both come from lib/sketch-client.ts: the image calls are
+  // batch jobs at half price, so the browser waits for them rather than the
+  // server, and the finished photo edit is reused for a redraw.
+  const [stage, setStage] = React.useState<SketchStage>('touching-up');
+  // The photo-edit job, with the photo, crop and style it was made from: it
+  // may only be reused for a redraw of exactly that, or a changed crop would
+  // be silently redrawn from the old one.
+  const [touchUp, setTouchUp] = React.useState<{ job: string; key: string } | null>(null);
 
   // Non-null for every consumer downstream of generation; the fallback is
   // defensive only, since `hasSketch` requires `selectedCategory` to be set.
@@ -192,8 +202,10 @@ export default function Home() {
     setOriginalImage(URL.createObjectURL(selected));
     setErrorMessage(null);
     setStatus('idle');
-    // A new photo means any previous sketch no longer corresponds to it.
+    // A new photo means any previous sketch, and the photo edit behind it, no
+    // longer correspond to it.
     setMasterSketch(null);
+    setTouchUp(null);
   };
 
   /**
@@ -208,7 +220,10 @@ export default function Home() {
       return;
     }
     const requestId = ++requestIdRef.current;
+    const superseded = () => requestId !== requestIdRef.current;
+    const key = JSON.stringify({ name: file.name, size: file.size, modified: file.lastModified, crop, category: selectedCategory });
     setQuality(wanted);
+    setStage('touching-up');
     setStatus('generating');
     setErrorMessage(null);
     setMasterSketch(null);
@@ -217,36 +232,34 @@ export default function Home() {
     try {
       cropped = await cropImageFile(file, crop);
     } catch {
-      if (requestId !== requestIdRef.current) return;
+      if (superseded()) return;
       setErrorMessage('We couldn\'t crop this photo. Please try another one.');
       setStatus('error');
       return;
     }
     try {
-      const formData = new FormData();
-      formData.set('file', cropped);
-      formData.set('category', selectedCategory);
-      formData.set('quality', wanted);
-      // A plain redraw reuses the touched-up photo the server still has for
-      // this photograph and re-rolls only the drawing — the same result for a
-      // third less. 'redo' is for when the photo edit itself went wrong.
-      if (redoPhotoEdit) formData.set('photoEdit', 'redo');
-      const response = await fetch('/api/generate-image', { method: 'POST', body: formData });
-      const body = (await response.json().catch(() => null)) as
-        | { success: true; image: string }
-        | { success: false; error: string }
-        | null;
-      if (requestId !== requestIdRef.current) return; // superseded by a newer request
-      if (!body || !response.ok || !body.success) {
-        setErrorMessage(body && !body.success ? body.error : 'Something went wrong making the sketch. Please try again.');
-        setStatus('error');
-        return;
-      }
-      setMasterSketch(body.image);
+      // A plain redraw hands back the photo-edit job from the last attempt,
+      // so only the drawing is paid for again. `redoPhotoEdit` is the other
+      // case — the photo edit itself went wrong — and starts from the photo.
+      const run = await runSketch({
+        file: cropped,
+        category: selectedCategory,
+        quality: wanted,
+        redrawFrom: redoPhotoEdit || touchUp?.key !== key ? undefined : touchUp.job,
+        onStage: (next) => {
+          if (!superseded()) setStage(next);
+        },
+        cancelled: superseded,
+      });
+      if (superseded() || !run) return; // superseded by a newer request
+      setTouchUp({ job: run.touchUpJob, key });
+      setMasterSketch(run.image);
       setStatus('done');
-    } catch {
-      if (requestId !== requestIdRef.current) return;
-      setErrorMessage('We couldn\'t connect. Check your internet and try again.');
+    } catch (error) {
+      if (superseded()) return;
+      setErrorMessage(
+        error instanceof SketchError ? error.message : 'We couldn\'t connect. Check your internet and try again.',
+      );
       setStatus('error');
     }
   };
@@ -256,6 +269,7 @@ export default function Home() {
     setFile(null);
     setOriginalImage(null);
     setMasterSketch(null);
+    setTouchUp(null);
     setErrorMessage(null);
     setStatus('idle');
     setSelectedCategory(null);
@@ -363,7 +377,7 @@ export default function Home() {
                 <p className="text-center text-xs text-amber-600">Pick a pendant style above to continue.</p>
               )}
             </div>
-            {isGenerating && <GenerationProgress />}
+            {isGenerating && <GenerationProgress stage={stage} />}
           </div>
         </Section>
       )}

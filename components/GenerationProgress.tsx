@@ -1,33 +1,25 @@
 'use client';
 
 /**
- * Loading state. Cycles through a few real phrases instead of a bare spinner
- * — the request genuinely runs for a minute or more, and a static "Loading…"
- * for that long reads as stuck. No fixed percentage: we don't know how far
- * along the model actually is, so this shows a mood, not a number.
+ * Loading state, and a long one: the drawing is queued as a batch job at half
+ * price, which took 87 seconds for the photo edit and 379 for the 4K drawing
+ * in the jobs measured. A spinner alone reads as stuck over that long, so
+ * this shows which of the three real stages the work is actually at — the
+ * stage comes from the run itself (lib/sketch-client.ts), not from a timer,
+ * so it never claims progress that has not happened.
  */
 
 import * as React from 'react';
+import type { SketchStage } from '@/lib/sketch-client';
 
-const MESSAGES = [
-  'Touching up your photo…',
-  'Tracing the lines…',
-  'Inking the details…',
-  'Nearly there…',
-] as const;
+const STAGES: { id: SketchStage; message: string }[] = [
+  { id: 'touching-up', message: 'Touching up your photo…' },
+  { id: 'drawing', message: 'Inking the lines…' },
+  { id: 'finishing', message: 'Finishing the artwork…' },
+];
 
-/** How long each phrase holds before advancing to the next (ms). */
-const STEP_MS = 14000;
-
-export function GenerationProgress() {
-  const [index, setIndex] = React.useState(0);
-
-  React.useEffect(() => {
-    const id = setInterval(() => {
-      setIndex((current) => Math.min(current + 1, MESSAGES.length - 1));
-    }, STEP_MS);
-    return () => clearInterval(id);
-  }, []);
+export function GenerationProgress({ stage }: { stage: SketchStage }) {
+  const index = Math.max(0, STAGES.findIndex((s) => s.id === stage));
 
   return (
     <div
@@ -41,12 +33,12 @@ export function GenerationProgress() {
         <span className="absolute inset-5 rounded-full bg-indigo-600" />
       </div>
 
-      <p className="text-sm font-medium text-slate-700">{MESSAGES[index]}</p>
+      <p className="text-sm font-medium text-slate-700">{STAGES[index].message}</p>
 
       <div className="flex gap-1.5">
-        {MESSAGES.map((message, i) => (
+        {STAGES.map((entry, i) => (
           <span
-            key={message}
+            key={entry.id}
             className={`h-1.5 w-6 rounded-full transition-colors ${
               i <= index ? 'bg-indigo-500' : 'bg-slate-200'
             }`}
@@ -54,7 +46,9 @@ export function GenerationProgress() {
         ))}
       </div>
 
-      <p className="text-xs text-slate-400">This usually takes a minute or two.</p>
+      <p className="text-xs text-slate-400">
+        This takes a few minutes. The drawing is queued at half price, so it is worth the wait — leave this page open.
+      </p>
     </div>
   );
 }

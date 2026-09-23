@@ -20,7 +20,7 @@
  */
 
 import sharp from 'sharp';
-import { generateImageFromImage } from './gemini';
+import { readImageJob, submitImageJob } from './gemini-batch';
 import { PENDANT_MATERIALS, RIM_BAND_WIDTH, RIM_COLORS } from './materials';
 import { PENDANT_CATEGORIES } from './pendant-categories';
 import { resolvePendantGeometry, type PendantGeometry } from './pendant-geometry';
@@ -272,21 +272,32 @@ Output only the rendered image.`;
 export interface MockupResult {
   /** The photorealistic mockup as a data URL. */
   dataUrl: string;
-  /** The flat composite that was sent to Gemini, as a data URL — what the mockup is expected to be faithful to. */
-  compositeDataUrl: string;
 }
 
-export async function renderPendantMockup(request: DesignRequest): Promise<MockupResult> {
+/**
+ * Submits the product photo as a batch job, at half price like the sketch
+ * (lib/gemini-batch.ts), and returns the job's name. The flat design is built
+ * here and sent with it, so nothing has to be kept between this call and the
+ * one that collects the picture.
+ */
+export async function startPendantMockup(request: DesignRequest): Promise<string> {
   const { composite, engraving } = await buildMockupImages(request);
-  const result = await generateImageFromImage({
-    prompt: buildMockupPrompt(request),
-    images: [
-      { bytes: composite, mimeType: 'image/png' },
-      { bytes: engraving, mimeType: 'image/png' },
-    ],
-  });
-  return {
-    dataUrl: `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString('base64')}`,
-    compositeDataUrl: `data:image/png;base64,${composite.toString('base64')}`,
-  };
+  return submitImageJob(
+    {
+      prompt: buildMockupPrompt(request),
+      images: [
+        { bytes: composite, mimeType: 'image/png' },
+        { bytes: engraving, mimeType: 'image/png' },
+      ],
+    },
+    `mockup ${request.material}`,
+  );
+}
+
+/** The finished photograph from a job that has succeeded. */
+export async function collectPendantMockup(name: string, material: string): Promise<MockupResult> {
+  // Counted here: this is the only read of the job, so it is the one that
+  // carries the cost of the picture.
+  const result = await readImageJob(name, `mockup ${material}`, { count: true });
+  return { dataUrl: `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString('base64')}` };
 }

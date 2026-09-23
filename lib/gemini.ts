@@ -5,7 +5,7 @@ if (typeof window !== 'undefined') {
   throw new Error('lib/gemini.ts was imported into a browser bundle. This module is server-only.');
 }
 
-const MODEL_ID = 'gemini-3.1-flash-image';
+export const MODEL_ID = 'gemini-3.1-flash-image';
 /**
  * Text model for questions about a photo whose answer is data, not a picture
  * (lib/jawline.ts). Thinking is switched off: measured on the jawline
@@ -71,7 +71,7 @@ function getClient(): GoogleGenAI {
 }
 
 
-function classifyThrown(error: unknown): GeminiGenerationError {
+export function classifyThrown(error: unknown): GeminiGenerationError {
   if (error instanceof GeminiGenerationError) return error;
 
   if (error instanceof ApiError) {

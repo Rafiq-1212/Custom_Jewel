@@ -66,21 +66,28 @@ export interface CallUsage {
 }
 
 /**
+ * Half price for anything answered through the Batch API — Google's own
+ * discount for letting them choose when to run it. Same model, same prompt,
+ * same picture; see lib/gemini-batch.ts.
+ */
+const BATCH_DISCOUNT = 0.5;
+
+/**
  * An image call. Output tokens are billed at two different rates, and which
  * is which is only visible in the per-modality breakdown, so the image tokens
  * are taken from there and everything else counts as text.
  */
-export function priceImageCall(usage: CallUsage): number {
+export function priceImageCall(usage: CallUsage, options: { batch?: boolean } = {}): number {
   const imageTokens = (usage.candidatesTokensDetails ?? [])
     .filter((detail) => detail.modality === 'IMAGE')
     .reduce((total, detail) => total + (detail.tokenCount ?? 0), 0);
   const textTokens = Math.max(0, (usage.candidatesTokenCount ?? 0) - imageTokens) + (usage.thoughtsTokenCount ?? 0);
-  return (
+  const usd =
     ((usage.promptTokenCount ?? 0) * IMAGE_MODEL.input +
       imageTokens * IMAGE_MODEL.outputImage +
       textTokens * IMAGE_MODEL.outputText) /
-    1e6
-  );
+    1e6;
+  return options.batch ? usd * BATCH_DISCOUNT : usd;
 }
 
 /** A text call: the bindi check and the jawline lookup. Fractions of a cent. */
@@ -148,6 +155,9 @@ export async function withCostLog<T>(label: string, work: () => Promise<T>): Pro
  */
 export const TYPICAL_COST = {
   touchUp: 0.0687,
+  /** The same calls at the batch rate, which is what this app now pays. */
+  batchedTouchUp: 0.0344,
+  batchedFinish4K: 0.0776,
   faceCheck: 0.0019,
   jawline: 0.0018,
   finish2K: 0.1039,

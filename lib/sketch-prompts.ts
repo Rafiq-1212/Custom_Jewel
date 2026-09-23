@@ -57,10 +57,10 @@ Output only the edited photograph.`;
 /** Added to the enhance prompt when the first attempt left objects in the photo. */
 export const ENHANCE_RETRY_NOTE = `IMPORTANT: a previous attempt at this edit kept objects that are not part of the subject, such as a car door, window frame or furniture along the bottom of the photo. Remove every such object completely: everything that is not the subject must be pure white, right down to the bottom edge.`;
 
-const FINISH_STYLE = `STYLE: a detailed pen-and-ink portrait in the Comica line-art style — a jeweller's engraving template. Hand-drawn strokes rather than smooth vector curves, but fine and controlled throughout: rich in detail, light in ink.
-- Pure black ink on pure white only. No colour at all (a red bindi becomes solid black), no grey, no gradients, no stippling dots, no halftone, no pencil texture.
+const FINISH_STYLE = (marksExpected: boolean): string => `STYLE: a detailed pen-and-ink portrait in the Comica line-art style — a jeweller's engraving template. Hand-drawn strokes rather than smooth vector curves, but fine and controlled throughout: rich in detail, light in ink.
+- Pure black ink on pure white only. No colour at all${marksExpected ? ' (a red bindi becomes solid black)' : ' (a red saree becomes black lines on white)'}, no grey, no gradients, no stippling dots, no halftone, no pencil texture.
 - LINE WEIGHT, and this matters as much as the detail: draw with a fine, even pen. Every line stays thin and crisp, and the outer contours of heads, faces, shoulders and clothing are only a little heavier than the lines inside them: a clean outline, never a thick slab of ink.
-- NO SOLID BLACK AREAS. Every dark area, however dark it is in the photo, is built from separate thin strokes with white showing between them, so that each stroke can still be followed one by one. A shape that has been filled in solid, or strokes packed so tightly that they merge into a black blob, is wrong: draw fewer, cleaner strokes there instead. The only solid marks in the whole artwork are tiny ones: pupils, nostrils, a bindi.
+- NO SOLID BLACK AREAS. Every dark area, however dark it is in the photo, is built from separate thin strokes with white showing between them, so that each stroke can still be followed one by one. A shape that has been filled in solid, or strokes packed so tightly that they merge into a black blob, is wrong: draw fewer, cleaner strokes there instead. The only solid marks in the whole artwork are tiny ones: pupils and nostrils${marksExpected ? ', and the bindi described below' : ''}.
 - DARK GLASSES ARE DARK, and they are the one real exception to the rule above. If a person in image 1 is wearing sunglasses, fill each lens in dark so that it reads as a dark lens at a glance, leaving one clean white highlight streak across it where the light catches, and draw the frame and the arms as firm lines around it. Behind a dark lens there is nothing to see: do not draw the eyes, the lashes or the eyebrow through it, because eyes showing through sunglasses look like a mistake in the metal. Both lenses are equally dark. Two lenses are a small area, unlike a garment, so this costs the laser very little and the piece needs it. Clear spectacles are the opposite case: only the frame, the arms and a small highlight, with the eyes drawn normally through the glass.
 - Hair: as dark as the hair is in the photo, but always TEXTURED and always readable: built from many fine strands drawn one by one, with white gaps between them running through the whole mass, scratchy flyaways around the outside, and white highlight strands where light hits. Never a flat solid black fill, never a merged black mass, and never outlined white shapes.
 - Beards and moustaches, ONLY on a face that visibly has one in image 1: fine short strokes following the growth direction, with white gaps between the strokes everywhere so the texture of the hair stays visible even in the darkest part, and a scratchy edge. Never a flat solid black shape.
@@ -69,7 +69,7 @@ const FINISH_STYLE = `STYLE: a detailed pen-and-ink portrait in the Comica line-
 - FINGERNAILS ARE NEVER FILLED IN SOLID, whatever colour the polish is. Draw the shape of the nail with a clean outline and leave it white, the same way a dark garment is drawn. A nail blacked in reads as a hole in the metal and costs the laser dearly.
 - SOMETHING OUT OF FOCUS IN THE PHOTOGRAPH IS DRAWN SIMPLY: its outline and the few forms you can actually make out, nothing more. A blurred hand close to the lens has no visible skin texture, so it gets none — inventing detail there is guessing, and it draws the eye away from the faces, which are the point of the piece.
 - FACES CARRY NO SHADING, BUT THEY ARE FULLY DRAWN. These two are different things and the difference is the whole style. SHADING is tone — hatching, strokes laid side by side to darken an area — and there is none of it on skin: no hatching on a cheek or a forehead, no strokes down the neck, no shaded patch beside the nose. DRAWING is a line where one form really ends and another begins, and every one of those is drawn, firmly: the edge of the nose down one side and the curve of its tip, both nostril wings and the two nostril openings, the line under the tip, the dip of the philtrum, the full shape of both lips and the crease beneath the lower one, the curve of the cheek where it meets the mouth, the outer line of the cheek and the jaw, the chin's own curve, the fold of the upper eyelid, the line under the eye, the ear's inner folds. A face with the shading left off is right; a face with the features left off is a blank oval, and that is the mistake to avoid. On a baby or a small child these lines are soft and few, but they are there: draw the round of the cheeks, the little chin, the shape of the nose.
-- A BINDI OR POTTU IS DRAWN ONLY IF THAT PERSON IS ACTUALLY WEARING ONE in image 1. Look at each face separately: if you can clearly see the mark on her forehead, draw it as a small solid mark in the same place and size; if you cannot, her forehead stays completely blank. The same goes for sindoor in a parting, a tilak or a religious mark of any kind. Never add one, never copy one from another face in the picture, and never leave out one that is there. These marks say something about a person's religion and whether she is married, and putting one on someone who does not wear it gives offence.
+${marksExpected ? `- A BINDI OR POTTU IS DRAWN ONLY ON THE PEOPLE NAMED ABOVE as wearing one. Draw it as a small solid mark in the same place and size image 1 shows it. Every other forehead in this picture stays completely blank, and so does every hair parting. These marks say something about a person's religion and whether she is married, and putting one on someone who does not wear it gives offence.` : `- NOBODY IN THIS PICTURE WEARS A BINDI, A POTTU, A TILAK OR SINDOOR, and every forehead was checked one at a time, close up, before you were asked to draw. So there is no such mark to find and none to draw: every forehead stays blank white and every hair parting stays plain. Do not put a dot, a mark or a line on any forehead — not because you cannot see one, but because there is none there. A mark added here says something untrue about a real person's religion and marriage, and gives offence.`}
 - A SMILE HAS TO READ AS A SMILE. When someone is smiling in image 1, draw what the smile actually does to the face: the mouth curving up and its corners pulled back and deepened, the fold that runs from beside the nose down past the corner of the mouth, the cheek lifted into a fuller round with its own curved edge, the lower lids pushed up a little and the crease at the outer corner of the eye if the photo has one. If the teeth show, keep them simple: the shape of the row as a whole and the line where the upper lip crosses it, with at most a hint of the join between the two front teeth. Do not outline every tooth, do not darken the gum line and do not lay strokes between the teeth — a mouth drawn tooth by tooth stops looking like this person's smile. A mouth drawn as a flat closed line on a smiling face is wrong, and so is a cheek left as empty paper when the smile has raised it.
 - The CHEEKS: where image 1 shows the cheek's roundness turning away towards the ear or the jaw, or a fold beside the mouth, draw it — one clean line each, never a patch of shading. Where the photograph shows a smooth cheek with no edge in it, the cheek stays white. A pair of curved lines added to a face that has none of its own is an invention, and it changes who the person is.
 - Never age anyone. The lines above are the ones the photograph actually shows; do not add wrinkles, eye bags or slack skin on top of them, and a smooth young face stays smooth. Only draw a mole if it is clearly visible in image 1; never add dots or marks that are not there. Do NOT draw acne, pores or skin blemishes.
@@ -77,7 +77,8 @@ const FINISH_STYLE = `STYLE: a detailed pen-and-ink portrait in the Comica line-
 - NEVER cover a garment in a repeating fine texture — dots, mesh, crosshatch, weave, tiny checks, scribble shading. If a fabric's own print is that fine (a shirt of tiny dots, a woven texture), the garment is drawn PLAIN: only its folds, seams, collar, cuffs, buttons and pocket. Hint at the print in one small area at most, and leave the rest of the cloth empty white. A plain shirt drawn with its folds is right; a shirt filled edge to edge with thousands of little marks is wrong, and each of those marks is a separate cut for the laser.
 - DARK CLOTHING IS NEVER FILLED IN BLACK, no matter how dark it is in the photo. A navy blouse, a black jacket, a dark saree border: the fabric itself stays white, and you draw what is on it — its folds, its weave, its embroidery, its border pattern — as lines, exactly as a jeweller's engraving template does. Deep creases may get a few close parallel strokes, nothing more. This is not a style choice: a filled area has to be burned away in full by the laser, which costs far more than following lines.
 - Jewellery and flowers traced as they are: every bead of a necklace, every link of a chain, the stones of an earring, each petal, drawn separately with clean outlines.
-- Background: plain white. Anything that is white in image 1 stays white. Do not draw any frame, border or shape around the people.`;
+- Background: plain white. Anything that is white in image 1 stays white.
+- THE ARTWORK IS NOT A PICTURE OF A PENDANT. Draw the people and nothing else: no frame, no border, no circle or oval around them, no beaded rim, no chain, no bail, no hanging loop, no cord, no backing plate, no drop shadow. The metal, the shape and the hanging loop are cut and fitted afterwards by the workshop, from this drawing. Seen once in three runs of the same photograph: the whole portrait drawn inside a round beaded frame with a chain over the top, which makes the file useless.`;
 
 const FINISH_FAITHFUL = `FAITHFULNESS (most important):
 - This is a TRACING, not a new drawing. Every contour must sit exactly where the corresponding edge is in the photo: same head angles, same gaze, same face shapes and proportions, same expression, same hairline, same clothing folds, same framing and crop.
@@ -91,7 +92,7 @@ const FINISH_FAITHFUL = `FAITHFULNESS (most important):
  */
 const NO_FOREHEAD_MARKS = `IMPORTANT, AND CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND: not one person in this picture is wearing a bindi, a pottu, a tilak or sindoor. Every forehead in your drawing stays completely blank and every hair parting stays plain. Do not put a dot, a mark or a line on any forehead for any reason.`;
 
-const FINISH_PROMPT_BODY = `You are given two images of the same people. Image 1 is the photograph. Image 2 is a rough automatic ink trace of that exact photograph; its lines and dark areas are in the correct positions but they are blotchy and broken. Small isolated specks, dots and speckled skin texture in image 2 are noise from the automatic trace: ignore them, keep skin clean, and never draw them as pores, moles, dots or marks. The one exception is a bindi or pottu between the eyebrows, which is a real mark, not a speck.
+const FINISH_PROMPT_BODY = (marksExpected: boolean): string => `You are given two images of the same people. Image 1 is the photograph. Image 2 is a rough automatic ink trace of that exact photograph; its lines and dark areas are in the correct positions but they are blotchy and broken. Small isolated specks, dots and speckled skin texture in image 2 are noise from the automatic trace: ignore them, keep skin clean, and never draw them as pores, moles, dots or marks. The one exception is a bindi or pottu between the eyebrows, which is a real mark, not a speck.
 
 If the body has been cut away and only a head is left, this is a HEAD-ONLY portrait: draw the hair, the face, the ears and the beard, and NOTHING below the chin or the beard. No neck, no throat, no shoulders, no collar, no chain: the artwork simply ends where the chin or the beard ends, on white. On the turned side the outline of the face runs from the beard straight up into the ear, with no line hanging down below the ear. Do not continue the neck downwards to complete the figure, even if a little of it shows in image 1. Any scrap of clothing or skin still showing beside or below the beard is left over from that removal, not part of the portrait, and you leave it out completely.
 
@@ -122,7 +123,7 @@ NO STRAY LINES. Every line you draw has to be something real in image 1: an edge
 
 ${FINISH_FAITHFUL}
 
-${FINISH_STYLE}
+${FINISH_STYLE(marksExpected)}
 
 Output only the finished line art.`;
 
@@ -184,16 +185,22 @@ export interface FinishOptions {
 }
 
 export function buildFinishPrompt(options: FinishOptions): string {
-  const parts = [FINISH_PROMPT_BODY];
   const faces = options.faces ?? [];
+  // Whether a bindi belongs anywhere in this picture is decided once and the
+  // whole prompt is built around the answer. Appending a denial to a style
+  // that still lists "a bindi" among its normal marks was not enough: on the
+  // same photograph of two women who wear none, one run left both foreheads
+  // blank and the next drew a bindi on one of them. A rule the prompt
+  // contradicts elsewhere is a rule the model gets to choose about.
+  const marksExpected = faces.some((face) => face.wears);
+  const parts = [FINISH_PROMPT_BODY(marksExpected)];
   if (faces.length > 0) {
     // Nobody wearing one at all is stated as a flat fact rather than as a
     // list of denials: told only "draw one if it is there", the model drew
     // one anyway on two women who wear none. That flat fact is only
     // available when every face was settled, though — otherwise the denial
     // is made person by person, and the unchecked faces are left unsaid.
-    const anyWearing = faces.some((face) => face.wears);
-    parts.push(!anyWearing && options.complete ? NO_FOREHEAD_MARKS : foreheadMarksByPerson(faces));
+    parts.push(!marksExpected && options.complete ? NO_FOREHEAD_MARKS : foreheadMarksByPerson(faces));
   }
   if (options.anyWomen) parts.push(WOMENS_FACES);
   return parts.join('\n\n');
