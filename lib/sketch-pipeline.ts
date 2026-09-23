@@ -1,38 +1,24 @@
 /**
- * Photo to engraving sketch, in the same steps the client uses by hand:
+ * Photo to engraving artwork, with no AI drawing anywhere in it:
  *
- *   1. Enhance (AI photo edit): remove the background, paint out anything
- *      that is not the subject, correct colour and exposure and sharpen
- *      facial detail. No drawing, and no re-posing. Face Pendant is then
- *      cut to the head on pixels, along a jawline located by a text call
- *      (lib/jawline.ts), never by asking the image model to do it.
- *   2. Rough trace (lib/ink-filter.ts, no AI): a comic ink filter on the
- *      enhanced photo, so every line sits on the photo's real edges.
- *   3. Finish (AI): detailed line art from the rough trace, keeping its line
- *      positions, using the enhanced photo to read what each line is.
+ *   1. Photo edit (AI, batched at half price): remove the background, paint
+ *      out anything that is not the subject, correct colour and exposure.
+ *      No drawing, and no re-posing. Face Pendant is then cut to the head on
+ *      pixels, along a jawline located by a text call (lib/jawline.ts).
+ *   2. Ink filter (lib/ink-filter.ts, no AI): a comic ink filter on that
+ *      edited photo. This IS the artwork.
  *
- * The result goes on to lib/image-processing.ts for trimming and the
- * transparent background, exactly as before.
+ * There used to be a third step, an AI "finish" that redrew the ink trace as
+ * clean line art. It was dropped because it drew people who were not in the
+ * photograph: shown a couple at a temple, it came back with a different
+ * face, a different saree, a shirt with a pocket nobody wore, and a bindi on
+ * a woman who wears none. Every prompt rule added against that only moved
+ * the problem. The ink filter cannot invent anything — every line in it is
+ * an edge in the real photo — so the likeness is the photo's own.
  *
- * Two AI calls per sketch (steps 1 and 3), occasionally three (see
- * `leftObjectsBehind`). After each AI step the result is checked for an
- * accidental left-right mirror and flipped back if needed (lib/orientation.ts).
- *
- * BOTH image calls go through the Batch API at half price (lib/gemini-batch.ts),
- * which is what brings a finished piece from about 28 rupees to about 14. A
- * batch job cannot be waited for inside one request — measured, the photo
- * edit took 87 seconds and the 4K drawing 379 — so this module no longer runs
- * the pipeline end to end. It exposes the three points where work actually
- * happens, and the browser drives them by polling (app/api/sketch/route.ts):
- *
- *   startTouchUp   submit step 1
- *   startFinish    read step 1's result, do step 2, submit step 3
- *   collectSketch  read step 3's result and finish the artwork
- *
- * Nothing is stored between those calls. A finished batch job's result stays
- * readable from Google, so the touched-up photo is simply read again when it
- * is needed — which also makes a redraw cheap and certain: the same photo-edit
- * job is reused and only the drawing is paid for again.
+ * The photo edit is a batch job, so the browser drives this by polling
+ * (app/api/sketch/route.ts): `startTouchUp` submits it, and `finishSketch`
+ * reads it back and makes the artwork. Nothing is stored in between.
  */
 
 import sharp from 'sharp';
@@ -43,49 +29,11 @@ import { findJawline } from './jawline';
 import { roughInkTrace } from './ink-filter';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
-import { buildEnhancePrompt, buildFinishPrompt, ENHANCE_RETRY_NOTE } from './sketch-prompts';
-import { lookAtFaces } from './face-marks';
-import { TYPICAL_COST } from './cost';
+import { buildEnhancePrompt, ENHANCE_RETRY_NOTE } from './sketch-prompts';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/sketch-pipeline.ts was imported into a browser bundle. This module is server-only.');
 }
-
-/**
- * The finish step draws at 4K. The bigger the canvas, the more the model
- * actually draws: at 1K a face in a couple photo was only about 250 px wide,
- * too small for individual hair strands; at 2K the strands appear but hair
- * still comes back as chunky masses; at 4K it draws each strand, the
- * flyaways around the edge of the hair, eyelashes and iris detail.
- *
- * The photo edit stays at 1K. Customer photos are rarely larger than that,
- * so a bigger canvas adds no real detail there, and in testing the 2K edit
- * repeatedly failed to remove objects (a car door) that the 1K edit removed
- * every time.
- */
-const FINISH_IMAGE_SIZE = '4K';
-/**
- * Draft mode draws the finish at 2K instead. Image output is billed per
- * image, not per pixel, and the 2K image is the cheaper of the two: measured
- * end to end, a draft sketch costs $0.176 against $0.226 for the final one,
- * so previewing a photo costs about a fifth less than finishing it.
- *
- * What it costs in quality is real and was measured side by side: teeth stop
- * being drawn as separate teeth, eyelashes come back as a solid lash line
- * and hair goes back to chunky masses instead of strands. It is a preview —
- * good enough to judge framing, pose, whether the right people are in it and
- * whether anything was invented — and not the file that goes to the laser.
- */
-const DRAFT_IMAGE_SIZE = '2K';
-/**
- * The 4K drawing is scaled back down to this longest side before anything
- * else sees it — the same size the 2K finish used to produce, so the master
- * sketch, the stored data URL and the vector exports stay exactly as heavy
- * as before. The extra resolution is spent on how much the model draws, not
- * on the size of the file: scaling down packs those extra strokes into
- * finer, cleaner lines (plain supersampling) instead of throwing them away.
- */
-const MASTER_MAX_DIM = 2700;
 
 /**
  * Styles whose framing ends above the bottom edge of the photo, so the
@@ -102,22 +50,10 @@ const BOTTOM_BAND = 0.04;
 /** More than this share of non-white pixels in the bottom band means something was left behind. */
 const MAX_BOTTOM_INK = 0.12;
 
-/** 'draft' finishes at 2K for a cheap preview; 'final' at 4K. */
-export type SketchQuality = 'draft' | 'final';
-
 export interface SketchInput {
   imageBytes: Uint8Array;
   mimeType: string;
   category: CategoryId;
-  quality?: SketchQuality;
-  /**
-   * Redo the photo edit instead of reusing the one from an earlier attempt on
-   * this same photograph (lib/photo-cache.ts). A plain redraw leaves the
-   * photo alone and re-rolls only the drawing, which is what "draw it again"
-   * usually means and costs a third less; this is for the other case, where
-   * the photo edit itself went wrong — an arm painted out, an object left in.
-   */
-  redoPhotoEdit?: boolean;
 }
 
 /**
@@ -186,86 +122,28 @@ async function touchedUpPhoto(edited: GenerateImageResult, original: Uint8Array,
   return CROP_TO_HEAD_CATEGORIES.has(category) ? cutToHead(photo, 'image/png') : photo;
 }
 
-export interface FinishStep {
-  /** A fresh photo-edit job, when the first edit left objects behind and has to be redone. */
-  touchUpJob?: string;
-  /** The drawing job, once the photo is good enough to draw from. */
-  finishJob?: string;
-}
+/**
+ * Smooths the filter's pixel stair-steps into ink-like edges. A median over a
+ * small window rounds the jaggies of a thresholded image without moving any
+ * line: a stroke is kept wherever most of its neighbourhood is ink.
+ */
+const SMOOTHING_WINDOW = 5;
+
+export type FinishStep = { touchUpJob: string } | { artwork: Buffer };
 
 /**
- * Reads the finished photo edit, does the free middle step on it, and submits
- * the drawing. When a head-only edit came back with something still touching
- * the bottom, this submits a second photo edit instead and says so, and the
- * browser simply waits again.
+ * Reads the finished photo edit and turns it into the artwork. When a
+ * head-only edit came back with something still touching the bottom, this
+ * submits a second photo edit instead and says so, and the browser simply
+ * waits again.
  */
-export async function startFinish(input: SketchInput & { touchUpJob: string; retried?: boolean }): Promise<FinishStep> {
-  // This is the step that pays for the photo edit: it is the one that reads
-  // it in order to move the sketch forward. Later reads of the same job cost
-  // nothing more and are not counted again.
+export async function finishSketch(input: SketchInput & { touchUpJob: string; retried?: boolean }): Promise<FinishStep> {
   const edited = await readImageJob(input.touchUpJob, `touch-up ${input.category}`, { count: true });
   if (!input.retried && HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(edited))) {
     console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
     return { touchUpJob: await startTouchUp(input, true) };
   }
-
-  // The faces are asked of the ORIGINAL photograph, not the edited one: the
-  // edit can lose a small mark, and a mark the check misses is one the
-  // drawing will be told nothing about, which is the safe way round.
-  const [photo, faces] = await Promise.all([
-    touchedUpPhoto(edited, input.imageBytes, input.category),
-    lookAtFaces(input.imageBytes, input.mimeType),
-  ]);
-  const rough = await roughInkTrace(photo);
-
-  const finishJob = await submitImageJob(
-    {
-      prompt: buildFinishPrompt(faces),
-      images: [
-        { bytes: photo, mimeType: 'image/png' },
-        { bytes: rough, mimeType: 'image/png' },
-      ],
-      imageSize: input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE,
-    },
-    `finish ${input.category} ${input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE}`,
-  );
-  return { finishJob };
-}
-
-/**
- * The finished drawing, scaled down and checked for a mirror. The rough trace
- * is rebuilt here from the same photo edit rather than carried around: it is
- * deterministic and takes a moment, where passing it between requests would
- * mean storing a megabyte somewhere for the sake of it.
- */
-export async function collectSketch(input: {
-  touchUpJob: string;
-  finishJob: string;
-  imageBytes: Uint8Array;
-  category: CategoryId;
-  quality?: SketchQuality;
-}): Promise<Buffer> {
-  const size = input.quality === 'draft' ? DRAFT_IMAGE_SIZE : FINISH_IMAGE_SIZE;
-  const [finished, edited] = await Promise.all([
-    readImageJob(input.finishJob, `finish ${input.category} ${size}`, { count: true }),
-    readImageJob(input.touchUpJob, `touch-up ${input.category}`),
-  ]);
   const photo = await touchedUpPhoto(edited, input.imageBytes, input.category);
-  const rough = await roughInkTrace(photo);
-
-  const scaled = await sharp(Buffer.from(finished.bytes))
-    .resize({ width: MASTER_MAX_DIM, height: MASTER_MAX_DIM, fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
-    .png()
-    .toBuffer();
-
-  const checked = await unmirror(rough, scaled);
-  if (checked.flipped) console.info(`[sketch] ${input.category}: finished sketch came back mirrored, flipped it back`);
-  return checked.image;
-}
-
-/** What a redraw saves by reusing the photo-edit job instead of paying for a new one. */
-export function redrawSaving(category: CategoryId): number {
-  return (
-    TYPICAL_COST.batchedTouchUp + TYPICAL_COST.faceCheck + (CROP_TO_HEAD_CATEGORIES.has(category) ? TYPICAL_COST.jawline : 0)
-  );
+  const trace = await roughInkTrace(photo);
+  return { artwork: await sharp(trace).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer() };
 }

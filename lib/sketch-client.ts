@@ -3,29 +3,15 @@
 /**
  * Driving the sketch from the browser, because the server cannot wait for it.
  *
- * Both image calls are batch jobs at half price (lib/gemini-batch.ts), and a
- * batch job is answered when it suits Google: 87 seconds for the photo edit
- * and 379 for the 4K drawing, in the two jobs measured. No serverless request
- * can sit through that, so the waiting happens here — a small poll every few
- * seconds while the page shows what stage the work is at.
- *
- * All this holds between steps is two job names and the photo the operator
- * already chose. Nothing is stored on the server, so a sketch cannot be lost
- * to an instance restart; the job names are the whole state, and they are
- * what makes "draw it again" cheap — the same photo-edit job is handed back
- * and only the drawing is paid for a second time.
+ * The one AI call — the photo edit — is a batch job at half price
+ * (lib/gemini-batch.ts), answered when it suits Google: 87 to 112 seconds in
+ * the jobs measured. No serverless request can sit through that, so the
+ * waiting happens here, a small poll every few seconds. Once the edit is
+ * back, the server runs the ink filter on it and returns the artwork.
  */
 
-import type { SketchQuality } from './pendant-storage';
-
 /** What the operator is told is happening. */
-export type SketchStage = 'touching-up' | 'drawing' | 'finishing';
-
-export interface SketchRun {
-  image: string;
-  /** Hand this back as `redrawFrom` to redraw without paying for the photo edit again. */
-  touchUpJob: string;
-}
+export type SketchStage = 'touching-up' | 'finishing';
 
 export class SketchError extends Error {}
 
@@ -68,59 +54,38 @@ async function waitFor(job: string, cancelled: () => boolean): Promise<boolean> 
 export interface SketchRequest {
   file: File;
   category: string;
-  quality: SketchQuality;
-  /** A finished photo-edit job to reuse — a redraw of the same photograph. */
-  redrawFrom?: string;
   onStage: (stage: SketchStage) => void;
   /** Checked between every step, so a superseded run stops instead of finishing invisibly. */
   cancelled: () => boolean;
 }
 
-export async function runSketch(request: SketchRequest): Promise<SketchRun | null> {
+/** The finished artwork as a data URL, or null if the run was cancelled. */
+export async function runSketch(request: SketchRequest): Promise<string | null> {
   const form = (action: string, extra: Record<string, string> = {}): FormData => {
     const data = new FormData();
     data.set('action', action);
     data.set('file', request.file);
     data.set('category', request.category);
-    data.set('quality', request.quality);
     for (const [key, value] of Object.entries(extra)) data.set(key, value);
     return data;
   };
 
-  let touchUpJob = request.redrawFrom;
-  if (!touchUpJob) {
-    request.onStage('touching-up');
-    touchUpJob = String((await post(form('start'))).touchUpJob);
-    if (!(await waitFor(touchUpJob, request.cancelled))) return null;
-  }
+  request.onStage('touching-up');
+  let touchUpJob = String((await post(form('start'))).touchUpJob);
+  if (!(await waitFor(touchUpJob, request.cancelled))) return null;
 
-  // `advance` normally submits the drawing, but for a head-only style it can
+  // `advance` normally returns the artwork, but for a head-only style it can
   // come back with a second photo edit instead, when the first one left an
   // object along the bottom. Then this waits again and asks once more.
-  request.onStage('drawing');
-  let step: Record<string, unknown>;
-  try {
-    step = await post(form('advance', { touchUpJob, ...(request.redrawFrom ? { redraw: '1' } : {}) }));
-  } catch (error) {
-    // A reused photo edit that Google no longer has is not worth an error
-    // message: start the whole thing again, which costs what it always did.
-    if (!request.redrawFrom) throw error;
-    return runSketch({ ...request, redrawFrom: undefined });
-  }
+  request.onStage('finishing');
+  let step = await post(form('advance', { touchUpJob }));
   if (step.stage === 'touch-up') {
     touchUpJob = String(step.touchUpJob);
     request.onStage('touching-up');
     if (!(await waitFor(touchUpJob, request.cancelled))) return null;
-    request.onStage('drawing');
+    request.onStage('finishing');
     step = await post(form('advance', { touchUpJob, retried: '1' }));
   }
-
-  const finishJob = String(step.finishJob ?? '');
-  if (!finishJob) throw new SketchError('Something went wrong making the sketch. Please try again.');
-  if (!(await waitFor(finishJob, request.cancelled))) return null;
-
-  request.onStage('finishing');
-  const done = await post(form('collect', { touchUpJob, finishJob }));
   if (request.cancelled()) return null;
-  return { image: String(done.image), touchUpJob };
+  return String(step.image);
 }

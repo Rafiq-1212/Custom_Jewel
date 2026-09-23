@@ -99,8 +99,6 @@ export function priceTextCall(usage: CallUsage): number {
 interface Tally {
   label: string;
   calls: { name: string; usd: number }[];
-  /** What was NOT spent because something was reused. */
-  saved: number;
 }
 
 /**
@@ -116,14 +114,6 @@ export function recordCall(name: string, usd: number): void {
   tally.getStore()?.calls.push({ name, usd });
 }
 
-/** Called when a cached result stands in for a call that would have been made. */
-export function recordSaving(name: string, usd: number): void {
-  const store = tally.getStore();
-  if (!store) return;
-  store.saved += usd;
-  console.info(`[cost] reused ${name}, saving $${usd.toFixed(4)}`);
-}
-
 function money(usd: number): string {
   return `$${usd.toFixed(4)} = ₹${(usd * inrPerUsd()).toFixed(2)}`;
 }
@@ -134,33 +124,14 @@ function money(usd: number): string {
  * money for those two calls, and that is exactly the case worth seeing.
  */
 export async function withCostLog<T>(label: string, work: () => Promise<T>): Promise<T> {
-  const store: Tally = { label, calls: [], saved: 0 };
+  const store: Tally = { label, calls: [] };
   try {
     return await tally.run(store, work);
   } finally {
     const total = store.calls.reduce((sum, call) => sum + call.usd, 0);
     const breakdown = store.calls.map((call) => `${call.name} $${call.usd.toFixed(4)}`).join(', ');
-    const saved = store.saved > 0 ? `, saved ${money(store.saved)} by reusing earlier work` : '';
     console.info(
-      `[cost] ${label}: ${store.calls.length} call${store.calls.length === 1 ? '' : 's'} ${money(total)}${saved}${breakdown ? ` — ${breakdown}` : ''}`,
+      `[cost] ${label}: ${store.calls.length} call${store.calls.length === 1 ? '' : 's'} ${money(total)}${breakdown ? ` — ${breakdown}` : ''}`,
     );
   }
 }
-
-/**
- * List prices for a whole call, used to say what a cache hit saved without
- * having made the call. Measured token counts on real photographs, so they
- * are what these steps actually cost rather than a guess: the touch-up and
- * the product photo return a 1K image, the finish a 2K or 4K one.
- */
-export const TYPICAL_COST = {
-  touchUp: 0.0687,
-  /** The same calls at the batch rate, which is what this app now pays. */
-  batchedTouchUp: 0.0344,
-  batchedFinish4K: 0.0776,
-  faceCheck: 0.0019,
-  jawline: 0.0018,
-  finish2K: 0.1039,
-  finish4K: 0.1544,
-  mockup: 0.0686,
-};

@@ -1,43 +1,38 @@
 /**
- * The sketch, in the three steps a batch job forces it into.
+ * The sketch, in the two steps a batch job forces it into.
  *
- * Both image calls go to Google's Batch API at half price, which is what
- * takes a finished piece from about 28 rupees to about 14 (lib/gemini-batch.ts).
- * A batch job is answered when it suits Google — 87 seconds for the photo
- * edit and 379 for the 4K drawing, in the two jobs measured — so no request
- * here waits for one. The browser drives it instead:
+ * The only AI call is the photo edit, sent to Google's Batch API at half
+ * price (lib/gemini-batch.ts); the artwork itself is the ink filter run on
+ * that edited photo, with no AI drawing (lib/sketch-pipeline.ts explains why).
+ * A batch job is answered when it suits Google — 87 to 112 seconds for the
+ * photo edit in the jobs measured — so no request here waits for one:
  *
- *   POST  action=start    submit the photo edit          -> { touchUpJob }
- *   GET   ?job=...        is that job finished yet?      -> { state }
- *   POST  action=advance  read it, trace it, draw it     -> { finishJob }
+ *   POST  action=start    submit the photo edit       -> { touchUpJob }
+ *   GET   ?job=...        is that job finished yet?   -> { state }
+ *   POST  action=advance  read it, ink it             -> { image }
  *                         (or another touchUpJob, when a pet photo's edit
  *                          left the car door in and has to be redone)
- *   GET   ?job=...        is that one finished yet?
- *   POST  action=collect  read the drawing, finish it    -> { image }
  *
- * Nothing is kept on the server between those calls. The browser holds two
- * job names and the photograph it already has; everything else is read back
- * from the jobs themselves. That is also what makes "draw it again" cheap:
- * it starts at `advance` with the same touch-up job, so the photo edit and
- * the face checks are not paid for twice.
+ * Nothing is kept on the server between those calls. The browser holds one
+ * job name and the photograph it already has.
  *
  * The Gemini API key is read from `process.env` on the server and never
  * appears in any response.
  */
 
-import { recordSaving, withCostLog } from '@/lib/cost';
+import { withCostLog } from '@/lib/cost';
 import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
-import { collectSketch, redrawSaving, startFinish, startTouchUp, type SketchQuality } from '@/lib/sketch-pipeline';
+import { finishSketch, startTouchUp } from '@/lib/sketch-pipeline';
 import { validateImageBytes } from '@/lib/validation';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// No step waits for a batch job; the longest is `collect`, which downloads a
-// 4K image and does the trimming and transparency work on it.
+// No step waits for a batch job; the longest is `advance`, which downloads
+// the edited photo and runs the ink filter and the trimming on it.
 export const maxDuration = 120;
 
 /** A job name as the API returns it, e.g. "batches/10mxub2qlici15wtzbvux1lai3y56v3yyv7n". */
@@ -73,22 +68,17 @@ function failFromGemini(error: unknown, where: string): Response {
   return fail(geminiError.message, statusByCode[geminiError.code]);
 }
 
-interface Labels {
-  category: CategoryId;
-  quality: SketchQuality;
-}
-
 /**
- * The photograph and the two labels every step needs. The photo is sent with
- * each step because each one genuinely uses it: to unmirror the edit against,
- * and to ask about the foreheads. It never leaves this server.
+ * The photo is sent with each step because each one genuinely uses it: the
+ * edit is checked against it for an accidental mirror. It never leaves this
+ * server.
  */
-function readLabels(formData: FormData): Labels | Response {
+function readCategory(formData: FormData): CategoryId | Response {
   const categoryRaw = formData.get('category');
   if (typeof categoryRaw !== 'string' || !isCategoryId(categoryRaw)) {
     return fail('Pick a pendant style first, then create the sketch.', 400);
   }
-  return { category: categoryRaw, quality: formData.get('quality') === 'draft' ? 'draft' : 'final' };
+  return categoryRaw;
 }
 
 function readJobName(formData: FormData, field: string): string | null {
@@ -115,8 +105,8 @@ export async function POST(request: globalThis.Request): Promise<Response> {
     return fail('We couldn\'t read that upload. Please try again.', 400);
   }
 
-  const labels = readLabels(formData);
-  if (labels instanceof Response) return labels;
+  const category = readCategory(formData);
+  if (category instanceof Response) return category;
 
   const file = formData.get('file');
   if (!(file instanceof File) || file.size === 0) return fail('Please choose a photo.', 400);
@@ -134,7 +124,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
     return fail(validation.message, validation.code === 'TOO_LARGE' ? 413 : 415);
   }
 
-  const input = { ...labels, imageBytes: bytes, mimeType: file.type };
+  const input = { category, imageBytes: bytes, mimeType: file.type };
   const action = formData.get('action');
 
   if (action === 'start') {
@@ -149,43 +139,22 @@ export async function POST(request: globalThis.Request): Promise<Response> {
   if (action === 'advance') {
     const touchUpJob = readJobName(formData, 'touchUpJob');
     if (!touchUpJob) return fail('That sketch has expired. Please start it again.', 400);
-    const redraw = formData.get('redraw') === '1';
     try {
-      return await withCostLog(`sketch ${input.category}/${input.quality}${redraw ? '/redraw' : ''} (batched)`, async () => {
-        if (redraw) recordSaving('the photo edit and the face checks', redrawSaving(input.category));
-        const step = await startFinish({ ...input, touchUpJob, retried: formData.get('retried') === '1' });
+      return await withCostLog(`sketch ${category} (batched)`, async () => {
+        const step = await finishSketch({ ...input, touchUpJob, retried: formData.get('retried') === '1' });
+        if ('touchUpJob' in step) return Response.json({ success: true, stage: 'touch-up', touchUpJob: step.touchUpJob });
+        // Deterministic post-processing, not AI: crop the white margin and
+        // turn the background transparent. For Face Pendant it also enforces
+        // the jaw cutoff. See lib/image-processing.ts.
+        const master = await makeTransparentMasterSketch(step.artwork, { cropBelowJaw: category === 'face' });
         return Response.json({
           success: true,
-          stage: step.finishJob ? 'finish' : 'touch-up',
-          touchUpJob: step.touchUpJob ?? touchUpJob,
-          finishJob: step.finishJob,
-          retried: Boolean(step.touchUpJob),
-        });
-      });
-    } catch (error) {
-      return failFromGemini(error, 'advance');
-    }
-  }
-
-  if (action === 'collect') {
-    const touchUpJob = readJobName(formData, 'touchUpJob');
-    const finishJob = readJobName(formData, 'finishJob');
-    if (!touchUpJob || !finishJob) return fail('That sketch has expired. Please start it again.', 400);
-    try {
-      return await withCostLog(`collect ${input.category}/${input.quality}`, async () => {
-        const sketch = await collectSketch({ ...input, touchUpJob, finishJob });
-        // Deterministic post-processing, not AI: crop the AI's white margin
-        // and turn the remaining background transparent. For Face Pendant it
-        // also enforces the jaw cutoff the prompt asks for but can't
-        // guarantee on its own. See lib/image-processing.ts.
-        const master = await makeTransparentMasterSketch(sketch, { cropBelowJaw: input.category === 'face' });
-        return Response.json({
-          success: true,
+          stage: 'done',
           image: `data:${master.contentType};base64,${master.buffer.toString('base64')}`,
         });
       });
     } catch (error) {
-      return failFromGemini(error, 'collect');
+      return failFromGemini(error, 'advance');
     }
   }
 

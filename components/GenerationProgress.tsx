@@ -1,21 +1,19 @@
 'use client';
 
 /**
- * Loading state, and a long one: the drawing is queued as a batch job at half
- * price, which took 87 seconds for the photo edit and 379 for the 4K drawing
- * in the jobs measured. A spinner alone reads as stuck over that long, so
- * this shows which of the three real stages the work is actually at — the
- * stage comes from the run itself (lib/sketch-client.ts), not from a timer,
- * so it never claims progress that has not happened.
+ * Loading state: the photo edit is queued as a batch job at half price, which
+ * took 87 to 112 seconds in the jobs measured. A spinner alone reads as stuck
+ * over that long, so this shows which real stage the work is at — the stage
+ * comes from the run itself (lib/sketch-client.ts), not from a timer, so it
+ * never claims progress that has not happened.
  */
 
 import * as React from 'react';
 import type { SketchStage } from '@/lib/sketch-client';
 
 const STAGES: { id: SketchStage; message: string }[] = [
-  { id: 'touching-up', message: 'Touching up your photo…' },
-  { id: 'drawing', message: 'Inking the lines…' },
-  { id: 'finishing', message: 'Finishing the artwork…' },
+  { id: 'touching-up', message: 'Cleaning up your photo…' },
+  { id: 'finishing', message: 'Inking the artwork…' },
 ];
 
 export function GenerationProgress({ stage }: { stage: SketchStage }) {
@@ -47,7 +45,7 @@ export function GenerationProgress({ stage }: { stage: SketchStage }) {
       </div>
 
       <p className="text-xs text-slate-400">
-        This takes a few minutes. The drawing is queued at half price, so it is worth the wait — leave this page open.
+        This takes a minute or two. Leave this page open.
       </p>
     </div>
   );

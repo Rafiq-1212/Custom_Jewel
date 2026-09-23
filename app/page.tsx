@@ -43,14 +43,13 @@ import { PendantControls } from '@/components/PendantControls';
 import { PendantDesignPicker } from '@/components/PendantDesignPicker';
 import { PendantPreview } from '@/components/PendantPreview';
 import { PendantShapePicker } from '@/components/PendantShapePicker';
-import { QualityPicker } from '@/components/QualityPicker';
 import { RimColorPicker } from '@/components/RimColorPicker';
 import { extractSilhouetteContour } from '@/lib/edge-cut-contour';
 import { DEFAULT_MATERIAL_ID, DEFAULT_RIM_COLOR_ID, PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
 import { DEFAULT_DESIGN_TYPE, type DesignType, type SilhouetteContour } from '@/lib/pendant-geometry';
 import { DEFAULT_CATEGORY_ID, GENERATION_CATEGORY_LIST, PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
-import { clearPendantSession, loadPrefs, loadSketch, savePrefs, saveSketch, type SketchQuality } from '@/lib/pendant-storage';
+import { clearPendantSession, loadPrefs, loadSketch, savePrefs, saveSketch } from '@/lib/pendant-storage';
 import { runSketch, SketchError, type SketchStage } from '@/lib/sketch-client';
 
 type Status = 'idle' | 'generating' | 'done' | 'error';
@@ -81,20 +80,9 @@ export default function Home() {
   const [selectedDesignType, setSelectedDesignType] = React.useState<DesignType>(DEFAULT_DESIGN_TYPE);
   const [rimColor, setRimColor] = React.useState<RimColorId>(DEFAULT_RIM_COLOR_ID);
 
-  // Draft or final. A draft finishes the drawing at 2K instead of 4K: about a
-  // fifth cheaper and noticeably quicker, enough to judge framing and likeness
-  // before paying for the detailed one. Holds the quality of the sketch on
-  // screen once there is one, so the page knows whether to offer the redraw.
-  const [quality, setQuality] = React.useState<SketchQuality>('final');
-  // Which of the three stages the run is at, and the photo-edit job it can be
-  // redrawn from. Both come from lib/sketch-client.ts: the image calls are
-  // batch jobs at half price, so the browser waits for them rather than the
-  // server, and the finished photo edit is reused for a redraw.
+  // Which stage the run is at; comes from lib/sketch-client.ts, which waits
+  // for the batched photo edit in the browser.
   const [stage, setStage] = React.useState<SketchStage>('touching-up');
-  // The photo-edit job, with the photo, crop and style it was made from: it
-  // may only be reused for a redraw of exactly that, or a changed crop would
-  // be silently redrawn from the old one.
-  const [touchUp, setTouchUp] = React.useState<{ job: string; key: string } | null>(null);
 
   // Non-null for every consumer downstream of generation; the fallback is
   // defensive only, since `hasSketch` requires `selectedCategory` to be set.
@@ -142,7 +130,6 @@ export default function Home() {
       setTransform(prefs.transform);
       setSelectedDesignType(prefs.designType);
       setRimColor(prefs.rimColor);
-      setQuality(prefs.sketchQuality);
     }
     setIsHydrated(true);
   }, []);
@@ -164,9 +151,8 @@ export default function Home() {
       transform,
       designType: selectedDesignType,
       rimColor,
-      sketchQuality: quality,
     });
-  }, [isHydrated, masterSketch, activeCategoryId, selectedShape, selectedMaterial, transform, selectedDesignType, rimColor, quality]);
+  }, [isHydrated, masterSketch, activeCategoryId, selectedShape, selectedMaterial, transform, selectedDesignType, rimColor]);
 
   // The traced boundary is stale the moment `masterSketch` changes — reset
   // synchronously during render (the "compare against state" pattern).
@@ -205,7 +191,6 @@ export default function Home() {
     // A new photo means any previous sketch, and the photo edit behind it, no
     // longer correspond to it.
     setMasterSketch(null);
-    setTouchUp(null);
   };
 
   /**
@@ -213,7 +198,7 @@ export default function Home() {
    * only place `masterSketch` is ever set from a network response. Guarded
    * against double-clicks, a missing category, and superseded responses.
    */
-  const generateSketch = async (wanted: SketchQuality = quality, redoPhotoEdit = false) => {
+  const generateSketch = async () => {
     if (!file || status === 'generating') return;
     if (!selectedCategory) {
       setErrorMessage('Pick a pendant style first, then create the sketch.');
@@ -221,8 +206,6 @@ export default function Home() {
     }
     const requestId = ++requestIdRef.current;
     const superseded = () => requestId !== requestIdRef.current;
-    const key = JSON.stringify({ name: file.name, size: file.size, modified: file.lastModified, crop, category: selectedCategory });
-    setQuality(wanted);
     setStage('touching-up');
     setStatus('generating');
     setErrorMessage(null);
@@ -238,22 +221,16 @@ export default function Home() {
       return;
     }
     try {
-      // A plain redraw hands back the photo-edit job from the last attempt,
-      // so only the drawing is paid for again. `redoPhotoEdit` is the other
-      // case — the photo edit itself went wrong — and starts from the photo.
-      const run = await runSketch({
+      const image = await runSketch({
         file: cropped,
         category: selectedCategory,
-        quality: wanted,
-        redrawFrom: redoPhotoEdit || touchUp?.key !== key ? undefined : touchUp.job,
         onStage: (next) => {
           if (!superseded()) setStage(next);
         },
         cancelled: superseded,
       });
-      if (superseded() || !run) return; // superseded by a newer request
-      setTouchUp({ job: run.touchUpJob, key });
-      setMasterSketch(run.image);
+      if (superseded() || !image) return; // superseded by a newer request
+      setMasterSketch(image);
       setStatus('done');
     } catch (error) {
       if (superseded()) return;
@@ -269,7 +246,6 @@ export default function Home() {
     setFile(null);
     setOriginalImage(null);
     setMasterSketch(null);
-    setTouchUp(null);
     setErrorMessage(null);
     setStatus('idle');
     setSelectedCategory(null);
@@ -363,7 +339,6 @@ export default function Home() {
             <p className="text-xs text-slate-400">
               This decides how much of the photo goes into the sketch. You can choose the pendant shape afterwards.
             </p>
-            <QualityPicker value={quality} onChange={setQuality} disabled={isGenerating} />
             <div className="flex flex-col items-center gap-3">
               <button
                 type="button"
@@ -389,48 +364,21 @@ export default function Home() {
               <div className="mx-auto w-full max-w-xs">
                 <GeneratedImage image={masterSketch} />
               </div>
-              {quality === 'draft' ? (
-                <div className="flex flex-col items-center gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-center">
-                  <p className="text-sm font-medium text-amber-800">
-                    This is a quick draft of your {PENDANT_CATEGORIES[activeCategoryId].label.toLowerCase()}. Check the framing and
-                    the likeness, then draw it in full detail before ordering.
-                  </p>
-                  {file && (
-                    <button
-                      type="button"
-                      onClick={() => generateSketch('final')}
-                      disabled={isGenerating}
-                      className="inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Draw it in full detail
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700">
-                  <span aria-hidden>✓</span> Your {PENDANT_CATEGORIES[activeCategoryId].label} sketch is ready. Everything below uses
-                  this same drawing.
-                </p>
-              )}
+              <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700">
+                <span aria-hidden>✓</span> Your {PENDANT_CATEGORIES[activeCategoryId].label} sketch is ready. Everything below uses
+                this same drawing.
+              </p>
               {file && (
-                <div className="flex flex-col items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => generateSketch()}
-                    disabled={isGenerating}
-                    className="text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Not quite right? Draw it again from the same photo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => generateSketch(quality, true)}
-                    disabled={isGenerating}
-                    className="text-xs text-slate-400 underline-offset-4 hover:text-slate-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Something wrong with the photo itself? Clean it up again too
-                  </button>
-                </div>
+                // The ink filter gives the same artwork from the same photo edit
+                // every time, so "again" only means anything as a fresh edit.
+                <button
+                  type="button"
+                  onClick={() => generateSketch()}
+                  disabled={isGenerating}
+                  className="mx-auto text-xs font-medium text-slate-500 underline-offset-4 hover:text-slate-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Not quite right? Clean up the photo again
+                </button>
               )}
             </div>
           </Section>
