@@ -126,8 +126,13 @@ async function touchedUpPhoto(edited: GenerateImageResult, original: Uint8Array,
  * Smooths the filter's pixel stair-steps into ink-like edges. A median over a
  * small window rounds the jaggies of a thresholded image without moving any
  * line: a stroke is kept wherever most of its neighbourhood is ink.
+ *
+ * 3, not 5: a 5x5 median snaps any stroke thinner than about three pixels
+ * into dashes, which is where a good part of the "broken lines" came from.
+ * Measured on a real couple photo, 3 leaves 17% fewer separate fragments
+ * (408 -> 340) with the same amount of ink and every forehead mark intact.
  */
-const SMOOTHING_WINDOW = 5;
+const SMOOTHING_WINDOW = 3;
 
 export type FinishStep = { touchUpJob: string } | { artwork: Buffer };
 
