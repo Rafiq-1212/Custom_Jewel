@@ -19,6 +19,7 @@
  */
 
 import sharp from 'sharp';
+import { roundClose, squaredDistanceTo } from './distance-transform';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/ink-filter.ts was imported into a browser bundle. This module is server-only.');
@@ -62,6 +63,43 @@ const BACKGROUND_LUMINANCE = 0.93;
 const MIN_INK_SPECK = Math.round(40 * SCALE * SCALE);
 const MIN_WHITE_PINHOLE = Math.round(10 * SCALE * SCALE);
 
+/**
+ * The artwork is engraved into gold or silver, and on polished metal a stray
+ * speck or a two-millimetre dash does not read as fabric texture — it reads
+ * as a scratch, and the laser still has to fire on it. So OUTSIDE the faces
+ * the cleanup is much harder: any isolated fragment smaller than this goes.
+ * Measured on a couple photo, fragments 408 -> about 80, the scattered weave
+ * across a kurta gone, the fold lines kept because they are long.
+ *
+ * Never applied to faces. There, a fragment that small can be a kumkum dot,
+ * a bindi, or on a small face in a group photo a whole eyebrow; the same cut
+ * applied everywhere erased all three in testing.
+ */
+const MIN_CLOTH_FRAGMENT = Math.round(400 * SCALE * SCALE);
+/**
+ * Outside the faces, a solid dark area is hollowed to a border this thick.
+ * A filled patch has to be burned out in full, which is slow, and on metal it
+ * comes out as a blotchy matte slab; its outline carries the shape. Lines up
+ * to twice this thick are untouched, so folds and seams keep their weight.
+ * Hair and beards sit inside the faces and stay solid.
+ */
+const HOLLOW_BORDER = 12 * SCALE;
+/**
+ * Gaps narrower than twice this are bridged before deciding what is "solid",
+ * so a dense crosshatch of shadow — a fold of dark cloth reads that way — is
+ * hollowed like a filled patch instead of engraving as a block of mesh. Only
+ * the decision uses the bridged shape; the ink kept is the original.
+ */
+const MESH_BRIDGE = 4 * SCALE;
+
+/** A region of the photo, as fractions of its width and height. */
+export interface Region {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 function gaussianBlur(src: Float32Array, width: number, height: number, sigma: number): Float32Array {
   const radius = Math.max(1, Math.ceil(sigma * 3));
   const kernel = new Float32Array(radius * 2 + 1);
@@ -92,8 +130,11 @@ function gaussianBlur(src: Float32Array, width: number, height: number, sigma: n
   return out;
 }
 
-/** Flips 4-connected regions of `target` smaller than `minSize` pixels. */
-function removeSmallRegions(ink: Uint8Array, width: number, height: number, target: 0 | 1, minSize: number): void {
+/**
+ * Flips 4-connected regions of `target` smaller than `minSize` pixels. A
+ * region touching any `spare` pixel is left alone.
+ */
+function removeSmallRegions(ink: Uint8Array, width: number, height: number, target: 0 | 1, minSize: number, spare?: Uint8Array): void {
   const n = width * height;
   const seen = new Uint8Array(n);
   const stack = new Int32Array(n);
@@ -102,23 +143,47 @@ function removeSmallRegions(ink: Uint8Array, width: number, height: number, targ
     if (seen[start] || ink[start] !== target) continue;
     let size = 0;
     let top = 0;
+    let spared = false;
     stack[top++] = start;
     seen[start] = 1;
     while (top) {
       const i = stack[--top];
       region[size++] = i;
+      if (spare && spare[i]) spared = true;
       const x = i % width;
       if (x > 0 && !seen[i - 1] && ink[i - 1] === target) { seen[i - 1] = 1; stack[top++] = i - 1; }
       if (x < width - 1 && !seen[i + 1] && ink[i + 1] === target) { seen[i + 1] = 1; stack[top++] = i + 1; }
       if (i >= width && !seen[i - width] && ink[i - width] === target) { seen[i - width] = 1; stack[top++] = i - width; }
       if (i < n - width && !seen[i + width] && ink[i + width] === target) { seen[i + width] = 1; stack[top++] = i + width; }
     }
-    if (size < minSize) for (let j = 0; j < size; j++) ink[region[j]] = target === 1 ? 0 : 1;
+    if (size < minSize && !spared) for (let j = 0; j < size; j++) ink[region[j]] = target === 1 ? 0 : 1;
   }
 }
 
-/** Rough ink trace of `photo` as a black-on-white PNG. */
-export async function roughInkTrace(photo: Buffer): Promise<Buffer> {
+/** Marks every pixel of each 4-connected region of `mask` that contains at least one `seed` pixel. */
+function touchingRegions(mask: Uint8Array, width: number, height: number, seed: Uint8Array): Uint8Array {
+  const n = width * height;
+  const out = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  let top = 0;
+  for (let i = 0; i < n; i++) if (mask[i] && seed[i] && !out[i]) { out[i] = 1; stack[top++] = i; }
+  while (top) {
+    const i = stack[--top];
+    const x = i % width;
+    for (const j of [x > 0 ? i - 1 : -1, x < width - 1 ? i + 1 : -1, i >= width ? i - width : -1, i < n - width ? i + width : -1]) {
+      if (j >= 0 && mask[j] && !out[j]) { out[j] = 1; stack[top++] = j; }
+    }
+  }
+  return out;
+}
+
+/**
+ * Ink trace of `photo` as a black-on-white PNG. `faces` marks the areas traced
+ * exactly as they are; everything else is cleaned up for engraving (see
+ * MIN_CLOTH_FRAGMENT and HOLLOW_BORDER). Without it, the whole photo is
+ * treated as face — the safe way round.
+ */
+export async function roughInkTrace(photo: Buffer, faces?: Region[]): Promise<Buffer> {
   const { data, info } = await sharp(photo)
     .flatten({ background: '#ffffff' })
     .resize({ width: WORK_WIDTH, withoutEnlargement: false })
@@ -177,6 +242,24 @@ export async function roughInkTrace(photo: Buffer): Promise<Buffer> {
     const line = ratio < LINE_RATIO;
     const darkFill = tone[i] < DARK_TONE && ratio <= HIGHLIGHT_RATIO;
     if (line || darkFill) ink[i] = 1;
+  }
+  if (faces) {
+    const face = new Uint8Array(n);
+    for (const r of faces) {
+      const x0 = Math.max(0, Math.floor(r.left * width)), x1 = Math.min(width, Math.ceil(r.right * width));
+      const y0 = Math.max(0, Math.floor(r.top * height)), y1 = Math.min(height, Math.ceil(r.bottom * height));
+      for (let y = y0; y < y1; y++) face.fill(1, y * width + x0, y * width + x1);
+    }
+    const solid = roundClose(ink, width, height, MESH_BRIDGE);
+    // Whole dark regions are hollowed or left alone, never cut part-way:
+    // stopping at the edge of a face box leaves a straight line through the
+    // cloth, which on metal reads as a machining fault. A region that
+    // touches a face at all keeps all its ink.
+    const nearFace = touchingRegions(solid, width, height, face);
+    const toWhite = squaredDistanceTo(solid, width, height, 0);
+    const border2 = HOLLOW_BORDER * HOLLOW_BORDER;
+    for (let i = 0; i < n; i++) if (ink[i] && !nearFace[i] && toWhite[i] > border2) ink[i] = 0;
+    removeSmallRegions(ink, width, height, 1, MIN_CLOTH_FRAGMENT, face);
   }
   removeSmallRegions(ink, width, height, 1, MIN_INK_SPECK);
   removeSmallRegions(ink, width, height, 0, MIN_WHITE_PINHOLE);

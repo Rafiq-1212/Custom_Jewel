@@ -22,11 +22,12 @@
  */
 
 import sharp from 'sharp';
-import { type GenerateImageResult } from './gemini';
+import { Type } from '@google/genai';
+import { generateJsonFromImage, type GenerateImageResult } from './gemini';
 import { readImageJob, submitImageJob } from './gemini-batch';
 import { cropPhotoToHead, cutBelowJawline } from './image-processing';
 import { findJawline } from './jawline';
-import { roughInkTrace } from './ink-filter';
+import { roughInkTrace, type Region } from './ink-filter';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, ENHANCE_RETRY_NOTE } from './sketch-prompts';
@@ -122,6 +123,49 @@ async function touchedUpPhoto(edited: GenerateImageResult, original: Uint8Array,
   return CROP_TO_HEAD_CATEGORIES.has(category) ? cutToHead(photo, 'image/png') : photo;
 }
 
+const FACES_PROMPT = `Everything below is on a 0-1000 scale (y down, x right).
+Return "boxes": one bounding box [ymin, xmin, ymax, xmax] for EVERY person's head in this photo — from the top of the hair to the chin or the bottom of the beard, and from ear to ear — and one for every visible hand. Include babies and people partly hidden. If there are none, return an empty list.`;
+
+const FACES_SCHEMA = {
+  type: Type.OBJECT,
+  properties: { boxes: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } } },
+  required: ['boxes'],
+};
+
+/** Each box is grown by this much on every side, so a mark at the hairline or a ring on a finger sits well inside. */
+const FACE_MARGIN = 0.15;
+
+/**
+ * Where the faces and hands are, so the ink filter can leave them exactly as
+ * traced and clean everything else for engraving (lib/ink-filter.ts). A text
+ * call on the edited photo — it looks, it never draws — costing a fraction of
+ * a rupee. Anything short of a clean answer returns undefined, which the
+ * filter takes as "treat the whole photo as face": the careful way round.
+ */
+async function findFaces(photo: Buffer): Promise<Region[] | undefined> {
+  try {
+    const answer = (await generateJsonFromImage({ prompt: FACES_PROMPT, image: { bytes: photo, mimeType: 'image/png' }, schema: FACES_SCHEMA })) as {
+      boxes?: unknown;
+    } | null;
+    const boxes = Array.isArray(answer?.boxes) ? answer.boxes : [];
+    const regions = boxes
+      .filter((b): b is number[] => Array.isArray(b) && b.length === 4 && b.every((v) => typeof v === 'number' && Number.isFinite(v)))
+      .map(([top, left, bottom, right]) => ({ left: left / 1000, top: top / 1000, right: right / 1000, bottom: bottom / 1000 }))
+      .filter((r) => r.right > r.left && r.bottom > r.top)
+      .map((r) => {
+        const mx = (r.right - r.left) * FACE_MARGIN;
+        const my = (r.bottom - r.top) * FACE_MARGIN;
+        return { left: r.left - mx, top: r.top - my, right: r.right + mx, bottom: r.bottom + my };
+      });
+    if (regions.length === 0) return undefined;
+    console.info(`[sketch] ${regions.length} faces and hands kept exactly as traced; the rest cleaned for engraving`);
+    return regions;
+  } catch (error) {
+    console.info(`[sketch] could not find the faces, tracing everything as face: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
 /**
  * Smooths the filter's pixel stair-steps into ink-like edges. A median over a
  * small window rounds the jaggies of a thresholded image without moving any
@@ -149,6 +193,8 @@ export async function finishSketch(input: SketchInput & { touchUpJob: string; re
     return { touchUpJob: await startTouchUp(input, true) };
   }
   const photo = await touchedUpPhoto(edited, input.imageBytes, input.category);
-  const trace = await roughInkTrace(photo);
+  // A head-only style is all face, so there is nothing to ask about.
+  const faces = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category) ? undefined : await findFaces(photo);
+  const trace = await roughInkTrace(photo, faces);
   return { artwork: await sharp(trace).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer() };
 }
