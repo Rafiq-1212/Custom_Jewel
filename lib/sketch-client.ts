@@ -33,17 +33,27 @@ async function post(body: FormData): Promise<Record<string, unknown>> {
   return json;
 }
 
+/**
+ * A status check that fails is asked again; only this many failures in a row
+ * end the run. One "fetch failed" between the server and Google used to throw
+ * away a sketch that was minutes along and still running fine.
+ */
+const MAX_FAILED_CHECKS = 6;
+
 /** Waits for one job, checking every few seconds. Returns false if the run was cancelled. */
 async function waitFor(job: string, cancelled: () => boolean): Promise<boolean> {
   const until = Date.now() + GIVE_UP_MS;
+  let failures = 0;
   while (Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     if (cancelled()) return false;
-    const response = await fetch(`/api/sketch?job=${encodeURIComponent(job)}`);
-    const json = (await response.json().catch(() => null)) as { success?: boolean; state?: string; error?: string } | null;
-    if (!json || !response.ok || json.success !== true) {
+    const response = await fetch(`/api/sketch?job=${encodeURIComponent(job)}`).catch(() => null);
+    const json = (await response?.json().catch(() => null)) as { success?: boolean; state?: string; error?: string } | null;
+    if (!response || !json || !response.ok || json.success !== true) {
+      if (++failures < MAX_FAILED_CHECKS) continue;
       throw new SketchError(typeof json?.error === 'string' ? json.error : 'We lost track of this sketch. Please try again.');
     }
+    failures = 0;
     if (json.state === 'done') return true;
     if (json.state === 'failed') throw new SketchError('The sketch didn\'t come back. Please try again.');
   }

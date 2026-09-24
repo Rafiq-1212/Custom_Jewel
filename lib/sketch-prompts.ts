@@ -79,7 +79,8 @@ Ink it as a clean black pen-and-ink illustration, the style of a detailed portra
 Stray specks that belong to no form are pencil noise: leave them out — but see the rule on marks below.
 
 THE EXPRESSION IS THE PERSON. Keep every face's expression exactly as it is, whatever it is — a smile, a half-smile, a neutral look, a squint, a frown — with the creases, the set of the mouth and how open the eyes are. Never relax, sharpen, soften, brighten or beautify a face. Do not make eyes bigger or rounder, faces slimmer, skin smoother or smiles wider.
-RELIGIOUS MARKS ARE PART OF THE PERSON. A dot between the eyebrows (bindi, pottu), marks or a smear of kumkum or sandal paste on the forehead, and kumkum in the parting of the hair are inked exactly where and exactly the shape they are — never dropped as noise, never tidied into a neat dot, and never added to anyone who does not have one.
+THE MOUTH IS EXACTLY THE MOUTH IN IMAGE 1. If the lips are closed there, they stay closed: never open a mouth, never show teeth that image 1 does not show, never turn a half-smile into a grin. The corners of the mouth stay at exactly the height image 1 puts them. A friendlier face is a different person.
+RELIGIOUS MARKS ARE PART OF THE PERSON. A dot between the eyebrows (bindi, pottu), marks or a smear of kumkum or sandal paste on the forehead, and kumkum in the parting of the hair are inked exactly where and exactly the shape they are — never dropped as noise, never added to anyone who does not have one, and never changed from one kind into another: a vertical streak or a smear of kumkum stays a streak or a smear and is never turned into a round dot, and a round bindi is never turned into a streak.
 Add nothing the source does not show: no pattern, pocket, button, fold, jewellery, hair or background. Do not change the pose, the angle of any head, or the framing.
 
 Output only the inked illustration.`;

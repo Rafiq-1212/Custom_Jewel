@@ -45,9 +45,18 @@ export async function runMockup(design: unknown): Promise<string> {
   if (!job) throw new MockupError('We couldn\'t make the product photo. Please try again.');
 
   const until = Date.now() + GIVE_UP_MS;
+  let failures = 0;
   while (Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-    const body = await read(await fetch(`/api/render-mockup?job=${encodeURIComponent(job)}&material=${encodeURIComponent(String((design as { material?: string }).material ?? ''))}`));
+    // A failed status check is asked again, as for the sketch (lib/sketch-client.ts).
+    let body: JobResponse;
+    try {
+      body = await read(await fetch(`/api/render-mockup?job=${encodeURIComponent(job)}&material=${encodeURIComponent(String((design as { material?: string }).material ?? ''))}`));
+      failures = 0;
+    } catch (error) {
+      if (++failures < 6) continue;
+      throw error;
+    }
     if (body.state === 'failed') throw new MockupError('The product photo didn\'t come back. Please try again.');
     if (body.state === 'done' && body.dataUrl) return body.dataUrl;
   }
