@@ -1,24 +1,27 @@
 /**
- * Photo to engraving artwork, with no AI drawing anywhere in it:
+ * Photo to engraving artwork, in three steps:
  *
- *   1. Photo edit (AI, batched at half price): remove the background, paint
- *      out anything that is not the subject, correct colour and exposure.
- *      No drawing, and no re-posing. Face Pendant is then cut to the head on
- *      pixels, along a jawline located by a text call (lib/jawline.ts).
- *   2. Ink filter (lib/ink-filter.ts, no AI): a comic ink filter on that
- *      edited photo. This IS the artwork.
+ *   1. Photo edit (AI, batched): remove the background, paint out anything
+ *      that is not the subject, correct and sharpen. Still a photograph; no
+ *      re-posing. Face Pendant is then cut to the head along a jawline found
+ *      by a text call (lib/jawline.ts).
+ *   2. Ink trace (lib/ink-filter.ts, no AI): a comic ink filter on that
+ *      photo. Every line in it is an edge of the real photograph, so it fixes
+ *      the likeness; faces are traced exactly, clothing cleaned for metal.
+ *   3. Inking (AI, batched): the trace is redrawn as a clean pen-and-ink
+ *      illustration (sketch-prompts.ts INK_PROMPT). It works OVER the trace,
+ *      the way a comic inker works over pencils, and sees the photo only to
+ *      read expressions and marks.
  *
- * There used to be a third step, an AI "finish" that redrew the ink trace as
- * clean line art. It was dropped because it drew people who were not in the
- * photograph: shown a couple at a temple, it came back with a different
- * face, a different saree, a shirt with a pocket nobody wore, and a bindi on
- * a woman who wears none. Every prompt rule added against that only moved
- * the problem. The ink filter cannot invent anything — every line in it is
- * an edge in the real photo — so the likeness is the photo's own.
+ * An earlier drawing step was handed the photograph and drew from it, and it
+ * drew people who were not there — a different face, a different saree, a
+ * bindi on a woman who wears none. The trace in step 2 is what stops that:
+ * it decides where every line goes before any model draws one.
  *
- * The photo edit is a batch job, so the browser drives this by polling
- * (app/api/sketch/route.ts): `startTouchUp` submits it, and `finishSketch`
- * reads it back and makes the artwork. Nothing is stored in between.
+ * Both AI steps are batch jobs, so the browser drives this by polling
+ * (app/api/sketch/route.ts): `startTouchUp`, then `finishSketch` (reads the
+ * edit, traces it, submits the inking), then `collectInked`. Nothing is
+ * stored in between; each job's result is read back from the job itself.
  */
 
 import sharp from 'sharp';
@@ -30,7 +33,7 @@ import { findJawline } from './jawline';
 import { roughInkTrace, type Region } from './ink-filter';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
-import { buildEnhancePrompt, ENHANCE_RETRY_NOTE } from './sketch-prompts';
+import { buildEnhancePrompt, ENHANCE_RETRY_NOTE, INK_PROMPT } from './sketch-prompts';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/sketch-pipeline.ts was imported into a browser bundle. This module is server-only.');
@@ -178,10 +181,10 @@ async function findFaces(photo: Buffer): Promise<Region[] | undefined> {
  */
 const SMOOTHING_WINDOW = 3;
 
-export type FinishStep = { touchUpJob: string } | { artwork: Buffer };
+export type FinishStep = { touchUpJob: string } | { inkJob: string };
 
 /**
- * Reads the finished photo edit and turns it into the artwork. When a
+ * Reads the finished photo edit, traces it and submits the inking. When a
  * head-only edit came back with something still touching the bottom, this
  * submits a second photo edit instead and says so, and the browser simply
  * waits again.
@@ -195,6 +198,27 @@ export async function finishSketch(input: SketchInput & { touchUpJob: string; re
   const photo = await touchedUpPhoto(edited, input.imageBytes, input.category);
   // A head-only style is all face, so there is nothing to ask about.
   const faces = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category) ? undefined : await findFaces(photo);
-  const trace = await roughInkTrace(photo, faces);
-  return { artwork: await sharp(trace).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer() };
+  const trace = await sharp(await roughInkTrace(photo, faces)).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer();
+  const inkJob = await submitImageJob(
+    {
+      prompt: INK_PROMPT,
+      images: [
+        { bytes: trace, mimeType: 'image/png' },
+        { bytes: photo, mimeType: 'image/png' },
+      ],
+      imageSize: '2K',
+    },
+    `inking ${input.category}`,
+  );
+  return { inkJob };
+}
+
+/**
+ * The inked artwork, forced to greyscale. The prompt asks for black ink only,
+ * but a red kumkum mark came back faintly red in testing; metal has no
+ * colour, so the colour is taken out here rather than trusted to the model.
+ */
+export async function collectInked(inkJob: string, category: CategoryId): Promise<Buffer> {
+  const inked = await readImageJob(inkJob, `inking ${category}`, { count: true });
+  return sharp(Buffer.from(inked.bytes)).flatten({ background: '#ffffff' }).greyscale().png().toBuffer();
 }

@@ -1,20 +1,21 @@
 /**
  * The sketch, in the two steps a batch job forces it into.
  *
- * The only AI call is the photo edit, sent to Google's Batch API at half
- * price (lib/gemini-batch.ts); the artwork itself is the ink filter run on
- * that edited photo, with no AI drawing (lib/sketch-pipeline.ts explains why).
- * A batch job is answered when it suits Google — 87 to 112 seconds for the
- * photo edit in the jobs measured — so no request here waits for one:
+ * Two AI calls, the photo edit and the inking, both sent to Google's Batch
+ * API at half price (lib/gemini-batch.ts); lib/sketch-pipeline.ts explains
+ * the steps. A batch job is answered when it suits Google — one to six
+ * minutes in the jobs measured — so no request here waits for one:
  *
  *   POST  action=start    submit the photo edit       -> { touchUpJob }
  *   GET   ?job=...        is that job finished yet?   -> { state }
- *   POST  action=advance  read it, ink it             -> { image }
- *                         (or another touchUpJob, when a pet photo's edit
- *                          left the car door in and has to be redone)
+ *   POST  action=advance  read it, trace it, submit    -> { inkJob }
+ *                         the inking (or another touchUpJob, when a pet
+ *                         photo's edit left the car door in)
+ *   GET   ?job=...        is the inking finished?     -> { state }
+ *   POST  action=collect  read the inked artwork      -> { image }
  *
- * Nothing is kept on the server between those calls. The browser holds one
- * job name and the photograph it already has.
+ * Nothing is kept on the server between those calls. The browser holds the
+ * job names and the photograph it already has.
  *
  * The Gemini API key is read from `process.env` on the server and never
  * appears in any response.
@@ -25,7 +26,7 @@ import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
-import { finishSketch, startTouchUp } from '@/lib/sketch-pipeline';
+import { collectInked, finishSketch, startTouchUp } from '@/lib/sketch-pipeline';
 import { validateImageBytes } from '@/lib/validation';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
@@ -143,10 +144,22 @@ export async function POST(request: globalThis.Request): Promise<Response> {
       return await withCostLog(`sketch ${category} (batched)`, async () => {
         const step = await finishSketch({ ...input, touchUpJob, retried: formData.get('retried') === '1' });
         if ('touchUpJob' in step) return Response.json({ success: true, stage: 'touch-up', touchUpJob: step.touchUpJob });
+        return Response.json({ success: true, stage: 'inking', inkJob: step.inkJob });
+      });
+    } catch (error) {
+      return failFromGemini(error, 'advance');
+    }
+  }
+
+  if (action === 'collect') {
+    const inkJob = readJobName(formData, 'inkJob');
+    if (!inkJob) return fail('That sketch has expired. Please start it again.', 400);
+    try {
+      return await withCostLog(`inking ${category} (batched)`, async () => {
         // Deterministic post-processing, not AI: crop the white margin and
         // turn the background transparent. For Face Pendant it also enforces
         // the jaw cutoff. See lib/image-processing.ts.
-        const master = await makeTransparentMasterSketch(step.artwork, { cropBelowJaw: category === 'face' });
+        const master = await makeTransparentMasterSketch(await collectInked(inkJob, category), { cropBelowJaw: category === 'face' });
         return Response.json({
           success: true,
           stage: 'done',
@@ -154,7 +167,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         });
       });
     } catch (error) {
-      return failFromGemini(error, 'advance');
+      return failFromGemini(error, 'collect');
     }
   }
 

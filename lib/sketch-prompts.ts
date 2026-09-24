@@ -55,3 +55,31 @@ Output only the edited photograph.`;
 
 /** Added to the enhance prompt when the first attempt left objects in the photo. */
 export const ENHANCE_RETRY_NOTE = `IMPORTANT: a previous attempt at this edit kept objects that are not part of the subject, such as a car door, window frame or furniture along the bottom of the photo. Remove every such object completely: everything that is not the subject must be pure white, right down to the bottom edge.`;
+
+/**
+ * The inker: redraws the ink trace as a clean pen-and-ink illustration.
+ *
+ * The earlier drawing step was given the photograph and asked to draw from
+ * it, and it drew people who were not there. This one is given the TRACE as
+ * the pencils — every line already sitting on a real edge of the photo — and
+ * the photograph only to read expressions and which small marks are real.
+ * Like a comic-book inker, it never decides where a line goes. Tested on a
+ * temple couple (her frown, his half-smile, his kumkum, her bindi and the
+ * kumkum in her parting all kept) and on two women who wear no bindi (none
+ * added, which the earlier step had done).
+ */
+export const INK_PROMPT = `You are a professional comic-book INKER. Image 1 is the penciller's finished pencils: every line in it is already in exactly the right place, and ALL SHAPES COME FROM IMAGE 1 ONLY. Image 2 is the photograph the pencils were made from. Use image 2 for exactly two things and nothing else: to read each person's EXPRESSION, and to see which small marks are real (a bindi, kumkum, sandal paste) rather than pencil noise. Never take a shape, a line, a pattern or a detail from image 2 that image 1 does not already have.
+
+Ink it as a clean black pen-and-ink illustration, the style of a detailed portrait engraving:
+- Trace every contour with one clean, continuous, confident pen line. Where the pencils are broken, dashed or ragged, join them into the single smooth line they are trying to be.
+- Where the pencils have a solid black patch or a scribble of shadow, render it as fine parallel hatching that follows the form, and cross-hatching where it is darkest. Hair and beards become many fine strands with hatching. Only pupils and the very darkest points stay solid black.
+- PURE BLACK INK ON WHITE ONLY. No colour anywhere, no grey wash: a red bindi, red kumkum or a red smear is inked in solid black, the same as everything else. This is engraved into metal, which has no colour.
+- White background. Same size, same position, same crop.
+
+Stray specks that belong to no form are pencil noise: leave them out — but see the rule on marks below.
+
+THE EXPRESSION IS THE PERSON. Keep every face's expression exactly as it is, whatever it is — a smile, a half-smile, a neutral look, a squint, a frown — with the creases, the set of the mouth and how open the eyes are. Never relax, sharpen, soften, brighten or beautify a face. Do not make eyes bigger or rounder, faces slimmer, skin smoother or smiles wider.
+RELIGIOUS MARKS ARE PART OF THE PERSON. A dot between the eyebrows (bindi, pottu), marks or a smear of kumkum or sandal paste on the forehead, and kumkum in the parting of the hair are inked exactly where and exactly the shape they are — never dropped as noise, never tidied into a neat dot, and never added to anyone who does not have one.
+Add nothing the source does not show: no pattern, pocket, button, fold, jewellery, hair or background. Do not change the pose, the angle of any head, or the framing.
+
+Output only the inked illustration.`;

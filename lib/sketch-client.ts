@@ -3,15 +3,14 @@
 /**
  * Driving the sketch from the browser, because the server cannot wait for it.
  *
- * The one AI call — the photo edit — is a batch job at half price
- * (lib/gemini-batch.ts), answered when it suits Google: 87 to 112 seconds in
- * the jobs measured. No serverless request can sit through that, so the
- * waiting happens here, a small poll every few seconds. Once the edit is
- * back, the server runs the ink filter on it and returns the artwork.
+ * Both AI calls — the photo edit and the inking — are batch jobs at half
+ * price (lib/gemini-batch.ts), answered when it suits Google: one to six
+ * minutes each in the jobs measured. No serverless request can sit through
+ * that, so the waiting happens here, a small poll every few seconds.
  */
 
 /** What the operator is told is happening. */
-export type SketchStage = 'touching-up' | 'finishing';
+export type SketchStage = 'touching-up' | 'inking' | 'finishing';
 
 export class SketchError extends Error {}
 
@@ -74,18 +73,24 @@ export async function runSketch(request: SketchRequest): Promise<string | null> 
   let touchUpJob = String((await post(form('start'))).touchUpJob);
   if (!(await waitFor(touchUpJob, request.cancelled))) return null;
 
-  // `advance` normally returns the artwork, but for a head-only style it can
+  // `advance` normally submits the inking, but for a head-only style it can
   // come back with a second photo edit instead, when the first one left an
   // object along the bottom. Then this waits again and asks once more.
-  request.onStage('finishing');
+  request.onStage('inking');
   let step = await post(form('advance', { touchUpJob }));
   if (step.stage === 'touch-up') {
     touchUpJob = String(step.touchUpJob);
     request.onStage('touching-up');
     if (!(await waitFor(touchUpJob, request.cancelled))) return null;
-    request.onStage('finishing');
+    request.onStage('inking');
     step = await post(form('advance', { touchUpJob, retried: '1' }));
   }
+  const inkJob = String(step.inkJob ?? '');
+  if (!inkJob) throw new SketchError('Something went wrong making the sketch. Please try again.');
+  if (!(await waitFor(inkJob, request.cancelled))) return null;
+
+  request.onStage('finishing');
+  const done = await post(form('collect', { inkJob }));
   if (request.cancelled()) return null;
-  return String(step.image);
+  return String(done.image);
 }

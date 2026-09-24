@@ -59,8 +59,13 @@ if (typeof window !== 'undefined') {
   throw new Error('lib/laser-export.ts was imported into a browser bundle. This module is server-only.');
 }
 
-/** Raster pixels per viewBox unit when rendering for tracing, PNG export and the mockup composite. */
-export const RASTER_SCALE = 10;
+/**
+ * Raster pixels per viewBox unit when rendering for tracing and PNG export.
+ * At 10 the whole pendant was traced at 1000 px, and the fine hatching of
+ * the inked artwork merged: hair and beards engraved as solid black slabs,
+ * eye sockets as blots. At 25 the same drawing reaches the file intact.
+ */
+export const RASTER_SCALE = 25;
 /** Default physical width of the exported pendant, in millimeters. */
 const DEFAULT_WIDTH_MM = 25;
 
@@ -68,7 +73,9 @@ const POTRACE_OPTIONS: PotraceOptions = {
   blackOnWhite: true,
   turdSize: 4,
   optCurve: true,
-  threshold: 180,
+  // The midpoint. At 180 every light-grey anti-aliased gap between two hatch
+  // lines counted as ink and the hatching filled in solid.
+  threshold: 128,
 };
 
 function decodeDataUrl(dataUrl: string): { buffer: Buffer; mimeType: string } {
