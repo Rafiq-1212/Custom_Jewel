@@ -213,7 +213,16 @@ export async function renderTransformedArtwork(
   return { png, width: canvasWidth, height: canvasHeight };
 }
 
-/** Trace the (white-flattened) engraving raster into a vector `<path>`. */
+/**
+ * Trace the (white-flattened) engraving raster into a vector `<path>`.
+ *
+ * Potrace marks white islands inside ink — a face ringed by hair, the white
+ * of an eye, a gap between curls — as holes that only exist under
+ * fill-rule="evenodd", which it puts on its own <path> tag. Only `d` is kept
+ * here, so whoever draws the path MUST set evenodd again: under SVG's default
+ * rule every such hole was filled, and a woman's whole face engraved as a
+ * solid black head.
+ */
 function tracePath(png: Buffer): Promise<string> {
   return new Promise((resolve, reject) => {
     potraceTrace(png, POTRACE_OPTIONS, (error, _svg, instance) => {
@@ -296,7 +305,7 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
     <path d="${escapeAttr(geometry.outerPath)}"/>
   </g>
   <g id="engrave" fill="#000000" stroke="none" transform="scale(${unitsPerRasterPx})">
-    <path d="${tracedD}"/>
+    <path d="${tracedD}" fill-rule="evenodd"/>
   </g>
 </svg>`;
 
