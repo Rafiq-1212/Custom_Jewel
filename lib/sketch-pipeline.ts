@@ -181,6 +181,9 @@ async function findFaces(photo: Buffer): Promise<Region[] | undefined> {
  */
 const SMOOTHING_WINDOW = 3;
 
+/** Sampling temperature for the inker. See the note where it is used. */
+const INK_TEMPERATURE = 0.1;
+
 export type FinishStep = { touchUpJob: string } | { inkJob: string };
 
 /**
@@ -207,6 +210,10 @@ export async function finishSketch(input: SketchInput & { touchUpJob: string; re
         { bytes: photo, mimeType: 'image/png' },
       ],
       imageSize: '2K',
+      // Low, so the same photo draws the same people every time. At the
+      // default, one run of the temple couple was faithful and the next gave
+      // him a styled quiff and her a longer, older face from the same inputs.
+      temperature: INK_TEMPERATURE,
     },
     `inking ${input.category}`,
   );

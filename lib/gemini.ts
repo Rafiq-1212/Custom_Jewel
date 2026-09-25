@@ -110,6 +110,11 @@ export interface GenerateImageFromImageInput {
    * cost of time.
    */
   imageSize?: '1K' | '2K' | '4K';
+  /**
+   * Sampling temperature; the model's default when omitted. Low values make
+   * repeated runs on the same input come out alike (see INK_PROMPT's caller).
+   */
+  temperature?: number;
 }
 
 /**
@@ -140,6 +145,7 @@ export async function generateImageFromImage(
       config: {
         responseModalities: [Modality.TEXT, Modality.IMAGE],
         ...(input.imageSize ? { imageConfig: { imageSize: input.imageSize } } : {}),
+        ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         httpOptions: { timeout: REQUEST_TIMEOUT_MS },
       },
     });

@@ -60,6 +60,7 @@ export async function submitImageJob(input: GenerateImageFromImageInput, label: 
           config: {
             responseModalities: [Modality.TEXT, Modality.IMAGE],
             ...(input.imageSize ? { imageConfig: { imageSize: input.imageSize } } : {}),
+            ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
           },
         },
       ],
