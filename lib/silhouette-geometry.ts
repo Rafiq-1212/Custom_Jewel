@@ -220,7 +220,18 @@ export function fillHoles(mask: Uint8Array, width: number, height: number): Uint
  * pixel of that row/column is marked foreground — the image edge itself
  * becomes the closing stroke, which is exactly what the cut boundary should
  * be there (a flat cut where the artwork ends).
+ *
+ * The BOTTOM edge is sealed across the widest ink found anywhere in the
+ * bottom band (BOTTOM_SEAL_BAND of the height), not just in its last rows.
+ * With two people cut off by the bottom of the frame, one figure's lines can
+ * stop a little short of the edge — a pale shirt drawn with no ink along its
+ * lower part — and sealing only what touches the last rows left that figure
+ * open: the fill flooded up into it and the cut line came back with a deep
+ * notch between the two people.
  */
+/** Height of the band at the bottom whose ink sets the width of the bottom seal; see sealBorderGaps. */
+const BOTTOM_SEAL_BAND = 0.08;
+
 export function sealBorderGaps(mask: Uint8Array, width: number, height: number, depth: number): Uint8Array {
   const out = mask.slice();
   const rows = Math.min(depth, height);
@@ -244,9 +255,18 @@ export function sealBorderGaps(mask: Uint8Array, width: number, height: number, 
     for (let y = minY; y <= maxY; y++) out[y * width + x] = 1;
   };
 
-  for (let d = 0; d < rows; d++) {
-    sealRow(d);
-    sealRow(height - 1 - d);
+  for (let d = 0; d < rows; d++) sealRow(d);
+
+  let bottomMin = width;
+  let bottomMax = -1;
+  for (let y = Math.max(0, height - Math.round(height * BOTTOM_SEAL_BAND)); y < height; y++) {
+    const extent = rowExtent(mask, width, y);
+    if (!extent) continue;
+    bottomMin = Math.min(bottomMin, extent.minX);
+    bottomMax = Math.max(bottomMax, extent.maxX);
+  }
+  if (bottomMax >= 0) {
+    for (let d = 0; d < rows; d++) out.fill(1, (height - 1 - d) * width + bottomMin, (height - 1 - d) * width + bottomMax + 1);
   }
   for (let d = 0; d < cols; d++) {
     sealColumn(d);
