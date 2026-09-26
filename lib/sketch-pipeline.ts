@@ -129,46 +129,93 @@ async function touchedUpPhoto(edited: GenerateImageResult, original: Uint8Array,
 }
 
 const FACES_PROMPT = `Everything below is on a 0-1000 scale (y down, x right).
-Return "boxes": one bounding box [ymin, xmin, ymax, xmax] for EVERY person's head in this photo — from the top of the hair to the chin or the bottom of the beard, and from ear to ear — and one for every visible hand. Include babies and people partly hidden. If there are none, return an empty list.`;
+Return "people": one entry for EVERY person in this photo, including babies and people partly hidden, each with:
+- "head": the bounding box [ymin, xmin, ymax, xmax] of the head, from the top of the hair to the chin or the bottom of the beard, and from ear to ear;
+- "hair": that person's hair exactly as it looks in this photo, always covering all three of: its LENGTH; its TEXTURE, which is always one of curly, wavy or straight (say where, if it differs, e.g. "curly on top"); and how it is WORN (loose, tied back, plaited, in a bun, cropped short at the sides). For example "short, curly on top, cropped short at the sides" or "long, straight and smooth, tied back in a bun". Describe only what you can see; do not guess.
+Return "hands": one bounding box [ymin, xmin, ymax, xmax] for every visible hand. Empty lists when there are none.`;
 
 const FACES_SCHEMA = {
   type: Type.OBJECT,
-  properties: { boxes: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } } },
-  required: ['boxes'],
+  properties: {
+    people: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: { head: { type: Type.ARRAY, items: { type: Type.NUMBER } }, hair: { type: Type.STRING } },
+        required: ['head', 'hair'],
+      },
+    },
+    hands: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
+  },
+  required: ['people', 'hands'],
 };
 
 /** Each box is grown by this much on every side, so a mark at the hairline or a ring on a finger sits well inside. */
 const FACE_MARGIN = 0.15;
 
+interface Faces {
+  /** Heads and hands, traced exactly and never cleaned (lib/ink-filter.ts). */
+  regions: Region[];
+  /** What each person's hair looks like, left to right, for the inker. */
+  hair: string[];
+}
+
+function toRegion(box: unknown): Region | null {
+  if (!Array.isArray(box) || box.length !== 4 || !box.every((v) => typeof v === 'number' && Number.isFinite(v))) return null;
+  const [top, left, bottom, right] = (box as number[]).map((v) => v / 1000);
+  if (right <= left || bottom <= top) return null;
+  const mx = (right - left) * FACE_MARGIN;
+  const my = (bottom - top) * FACE_MARGIN;
+  return { left: left - mx, top: top - my, right: right + mx, bottom: bottom + my };
+}
+
 /**
  * Where the faces and hands are, so the ink filter can leave them exactly as
- * traced and clean everything else for engraving (lib/ink-filter.ts). A text
- * call on the edited photo — it looks, it never draws — costing a fraction of
- * a rupee. Anything short of a clean answer returns undefined, which the
- * filter takes as "treat the whole photo as face": the careful way round.
+ * traced and clean everything else for engraving (lib/ink-filter.ts) — and
+ * what each person's hair looks like, so the inker is told it as a fact.
+ * A text call on the edited photo — it looks, it never draws — costing a
+ * fraction of a rupee. Anything short of a clean answer returns undefined,
+ * which the filter takes as "treat the whole photo as face": the careful way
+ * round.
  */
-async function findFaces(photo: Buffer): Promise<Region[] | undefined> {
+async function findFaces(photo: Buffer): Promise<Faces | undefined> {
   try {
     const answer = (await generateJsonFromImage({ prompt: FACES_PROMPT, image: { bytes: photo, mimeType: 'image/png' }, schema: FACES_SCHEMA })) as {
-      boxes?: unknown;
+      people?: { head?: unknown; hair?: unknown }[];
+      hands?: unknown[];
     } | null;
-    const boxes = Array.isArray(answer?.boxes) ? answer.boxes : [];
-    const regions = boxes
-      .filter((b): b is number[] => Array.isArray(b) && b.length === 4 && b.every((v) => typeof v === 'number' && Number.isFinite(v)))
-      .map(([top, left, bottom, right]) => ({ left: left / 1000, top: top / 1000, right: right / 1000, bottom: bottom / 1000 }))
-      .filter((r) => r.right > r.left && r.bottom > r.top)
-      .map((r) => {
-        const mx = (r.right - r.left) * FACE_MARGIN;
-        const my = (r.bottom - r.top) * FACE_MARGIN;
-        return { left: r.left - mx, top: r.top - my, right: r.right + mx, bottom: r.bottom + my };
-      });
+    const people = (Array.isArray(answer?.people) ? answer.people : [])
+      .map((person) => ({ region: toRegion(person?.head), hair: typeof person?.hair === 'string' ? person.hair.trim() : '' }))
+      .filter((person): person is { region: Region; hair: string } => person.region !== null)
+      .sort((x, y) => x.region.left + x.region.right - (y.region.left + y.region.right));
+    const hands = (Array.isArray(answer?.hands) ? answer.hands : []).map(toRegion).filter((r): r is Region => r !== null);
+    const regions = [...people.map((person) => person.region), ...hands];
     if (regions.length === 0) return undefined;
-    console.info(`[sketch] ${regions.length} faces and hands kept exactly as traced; the rest cleaned for engraving`);
-    return regions;
+    console.info(`[sketch] ${people.length} faces and ${hands.length} hands kept exactly as traced; hair: ${people.map((p) => p.hair).join(' | ')}`);
+    return { regions, hair: people.map((person) => person.hair) };
   } catch (error) {
     console.info(`[sketch] could not find the faces, tracing everything as face: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
   }
+}
+
+/**
+ * Each person's hair, stated as a fact per person. A general rule about hair
+ * was not enough: written against combing curls out, it put curls on a woman
+ * whose hair is smooth; rewritten both ways, it passed two test runs and the
+ * next production run of the same photo still gave her curls and him a wavy
+ * quiff. Told per person what the photo shows — as with the bindi check —
+ * the model follows it.
+ */
+function hairFacts(hair: string[]): string {
+  const described = hair.filter((h) => h.length > 0);
+  if (described.length === 0 || described.length !== hair.length) return '';
+  const place = (i: number) =>
+    hair.length === 1 ? 'The person' : i === 0 ? 'The person furthest to the LEFT' : i === hair.length - 1 ? 'The person furthest to the RIGHT' : `Person ${i + 1} from the left`;
+  return [
+    "EACH PERSON'S HAIR, CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND. Draw exactly this, for each person, and nothing else — not a style you think suits them, and not the hair of the person next to them:",
+    ...hair.map((h, i) => `- ${place(i)}: ${h}.`),
+  ].join('\n');
 }
 
 /**
@@ -198,12 +245,15 @@ export async function startSketch(input: SketchInput): Promise<string> {
     edited = await touchUp(input, true);
   }
   const photo = await touchedUpPhoto(edited, input.imageBytes, input.category);
-  // A head-only style is all face, so there is nothing to ask about.
-  const faces = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category) ? undefined : await findFaces(photo);
-  const trace = await sharp(await roughInkTrace(photo, faces)).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer();
+  const faces = await findFaces(photo);
+  // A head-only style is all face, so it is traced whole; the hair facts
+  // still apply.
+  const headOnly = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category);
+  const trace = await sharp(await roughInkTrace(photo, headOnly ? undefined : faces?.regions)).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer();
+  const facts = faces ? hairFacts(faces.hair) : '';
   return submitImageJob(
     {
-      prompt: INK_PROMPT,
+      prompt: facts ? `${INK_PROMPT}\n\n${facts}` : INK_PROMPT,
       images: [
         { bytes: trace, mimeType: 'image/png' },
         { bytes: photo, mimeType: 'image/png' },
