@@ -79,24 +79,12 @@ export async function runSketch(request: SketchRequest): Promise<string | null> 
     return data;
   };
 
+  // `start` edits the photo live and submits the inking; only the inking
+  // is waited for here.
   request.onStage('touching-up');
-  let touchUpJob = String((await post(form('start'))).touchUpJob);
-  if (!(await waitFor(touchUpJob, request.cancelled))) return null;
-
-  // `advance` normally submits the inking, but for a head-only style it can
-  // come back with a second photo edit instead, when the first one left an
-  // object along the bottom. Then this waits again and asks once more.
-  request.onStage('inking');
-  let step = await post(form('advance', { touchUpJob }));
-  if (step.stage === 'touch-up') {
-    touchUpJob = String(step.touchUpJob);
-    request.onStage('touching-up');
-    if (!(await waitFor(touchUpJob, request.cancelled))) return null;
-    request.onStage('inking');
-    step = await post(form('advance', { touchUpJob, retried: '1' }));
-  }
-  const inkJob = String(step.inkJob ?? '');
+  const inkJob = String((await post(form('start'))).inkJob ?? '');
   if (!inkJob) throw new SketchError('Something went wrong making the sketch. Please try again.');
+  request.onStage('inking');
   if (!(await waitFor(inkJob, request.cancelled))) return null;
 
   request.onStage('finishing');

@@ -1,21 +1,17 @@
 /**
- * The sketch, in the two steps a batch job forces it into.
+ * The sketch, in two requests and a wait.
  *
- * Two AI calls, the photo edit and the inking, both sent to Google's Batch
- * API at half price (lib/gemini-batch.ts); lib/sketch-pipeline.ts explains
- * the steps. A batch job is answered when it suits Google — one to six
- * minutes in the jobs measured — so no request here waits for one:
+ * The photo edit runs live, in about 25 seconds, and is traced at once; the
+ * inking is sent to Google's Batch API at half price (lib/gemini-batch.ts),
+ * answered in two to four minutes in the jobs measured, so the browser polls
+ * for it. lib/sketch-pipeline.ts explains the steps.
  *
- *   POST  action=start    submit the photo edit       -> { touchUpJob }
- *   GET   ?job=...        is that job finished yet?   -> { state }
- *   POST  action=advance  read it, trace it, submit    -> { inkJob }
- *                         the inking (or another touchUpJob, when a pet
- *                         photo's edit left the car door in)
+ *   POST  action=start    edit, trace, submit inking  -> { inkJob }
  *   GET   ?job=...        is the inking finished?     -> { state }
  *   POST  action=collect  read the inked artwork      -> { image }
  *
  * Nothing is kept on the server between those calls. The browser holds the
- * job names and the photograph it already has.
+ * job name and the photograph it already has.
  *
  * The Gemini API key is read from `process.env` on the server and never
  * appears in any response.
@@ -26,15 +22,16 @@ import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
-import { collectInked, finishSketch, startTouchUp } from '@/lib/sketch-pipeline';
+import { collectInked, startSketch } from '@/lib/sketch-pipeline';
 import { validateImageBytes } from '@/lib/validation';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// No step waits for a batch job; the longest is `advance`, which downloads
-// the edited photo and runs the ink filter and the trimming on it.
-export const maxDuration = 120;
+// `start` holds the live photo edit (about 25 s, twice for a pet photo that
+// needs a second edit), the face check and the trace; nothing waits for a
+// batch job.
+export const maxDuration = 300;
 
 /** A job name as the API returns it, e.g. "batches/10mxub2qlici15wtzbvux1lai3y56v3yyv7n". */
 const JOB_NAME = /^batches\/[A-Za-z0-9_-]{1,128}$/;
@@ -130,24 +127,12 @@ export async function POST(request: globalThis.Request): Promise<Response> {
 
   if (action === 'start') {
     try {
-      const touchUpJob = await startTouchUp(input);
-      return Response.json({ success: true, stage: 'touch-up', touchUpJob });
-    } catch (error) {
-      return failFromGemini(error, 'start');
-    }
-  }
-
-  if (action === 'advance') {
-    const touchUpJob = readJobName(formData, 'touchUpJob');
-    if (!touchUpJob) return fail('That sketch has expired. Please start it again.', 400);
-    try {
-      return await withCostLog(`sketch ${category} (batched)`, async () => {
-        const step = await finishSketch({ ...input, touchUpJob, retried: formData.get('retried') === '1' });
-        if ('touchUpJob' in step) return Response.json({ success: true, stage: 'touch-up', touchUpJob: step.touchUpJob });
-        return Response.json({ success: true, stage: 'inking', inkJob: step.inkJob });
+      return await withCostLog(`sketch ${category}`, async () => {
+        const inkJob = await startSketch(input);
+        return Response.json({ success: true, stage: 'inking', inkJob });
       });
     } catch (error) {
-      return failFromGemini(error, 'advance');
+      return failFromGemini(error, 'start');
     }
   }
 

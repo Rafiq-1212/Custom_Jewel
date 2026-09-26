@@ -18,15 +18,15 @@
  * bindi on a woman who wears none. The trace in step 2 is what stops that:
  * it decides where every line goes before any model draws one.
  *
- * Both AI steps are batch jobs, so the browser drives this by polling
- * (app/api/sketch/route.ts): `startTouchUp`, then `finishSketch` (reads the
- * edit, traces it, submits the inking), then `collectInked`. Nothing is
- * stored in between; each job's result is read back from the job itself.
+ * The photo edit runs live (seconds); the inking is a batch job at half
+ * price, so the browser polls for it (app/api/sketch/route.ts): `startSketch`
+ * does the edit and the trace and submits the inking, then `collectInked`
+ * reads it back. Nothing is stored in between.
  */
 
 import sharp from 'sharp';
 import { Type } from '@google/genai';
-import { generateJsonFromImage, type GenerateImageResult } from './gemini';
+import { generateImageFromImage, generateJsonFromImage, type GenerateImageResult } from './gemini';
 import { readImageJob, submitImageJob } from './gemini-batch';
 import { cropPhotoToHead, cutBelowJawline } from './image-processing';
 import { findJawline } from './jawline';
@@ -86,15 +86,17 @@ async function leftObjectsBehind(image: GenerateImageResult): Promise<boolean> {
   return total > 0 && ink / total > MAX_BOTTOM_INK;
 }
 
-/** Submits the photo edit. `retry` adds the note for a pet photo that kept a car door. */
-export async function startTouchUp(input: SketchInput, retry = false): Promise<string> {
-  return submitImageJob(
-    {
-      prompt: retry ? `${buildEnhancePrompt(input.category)}\n\n${ENHANCE_RETRY_NOTE}` : buildEnhancePrompt(input.category),
-      images: [{ bytes: input.imageBytes, mimeType: input.mimeType }],
-    },
-    `touch-up ${input.category}`,
-  );
+/**
+ * The photo edit, run LIVE: about 25 seconds instead of the 1.5 to 7.5
+ * minutes the batch queue took, for 6.6 rupees instead of 3.3. It was the
+ * worst of the waits. `retry` adds the note for a pet photo that kept a car
+ * door.
+ */
+async function touchUp(input: SketchInput, retry = false): Promise<GenerateImageResult> {
+  return generateImageFromImage({
+    prompt: retry ? `${buildEnhancePrompt(input.category)}\n\n${ENHANCE_RETRY_NOTE}` : buildEnhancePrompt(input.category),
+    images: [{ bytes: input.imageBytes, mimeType: input.mimeType }],
+  });
 }
 
 /**
@@ -184,31 +186,30 @@ const SMOOTHING_WINDOW = 3;
 /** Sampling temperature for the inker. See the note where it is used. */
 const INK_TEMPERATURE = 0.1;
 
-export type FinishStep = { touchUpJob: string } | { inkJob: string };
-
 /**
- * Reads the finished photo edit, traces it and submits the inking. When a
- * head-only edit came back with something still touching the bottom, this
- * submits a second photo edit instead and says so, and the browser simply
- * waits again.
+ * Edits the photo (live), traces it and submits the inking as a batch job,
+ * returning that job's name. A head-only edit that came back with something
+ * still touching the bottom is redone once, here, before anything is traced.
  */
-export async function finishSketch(input: SketchInput & { touchUpJob: string; retried?: boolean }): Promise<FinishStep> {
-  const edited = await readImageJob(input.touchUpJob, `touch-up ${input.category}`, { count: true });
-  if (!input.retried && HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(edited))) {
+export async function startSketch(input: SketchInput): Promise<string> {
+  let edited = await touchUp(input);
+  if (HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(edited))) {
     console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
-    return { touchUpJob: await startTouchUp(input, true) };
+    edited = await touchUp(input, true);
   }
   const photo = await touchedUpPhoto(edited, input.imageBytes, input.category);
   // A head-only style is all face, so there is nothing to ask about.
   const faces = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category) ? undefined : await findFaces(photo);
   const trace = await sharp(await roughInkTrace(photo, faces)).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer();
-  const inkJob = await submitImageJob(
+  return submitImageJob(
     {
       prompt: INK_PROMPT,
       images: [
         { bytes: trace, mimeType: 'image/png' },
         { bytes: photo, mimeType: 'image/png' },
       ],
+      // 2K, batched. Tested at 1K live to save the wait: it came back heavier
+      // in the laser file and dropped both kumkum marks on the temple photo.
       imageSize: '2K',
       // Low, so the same photo draws the same people every time. At the
       // default, one run of the temple couple was faithful and the next gave
@@ -217,7 +218,6 @@ export async function finishSketch(input: SketchInput & { touchUpJob: string; re
     },
     `inking ${input.category}`,
   );
-  return { inkJob };
 }
 
 /**
