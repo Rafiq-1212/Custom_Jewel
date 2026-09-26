@@ -63,12 +63,16 @@ export const ENHANCE_RETRY_NOTE = `IMPORTANT: a previous attempt at this edit ke
  * it, and it drew people who were not there. This one is given the TRACE as
  * the pencils — every line already sitting on a real edge of the photo — and
  * the photograph only to read expressions and which small marks are real.
- * Like a comic-book inker, it never decides where a line goes. Tested on a
+ * Like a comic-book inker, it never decides where a line goes — except for
+ * small real details the trace was too coarse to keep (a chain, earrings,
+ * saree motifs), which it may take from the photo, inside the traced shapes.
+ * That gave the temple couple her gold chain and the gold buttas on her
+ * saree back, faces unchanged. Tested on a
  * temple couple (her frown, his half-smile, his kumkum, her bindi and the
  * kumkum in her parting all kept) and on two women who wear no bindi (none
  * added, which the earlier step had done).
  */
-export const INK_PROMPT = `You are a professional comic-book INKER. Image 1 is the penciller's finished pencils: every line in it is already in exactly the right place, and ALL SHAPES COME FROM IMAGE 1 ONLY. Image 2 is the photograph the pencils were made from. Use image 2 for exactly two things and nothing else: to read each person's EXPRESSION, and to see which small marks are real (a bindi, kumkum, sandal paste) rather than pencil noise. Never take a shape, a line, a pattern or a detail from image 2 that image 1 does not already have.
+export const INK_PROMPT = `You are a professional comic-book INKER. Image 1 is the penciller's finished pencils: every line in it is already in exactly the right place, and ALL SHAPES COME FROM IMAGE 1 ONLY. Image 2 is the photograph the pencils were made from. Use image 2 for exactly three things: to read each person's EXPRESSION; to see which small marks are real (a bindi, kumkum, sandal paste) rather than pencil noise; and to recover SMALL REAL DETAILS the pencils were too coarse to keep — a thin chain or necklace, earrings, bangles, buttons, the printed or woven motifs on a saree or dupatta, the weave or texture of a shirt. Draw those only where they are plainly visible in image 2, in the place and size image 2 shows them, and draw them inside the shapes image 1 already has. Never take a face, a hair outline, a body outline or a fold position from image 2: those come from image 1 only.
 
 Ink it as a clean black pen-and-ink illustration, the style of a detailed portrait engraving:
 - Trace every contour with one clean, continuous, confident pen line. Where the pencils are broken, dashed or ragged, join them into the single smooth line they are trying to be.
@@ -84,6 +88,6 @@ NEVER AGE ANYONE. Draw only the lines this face actually has in image 1. A young
 HAIR IS EXACTLY THE HAIR IN IMAGE 1. Its outline, its height and its volume stay exactly where the pencils put them. Tight messy curls stay tight messy curls, drawn as small curls; short hair stays short; flat hair stays flat. Never comb, style, smooth, lift or thicken it, and never turn curls into waves or a neat illustration hairstyle. Draw the hair this person actually has, not a better haircut.
 MARKS KEEP THEIR SIZE. A mark on the forehead is inked at the size it has in image 1 — a small dot stays small, a thin streak stays thin — never enlarged into a bold teardrop, slash or blob.
 RELIGIOUS MARKS ARE PART OF THE PERSON. A dot between the eyebrows (bindi, pottu), marks or a smear of kumkum or sandal paste on the forehead, and kumkum in the parting of the hair are inked exactly where and exactly the shape they are — never dropped as noise, never added to anyone who does not have one, and never changed from one kind into another: a vertical streak or a smear of kumkum stays a streak or a smear and is never turned into a round dot, and a round bindi is never turned into a streak.
-Add nothing the source does not show: no pattern, pocket, button, fold, jewellery, hair or background. Do not change the pose, the angle of any head, or the framing.
+Add nothing that is not in image 2: no invented pattern, pocket, button, fold, jewellery, hair or background. A garment that is plain in image 2 stays plain. Do not change the pose, the angle of any head, or the framing.
 
 Output only the inked illustration.`;
