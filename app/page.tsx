@@ -36,7 +36,6 @@ import { CutLayoutPreview } from '@/components/CutLayoutPreview';
 import { PhotoCropper } from '@/components/PhotoCropper';
 import { FULL_CROP, cropImageFile, type CropRect } from '@/lib/photo-crop';
 import { ImageUploader } from '@/components/ImageUploader';
-import { MaterialPicker } from '@/components/MaterialPicker';
 import { MockupPanel } from '@/components/MockupPanel';
 import { PendantCategoryPicker } from '@/components/PendantCategoryPicker';
 import { PendantControls } from '@/components/PendantControls';
@@ -403,27 +402,34 @@ export default function Home() {
             </div>
           </Section>
 
-          <Section step={5} title="Choose the metal">
-            <MaterialPicker value={selectedMaterial} onChange={setSelectedMaterial} />
-          </Section>
-
-          <Section step={6} title="Preview">
+          <Section step={5} title="Preview and metal">
             <div className="flex flex-col items-center gap-8">
               <PendantPreview {...previewProps} material={selectedMaterial} size={280} />
               <div className="flex w-full flex-col gap-3 border-t border-slate-100 pt-6">
-                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Silver and gold side by side: {designLabel}</p>
-                <div className="flex items-start justify-center gap-8">
-                  {PENDANT_MATERIAL_LIST.map((material) => (
-                    <div key={material.id} className="flex flex-col items-center gap-2">
-                      <PendantPreview
-                        {...previewProps}
-                        material={material.id}
-                        size={120}
-                        className={material.id === selectedMaterial ? 'rounded-lg ring-2 ring-slate-900 ring-offset-2' : ''}
-                      />
-                      <span className="text-xs font-medium text-slate-500">{material.label}</span>
-                    </div>
-                  ))}
+                <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-400">Pick the metal: {designLabel}</p>
+                {/* The side-by-side previews are the metal picker: click one to choose it. */}
+                <div role="radiogroup" aria-label="Metal" className="flex items-start justify-center gap-8">
+                  {PENDANT_MATERIAL_LIST.map((material) => {
+                    const selected = material.id === selectedMaterial;
+                    return (
+                      <button
+                        key={material.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => setSelectedMaterial(material.id)}
+                        className="flex cursor-pointer flex-col items-center gap-2 rounded-lg transition-opacity hover:opacity-90"
+                      >
+                        <PendantPreview
+                          {...previewProps}
+                          material={material.id}
+                          size={120}
+                          className={selected ? 'rounded-lg ring-2 ring-slate-900 ring-offset-2' : 'rounded-lg'}
+                        />
+                        <span className={`text-xs font-medium ${selected ? 'text-slate-900' : 'text-slate-500'}`}>{material.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex w-full flex-col gap-3 border-t border-slate-100 pt-6">
@@ -441,19 +447,19 @@ export default function Home() {
             </div>
           </Section>
 
-          <Section step={7} title="Adjust the artwork">
+          <Section step={6} title="Adjust the artwork">
             <PendantControls transform={transform} onChange={setTransform} />
           </Section>
 
-          <Section step={8} title="Product photo">
+          <Section step={7} title="Product photo">
             <MockupPanel {...previewProps} sketch={masterSketch} />
           </Section>
 
-          <Section step={9} title="Files for production">
+          <Section step={8} title="Files for production">
             <ExportPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} />
           </Section>
 
-          <Section step={10} title="Download a preview">
+          <Section step={9} title="Download a preview">
             <DownloadPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} />
           </Section>
         </>
