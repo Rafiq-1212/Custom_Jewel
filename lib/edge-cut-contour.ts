@@ -281,16 +281,10 @@ export async function extractSilhouetteContour(sketchDataUrl: string, { sealEdge
   const largerAnalysisDim = Math.max(analysisWidth, analysisHeight);
   const bridgeRadius = Math.max(3, Math.round(largerAnalysisDim * 0.015));
 
-  mask = roundDilate(mask, analysisWidth, analysisHeight, bridgeRadius);
-  if (sealEdges) mask = sealBorderGaps(mask, analysisWidth, analysisHeight, bridgeRadius);
-  mask = fillHoles(mask, analysisWidth, analysisHeight);
-  mask = roundErode(mask, analysisWidth, analysisHeight, Math.max(0, bridgeRadius - 1));
-  mask = largestComponentMask(mask, analysisWidth, analysisHeight);
-
-  // From here on the mask needs room outside the sketch's own frame: the cut
-  // margin grows past every edge and the ring sits above the top. Pad the
-  // canvas and keep track of the offset so points still map back into the
-  // sketch's own local space below.
+  // Everything past the bridge step needs room outside the sketch's own
+  // frame: the cut margin grows past every edge and the ring sits above the
+  // top. The canvas is padded and the offset kept, so points still map back
+  // into the sketch's own local space below.
   const largerDim = Math.max(analysisWidth, analysisHeight);
   const marginRadius = Math.max(3, Math.round(largerDim * CUT_MARGIN_FRACTION));
   const smoothingRadius = Math.round(largerDim * SMOOTHING_CLOSE_FRACTION);
@@ -300,7 +294,24 @@ export async function extractSilhouetteContour(sketchDataUrl: string, { sealEdge
   const pad = marginRadius + smoothingRadius * 2 + ringEstimate * 3;
   const paddedWidth = analysisWidth + pad * 2;
   const paddedHeight = analysisHeight + pad * 2;
-  mask = padMask(mask, analysisWidth, analysisHeight, pad);
+
+  if (sealEdges) {
+    mask = roundDilate(mask, analysisWidth, analysisHeight, bridgeRadius);
+    mask = sealBorderGaps(mask, analysisWidth, analysisHeight, bridgeRadius);
+    mask = fillHoles(mask, analysisWidth, analysisHeight);
+    mask = roundErode(mask, analysisWidth, analysisHeight, Math.max(0, bridgeRadius - 1));
+    mask = largestComponentMask(mask, analysisWidth, analysisHeight);
+    mask = padMask(mask, analysisWidth, analysisHeight, pad);
+  } else {
+    // Padded first. The sketch is trimmed tight to its ink, so a chin sits
+    // on the bottom row; bridged inside the frame, the grow-and-shrink was
+    // cut off by that edge and the chin came out squared off in the cut line.
+    mask = padMask(mask, analysisWidth, analysisHeight, pad);
+    mask = roundDilate(mask, paddedWidth, paddedHeight, bridgeRadius);
+    mask = fillHoles(mask, paddedWidth, paddedHeight);
+    mask = roundErode(mask, paddedWidth, paddedHeight, Math.max(0, bridgeRadius - 1));
+    mask = largestComponentMask(mask, paddedWidth, paddedHeight);
+  }
 
   // A true round offset (Euclidean distance <= margin), not a box filter —
   // see lib/distance-transform.ts for why that matters at every corner.
