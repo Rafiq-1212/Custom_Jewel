@@ -327,6 +327,12 @@ export interface RenderPendantPngOptions {
   rimColor?: RimColorId;
   /** Output width in pixels. Defaults to print/laser-reference quality. */
   size?: number;
+  /**
+   * Show the pendant the way it is worn and sold: small, hanging from a
+   * drawn chain on a larger transparent canvas, instead of filling the
+   * frame. See `hangOnChain`.
+   */
+  necklace?: boolean;
 }
 
 /**
@@ -368,12 +374,132 @@ export async function renderPendantPngBlob(options: RenderPendantPngOptions): Pr
     1,
   );
 
+  const output = options.necklace ? hangOnChain(canvas, geometry, options.material) : canvas;
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
+    output.toBlob((blob) => {
       if (blob) resolve(blob);
       else reject(new Error('Canvas could not be exported to PNG.'));
     }, 'image/png');
   });
+}
+
+/** The pendant's height as a fraction of the necklace picture's; see hangOnChain. */
+const NECKLACE_PENDANT_HEIGHT = 0.42;
+/** Where the bottom of the pendant sits, as a fraction of the picture's height. */
+const NECKLACE_PENDANT_BOTTOM = 0.9;
+/** The necklace picture's width to height. */
+const NECKLACE_ASPECT = 0.85;
+
+/**
+ * The painted pendant placed small and low on a larger transparent canvas,
+ * hanging from a drawn chain that rises in a V out of the top edge. A 25 mm
+ * pendant shown filling the frame invites people to judge a small engraving
+ * at many times its real size; on its chain it is seen the way it is worn.
+ * Same proportions as the product photo (lib/mockup.ts). The chain hangs from
+ * the jump-ring hole on a cut-to-shape piece, and from a small drawn bail at
+ * the top centre of a catalogue shape.
+ */
+function hangOnChain(pendant: HTMLCanvasElement, geometry: PendantGeometry, material: MaterialId): HTMLCanvasElement {
+  const ctx = pendant.getContext('2d');
+  if (!ctx) return pendant;
+  const { width, height } = pendant;
+  const alpha = ctx.getImageData(0, 0, width, height).data;
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (alpha[(y * width + x) * 4 + 3] > 16) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return pendant;
+
+  const scale = width / PENDANT_VIEWBOX.width;
+  const hole = geometry.hangingHole;
+  const bailRadius = width * 0.022;
+  // Where the chain passes through: the hole's centre, or the top of a drawn
+  // bail above the highest point of the plate's centre line.
+  let hangX: number;
+  let hangY: number;
+  let bail: { x: number; y: number } | null = null;
+  if (hole) {
+    hangX = hole.cx * scale;
+    hangY = hole.cy * scale;
+  } else {
+    hangX = Math.round((minX + maxX) / 2);
+    let top = minY;
+    for (let y = minY; y <= maxY; y++) if (alpha[(y * width + hangX) * 4 + 3] > 16) { top = y; break; }
+    bail = { x: hangX, y: top - bailRadius * 0.6 };
+    hangY = bail.y - bailRadius * 0.4;
+    minY = Math.min(minY, Math.floor(bail.y - bailRadius * 1.2));
+  }
+
+  const pendantHeight = maxY - minY + 1;
+  const outHeight = Math.round(pendantHeight / NECKLACE_PENDANT_HEIGHT);
+  const outWidth = Math.max(maxX - minX + 2, Math.round(outHeight * NECKLACE_ASPECT));
+  const offsetX = Math.round(outWidth / 2 - (minX + maxX) / 2);
+  const offsetY = Math.round(outHeight * NECKLACE_PENDANT_BOTTOM - maxY);
+
+  const out = document.createElement('canvas');
+  out.width = outWidth;
+  out.height = outHeight;
+  const o = out.getContext('2d');
+  if (!o) return pendant;
+  const metal = PENDANT_MATERIALS[material].flat;
+  const shade = 'rgba(0,0,0,0.35)';
+
+  // Chain first, so the pendant sits over its lowest link.
+  const linkLength = outWidth * 0.018;
+  const hx = hangX + offsetX;
+  const hy = hangY + offsetY;
+  for (const endX of [outWidth * 0.2, outWidth * 0.8]) {
+    const cx = (hx + endX) / 2 + (endX < hx ? -1 : 1) * outWidth * 0.04;
+    const cy = hy * 0.45;
+    let prev = { x: hx, y: hy };
+    let travelled = 0;
+    let link = 0;
+    for (let i = 1; i <= 400; i++) {
+      const t = i / 400;
+      const x = (1 - t) * (1 - t) * hx + 2 * (1 - t) * t * cx + t * t * endX;
+      const y = (1 - t) * (1 - t) * hy + 2 * (1 - t) * t * cy + t * t * -linkLength;
+      travelled += Math.hypot(x - prev.x, y - prev.y);
+      if (travelled >= linkLength) {
+        const angle = Math.atan2(y - prev.y, x - prev.x);
+        o.save();
+        o.translate(x, y);
+        o.rotate(angle);
+        o.beginPath();
+        o.ellipse(0, 0, linkLength * 0.62, link % 2 ? linkLength * 0.18 : linkLength * 0.36, 0, 0, Math.PI * 2);
+        o.lineWidth = Math.max(1.5, linkLength * 0.16);
+        o.strokeStyle = metal;
+        o.stroke();
+        o.lineWidth = Math.max(0.6, linkLength * 0.05);
+        o.strokeStyle = shade;
+        o.stroke();
+        o.restore();
+        travelled = 0;
+        link++;
+      }
+      prev = { x, y };
+    }
+  }
+
+  o.drawImage(pendant, offsetX, offsetY);
+
+  if (bail) {
+    o.beginPath();
+    o.arc(bail.x + offsetX, bail.y + offsetY, bailRadius, 0, Math.PI * 2);
+    o.lineWidth = bailRadius * 0.45;
+    o.strokeStyle = metal;
+    o.stroke();
+    o.lineWidth = Math.max(0.8, bailRadius * 0.08);
+    o.strokeStyle = shade;
+    o.stroke();
+  }
+  return out;
 }
 
 export interface PendantPreviewProps {

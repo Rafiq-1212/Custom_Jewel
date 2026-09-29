@@ -31,6 +31,7 @@ import { readImageJob, submitImageJob } from './gemini-batch';
 import { cropPhotoToHead, cutBelowJawline } from './image-processing';
 import { findJawline } from './jawline';
 import { roughInkTrace, type Region } from './ink-filter';
+import { roundDilate } from './distance-transform';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, ENHANCE_RETRY_NOTE, INK_PROMPT } from './sketch-prompts';
@@ -132,6 +133,8 @@ const FACES_PROMPT = `Everything below is on a 0-1000 scale (y down, x right).
 Return "people": one entry for EVERY person in this photo, including babies and people partly hidden, each with:
 - "head": the bounding box [ymin, xmin, ymax, xmax] of the head, from the top of the hair to the chin or the bottom of the beard, and from ear to ear;
 - "hair": that person's hair exactly as it looks in this photo, always covering all three of: its LENGTH; its TEXTURE, which is always one of curly, wavy or straight (say where, if it differs, e.g. "curly on top"); and how it is WORN (loose, tied back, plaited, in a bun, cropped short at the sides). For example "short, curly on top, cropped short at the sides" or "long, straight and smooth, tied back in a bun". Describe only what you can see; do not guess.
+- "marks": any mark on that person's forehead or in the parting of their hair — a bindi or pottu, kumkum, sandal paste, a tilak, sindoor — described by its shape, size and place (for example "a small round dot between the eyebrows and a short horizontal line of sandal paste above it"), or exactly "none" if there is none. Look closely at every forehead; do not assume a mark from clothes, jewellery or where someone seems to be from.
+- "eyes": whether each eye is open, half-closed or closed in this photo (for example "both open, narrowed in a smile"). A person squinting in a smile has both eyes open.
 Return "hands": one bounding box [ymin, xmin, ymax, xmax] for every visible hand. Empty lists when there are none.`;
 
 const FACES_SCHEMA = {
@@ -141,8 +144,13 @@ const FACES_SCHEMA = {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
-        properties: { head: { type: Type.ARRAY, items: { type: Type.NUMBER } }, hair: { type: Type.STRING } },
-        required: ['head', 'hair'],
+        properties: {
+          head: { type: Type.ARRAY, items: { type: Type.NUMBER } },
+          hair: { type: Type.STRING },
+          marks: { type: Type.STRING },
+          eyes: { type: Type.STRING },
+        },
+        required: ['head', 'hair', 'marks', 'eyes'],
       },
     },
     hands: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
@@ -153,11 +161,18 @@ const FACES_SCHEMA = {
 /** Each box is grown by this much on every side, so a mark at the hairline or a ring on a finger sits well inside. */
 const FACE_MARGIN = 0.15;
 
+/** What the photo shows about one person, stated to the inker as fact. */
+interface PersonFacts {
+  hair: string;
+  marks: string;
+  eyes: string;
+}
+
 interface Faces {
   /** Heads and hands, traced exactly and never cleaned (lib/ink-filter.ts). */
   regions: Region[];
-  /** What each person's hair looks like, left to right, for the inker. */
-  hair: string[];
+  /** Each person, left to right, for the inker. */
+  people: PersonFacts[];
 }
 
 function toRegion(box: unknown): Region | null {
@@ -181,18 +196,26 @@ function toRegion(box: unknown): Region | null {
 async function findFaces(photo: Buffer): Promise<Faces | undefined> {
   try {
     const answer = (await generateJsonFromImage({ prompt: FACES_PROMPT, image: { bytes: photo, mimeType: 'image/png' }, schema: FACES_SCHEMA })) as {
-      people?: { head?: unknown; hair?: unknown }[];
+      people?: { head?: unknown; hair?: unknown; marks?: unknown; eyes?: unknown }[];
       hands?: unknown[];
     } | null;
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
     const people = (Array.isArray(answer?.people) ? answer.people : [])
-      .map((person) => ({ region: toRegion(person?.head), hair: typeof person?.hair === 'string' ? person.hair.trim() : '' }))
-      .filter((person): person is { region: Region; hair: string } => person.region !== null)
+      .map((person) => ({
+        region: toRegion(person?.head),
+        facts: { hair: text(person?.hair), marks: text(person?.marks), eyes: text(person?.eyes) },
+      }))
+      .filter((person): person is { region: Region; facts: PersonFacts } => person.region !== null)
       .sort((x, y) => x.region.left + x.region.right - (y.region.left + y.region.right));
     const hands = (Array.isArray(answer?.hands) ? answer.hands : []).map(toRegion).filter((r): r is Region => r !== null);
     const regions = [...people.map((person) => person.region), ...hands];
     if (regions.length === 0) return undefined;
-    console.info(`[sketch] ${people.length} faces and ${hands.length} hands kept exactly as traced; hair: ${people.map((p) => p.hair).join(' | ')}`);
-    return { regions, hair: people.map((person) => person.hair) };
+    console.info(
+      `[sketch] ${people.length} faces and ${hands.length} hands kept exactly as traced; ${people
+        .map((p) => `hair: ${p.facts.hair}; marks: ${p.facts.marks}; eyes: ${p.facts.eyes}`)
+        .join(' | ')}`,
+    );
+    return { regions, people: people.map((person) => person.facts) };
   } catch (error) {
     console.info(`[sketch] could not find the faces, tracing everything as face: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
@@ -200,21 +223,24 @@ async function findFaces(photo: Buffer): Promise<Faces | undefined> {
 }
 
 /**
- * Each person's hair, stated as a fact per person. A general rule about hair
- * was not enough: written against combing curls out, it put curls on a woman
- * whose hair is smooth; rewritten both ways, it passed two test runs and the
- * next production run of the same photo still gave her curls and him a wavy
- * quiff. Told per person what the photo shows — as with the bindi check —
- * the model follows it.
+ * What the photo shows about each person — hair, forehead marks, eyes —
+ * stated to the inker as fact, person by person. General rules were not
+ * enough: a hair rule passed two test runs and the next production run still
+ * gave a smooth-haired woman curls; the "never add a mark" rule did not stop
+ * a bindi being drawn on a man who wears none, and nothing stopped a
+ * squinting smile becoming a wink. Told per person what the photo shows, the
+ * model follows it — the lesson of the old bindi check, applied to all three.
  */
-function hairFacts(hair: string[]): string {
-  const described = hair.filter((h) => h.length > 0);
-  if (described.length === 0 || described.length !== hair.length) return '';
+function personFacts(people: PersonFacts[]): string {
+  if (people.length === 0 || people.some((p) => !p.hair || !p.marks || !p.eyes)) return '';
   const place = (i: number) =>
-    hair.length === 1 ? 'The person' : i === 0 ? 'The person furthest to the LEFT' : i === hair.length - 1 ? 'The person furthest to the RIGHT' : `Person ${i + 1} from the left`;
+    people.length === 1 ? 'The person' : i === 0 ? 'The person furthest to the LEFT' : i === people.length - 1 ? 'The person furthest to the RIGHT' : `Person ${i + 1} from the left`;
   return [
-    "EACH PERSON'S HAIR, CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND. Draw exactly this, for each person, and nothing else — not a style you think suits them, and not the hair of the person next to them:",
-    ...hair.map((h, i) => `- ${place(i)}: ${h}.`),
+    'EACH PERSON, CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND. Draw exactly this for each person and nothing else — not what you think suits them, and not what the person next to them has:',
+    ...people.map((p, i) => {
+      const marks = /^none\.?$/i.test(p.marks) ? 'NO mark of any kind on the forehead or in the hair parting — leave the forehead completely clean' : `forehead marks: ${p.marks}`;
+      return `- ${place(i)}: hair ${p.hair}; ${marks}; eyes ${p.eyes}.`;
+    }),
   ].join('\n');
 }
 
@@ -229,6 +255,68 @@ function hairFacts(hair: string[]): string {
  * (408 -> 340) with the same amount of ink and every forehead mark intact.
  */
 const SMOOTHING_WINDOW = 3;
+
+/** Width of the head mask carried with a Face Pendant's inking job; see headMask. */
+const HEAD_MASK_WIDTH = 256;
+/** How far past the photo's own head outline the drawing may reach, as a fraction of its width — room for flyaway hair and a line drawn a touch wide. */
+const HEAD_MASK_MARGIN = 0.02;
+/** A pixel of the cut photo this bright, connected to its border, is background. */
+const HEAD_MASK_WHITE = 240;
+
+/**
+ * Where the head is, from the cut photo: everything that is not the white
+ * background, grown by a small margin. Returned as a tiny PNG in base64 so it
+ * can travel inside the inking job's metadata and come back with the result.
+ *
+ * The photo is cut cleanly at the jaw before anything is drawn, and the trace
+ * ends there too — but the inker still drew a man's collar and shirt under
+ * his beard. A rule in the prompt had not stopped it, so the drawing is now
+ * clipped to the head afterwards, on pixels.
+ */
+async function headMask(photo: Buffer): Promise<string> {
+  const { data, info } = await sharp(photo)
+    .flatten({ background: '#ffffff' })
+    .resize({ width: HEAD_MASK_WIDTH })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const width = info.width;
+  const height = info.height;
+  const n = width * height;
+  const background = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  let top = 0;
+  const claim = (i: number) => {
+    if (!background[i] && data[i] >= HEAD_MASK_WHITE) {
+      background[i] = 1;
+      stack[top++] = i;
+    }
+  };
+  for (let x = 0; x < width; x++) { claim(x); claim(n - width + x); }
+  for (let y = 0; y < height; y++) { claim(y * width); claim(y * width + width - 1); }
+  while (top) {
+    const i = stack[--top];
+    const x = i % width;
+    if (x > 0) claim(i - 1);
+    if (x < width - 1) claim(i + 1);
+    if (i >= width) claim(i - width);
+    if (i < n - width) claim(i + width);
+  }
+  const subject = new Uint8Array(n);
+  for (let i = 0; i < n; i++) subject[i] = background[i] ? 0 : 1;
+  const grown = roundDilate(subject, width, height, Math.round(width * HEAD_MASK_MARGIN));
+  const out = Buffer.alloc(n);
+  for (let i = 0; i < n; i++) out[i] = grown[i] ? 255 : 0;
+  return (await sharp(out, { raw: { width, height, channels: 1 } }).png().toBuffer()).toString('base64');
+}
+
+/** Whites out every pixel of `image` that falls outside the head mask. The drawing and the photo share their framing, so the mask is simply stretched to fit. */
+async function clipToHead(image: Buffer, mask: string): Promise<Buffer> {
+  const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const keep = await sharp(Buffer.from(mask, 'base64')).resize(info.width, info.height, { fit: 'fill' }).greyscale().raw().toBuffer();
+  for (let i = 0; i < data.length; i++) if (keep[i] < 128) data[i] = 255;
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
+}
 
 /** Sampling temperature for the inker. See the note where it is used. */
 const INK_TEMPERATURE = 0.1;
@@ -250,7 +338,7 @@ export async function startSketch(input: SketchInput): Promise<string> {
   // still apply.
   const headOnly = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category);
   const trace = await sharp(await roughInkTrace(photo, headOnly ? undefined : faces?.regions)).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer();
-  const facts = faces ? hairFacts(faces.hair) : '';
+  const facts = faces ? personFacts(faces.people) : '';
   return submitImageJob(
     {
       prompt: facts ? `${INK_PROMPT}\n\n${facts}` : INK_PROMPT,
@@ -267,6 +355,7 @@ export async function startSketch(input: SketchInput): Promise<string> {
       temperature: INK_TEMPERATURE,
     },
     `inking ${input.category}`,
+    CROP_TO_HEAD_CATEGORIES.has(input.category) ? { head: await headMask(photo) } : undefined,
   );
 }
 
@@ -277,5 +366,7 @@ export async function startSketch(input: SketchInput): Promise<string> {
  */
 export async function collectInked(inkJob: string, category: CategoryId): Promise<Buffer> {
   const inked = await readImageJob(inkJob, `inking ${category}`, { count: true });
-  return sharp(Buffer.from(inked.bytes)).flatten({ background: '#ffffff' }).greyscale().png().toBuffer();
+  const grey = await sharp(Buffer.from(inked.bytes)).flatten({ background: '#ffffff' }).greyscale().png().toBuffer();
+  const head = inked.metadata?.head;
+  return head ? clipToHead(grey, head) : grey;
 }

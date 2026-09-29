@@ -39,7 +39,11 @@ function getClient(): GoogleGenAI {
 }
 
 /** Submits one image call and returns the job's name, which is the only thing anyone needs to keep. */
-export async function submitImageJob(input: GenerateImageFromImageInput, label: string): Promise<string> {
+export async function submitImageJob(
+  input: GenerateImageFromImageInput,
+  label: string,
+  metadata?: Record<string, string>,
+): Promise<string> {
   const ai = getClient();
   try {
     const job = await ai.batches.create({
@@ -62,6 +66,9 @@ export async function submitImageJob(input: GenerateImageFromImageInput, label: 
             ...(input.imageSize ? { imageConfig: { imageSize: input.imageSize } } : {}),
             ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
           },
+          // Comes back with the result (InlinedResponse.metadata), so a small
+          // piece of state can travel with the job instead of being stored.
+          ...(metadata ? { metadata } : {}),
         },
       ],
       config: { displayName: label },
@@ -96,6 +103,7 @@ interface InlinedResult {
     candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] }; finishReason?: string }[];
   };
   error?: unknown;
+  metadata?: Record<string, string>;
 }
 
 /**
@@ -107,7 +115,11 @@ interface InlinedResult {
  * a sketch, so exactly one of those reads is the one that counts. Default off,
  * so a read can never quietly inflate the figure the shop is shown.
  */
-export async function readImageJob(name: string, label: string, options: { count?: boolean } = {}): Promise<GenerateImageResult> {
+export async function readImageJob(
+  name: string,
+  label: string,
+  options: { count?: boolean } = {},
+): Promise<GenerateImageResult & { metadata?: Record<string, string> }> {
   const ai = getClient();
   let job;
   try {
@@ -140,5 +152,5 @@ export async function readImageJob(name: string, label: string, options: { count
   if (!part?.inlineData?.data) {
     throw new GeminiGenerationError('EMPTY_RESPONSE', `Batch job ${name} finished without an image (${candidate?.finishReason ?? 'no reason given'}).`);
   }
-  return { bytes: Buffer.from(part.inlineData.data, 'base64'), mimeType: part.inlineData.mimeType || 'image/png' };
+  return { bytes: Buffer.from(part.inlineData.data, 'base64'), mimeType: part.inlineData.mimeType || 'image/png', metadata: result.metadata };
 }

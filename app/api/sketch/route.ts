@@ -142,9 +142,9 @@ export async function POST(request: globalThis.Request): Promise<Response> {
     try {
       return await withCostLog(`inking ${category} (batched)`, async () => {
         // Deterministic post-processing, not AI: crop the white margin and
-        // turn the background transparent. For Face Pendant it also enforces
-        // the jaw cutoff. See lib/image-processing.ts.
-        const master = await makeTransparentMasterSketch(await collectInked(inkJob, category), { cropBelowJaw: category === 'face' });
+        // turn the background transparent (lib/image-processing.ts). A Face
+        // Pendant was already clipped to the head in collectInked.
+        const master = await makeTransparentMasterSketch(await collectInked(inkJob, category));
         return Response.json({
           success: true,
           stage: 'done',

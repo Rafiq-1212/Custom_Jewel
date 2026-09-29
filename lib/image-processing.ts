@@ -15,10 +15,9 @@
  * masterSketch with no background at all — only the linework has opacity —
  * so there is no rectangle for any transform to ever reveal.
  *
- * `MasterSketchOptions.cropBelowJaw` (Face Pendant only) additionally
- * shortens that crop to end at the jaw — see `computeFaceCropBox` below,
- * and `cropPhotoToHead`, which does the same measurement on the photo
- * earlier in the pipeline.
+ * A Face Pendant is cut at the jaw on the photo, before anything is drawn
+ * (`cutBelowJawline`), and the finished drawing is clipped to that same head
+ * afterwards (lib/sketch-pipeline.ts, `clipToHead`).
  */
 
 import sharp from 'sharp';
@@ -39,192 +38,6 @@ export interface MasterSketch {
   width: number;
   height: number;
   contentType: 'image/png';
-}
-
-export interface MasterSketchOptions {
-  /**
-   * Face Pendant is cut to the head on the photo, before the drawing starts
-   * (`cropPhotoToHead`). This is the backstop for what is left: a neck the
-   * photo crop's plateau test did not catch, or one the finish step drew
-   * below the chin anyway. Measured from the alpha mask's own geometry, so
-   * it never costs another AI call. See `computeFaceCropBox`.
-   */
-  cropBelowJaw?: boolean;
-}
-
-/** Pixels this opaque or more count as "ink" when measuring the mask's own shape below. */
-const NECK_DETECT_ALPHA = 40;
-/** A row narrower than this fraction of the head's own peak width counts as "at the jaw". */
-const CHIN_WIDTH_RATIO = 0.62;
-/** Rows narrower than this fraction of the peak are treated as a vanishing tip, not a neck. */
-const NECK_FLOOR_RATIO = 0.15;
-/** Row-to-row width change, as a fraction of the peak width, still counted as "flat" (cylindrical). */
-const PLATEAU_DELTA_RATIO = 0.05;
-
-/**
- * Finds the tight content bounding box of the alpha mask — and, when
- * `detectNeck` is set, shortens it to end at the jaw instead of the full
- * content height.
- *
- * The neck heuristic needs no face detector, but it does need to tell a real
- * neck apart from an ordinary tapering chin/jawline, which also "narrows
- * below the head's width" — the naive version of this check (verified
- * directly against a synthetic head-only silhouette before shipping) wrongly
- * cropped a perfectly correct chin, because *any* continuously-tapering
- * curve stays "narrow" for a while on its way to a point. The real
- * distinguishing signature is shape, not just width: a neck is roughly
- * cylindrical — width holds close to *constant* over a sustained run of
- * rows — while a natural taper keeps *shrinking* toward zero the whole way
- * down. So below the jaw, this looks for the longest run of consecutive
- * rows whose width is both below the jaw threshold and essentially flat
- * from one row to the next; only a genuine plateau like that counts as a
- * neck. Deliberately conservative in both directions — it only fires on a
- * clear, sustained plateau, and never removes more than 60% or less than 4%
- * of the content — because an undetected neck is a smaller defect than
- * wrongly decapitating an already-correct crop.
- */
-function computeFaceCropBox(
-  data: Buffer,
-  width: number,
-  height: number,
-  channels: number,
-  detectNeck: boolean,
-): { left: number; top: number; width: number; height: number } | null {
-  const rowMinX = new Int32Array(height).fill(-1);
-  const rowMaxX = new Int32Array(height).fill(-1);
-  const rowWidth = new Int32Array(height);
-
-  for (let y = 0; y < height; y++) {
-    let minX = -1;
-    let maxX = -1;
-    const rowStart = y * width * channels;
-    for (let x = 0; x < width; x++) {
-      if (data[rowStart + x * channels + 3] >= NECK_DETECT_ALPHA) {
-        if (minX === -1) minX = x;
-        maxX = x;
-      }
-    }
-    rowMinX[y] = minX;
-    rowMaxX[y] = maxX;
-    rowWidth[y] = minX === -1 ? 0 : maxX - minX + 1;
-  }
-
-  let topY = -1;
-  let bottomY = -1;
-  for (let y = 0; y < height; y++) {
-    if (rowWidth[y] > 0) {
-      if (topY === -1) topY = y;
-      bottomY = y;
-    }
-  }
-  if (topY === -1) return null;
-  const contentHeight = bottomY - topY + 1;
-
-  let keptBottomY = bottomY;
-
-  if (detectNeck && contentHeight >= 40) {
-    // Light smoothing so hand-drawn hatching texture doesn't register as
-    // width noise and break up an otherwise-real plateau.
-    const smoothed = new Float64Array(height);
-    for (let y = topY; y <= bottomY; y++) {
-      let sum = 0;
-      let count = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        const yy = y + dy;
-        if (yy < topY || yy > bottomY) continue;
-        sum += rowWidth[yy];
-        count++;
-      }
-      smoothed[y] = sum / count;
-    }
-
-    // The head's own widest point (hair/ears) — restricted to the upper
-    // portion of the content so a *second*, wider re-flare further down
-    // (shoulders) is never mistaken for "the head" and used as the peak.
-    let maxWidth = 0;
-    let peakY = topY;
-    const peakSearchEnd = topY + Math.round(contentHeight * 0.65);
-    for (let y = topY; y <= peakSearchEnd; y++) {
-      if (smoothed[y] > maxWidth) {
-        maxWidth = smoothed[y];
-        peakY = y;
-      }
-    }
-
-    if (maxWidth > 0) {
-      let chinY = -1;
-      const chinThreshold = maxWidth * CHIN_WIDTH_RATIO;
-      for (let y = peakY + 1; y <= bottomY; y++) {
-        if (smoothed[y] > 0 && smoothed[y] <= chinThreshold) {
-          chinY = y;
-          break;
-        }
-      }
-
-      if (chinY !== -1) {
-        const floorWidth = maxWidth * NECK_FLOOR_RATIO;
-        const maxDelta = Math.max(1.5, maxWidth * PLATEAU_DELTA_RATIO);
-
-        // Longest run, anywhere below the jaw, of consecutive rows that are
-        // both in the "neck-narrow, not a vanishing tip" band and roughly
-        // flat relative to the row that started the run — the cylindrical-
-        // width signature a natural taper never has. Comparing to the run's
-        // *start* width, not just the previous row, matters: a continuous
-        // taper's row-to-row steps can each individually be smaller than
-        // `maxDelta` (verified directly — a synthetic ellipse's tail was
-        // still misclassified as a plateau when only adjacent rows were
-        // compared), even though the shape is unmistakably still shrinking
-        // over any wider span.
-        let bestRunStart = -1;
-        let bestRunLen = 0;
-        let curStart = -1;
-        let curLen = 0;
-        for (let y = chinY; y <= bottomY; y++) {
-          const w = smoothed[y];
-          const inBand = w >= floorWidth && w <= chinThreshold;
-          const flatFromRunStart = curLen > 0 && curStart !== -1 && Math.abs(w - smoothed[curStart]) <= maxDelta;
-          if (inBand && (curLen === 0 || flatFromRunStart)) {
-            if (curLen === 0) curStart = y;
-            curLen++;
-          } else if (inBand) {
-            curStart = y;
-            curLen = 1;
-          } else {
-            curLen = 0;
-            curStart = -1;
-          }
-          if (curLen > bestRunLen) {
-            bestRunLen = curLen;
-            bestRunStart = curStart;
-          }
-        }
-
-        const minPlateauLen = Math.max(12, Math.round(contentHeight * 0.05));
-        if (bestRunLen >= minPlateauLen && bestRunStart !== -1) {
-          const removedFraction = (bottomY - bestRunStart + 1) / contentHeight;
-          if (removedFraction >= 0.04 && removedFraction <= 0.6) {
-            const margin = Math.max(2, Math.round(contentHeight * 0.01));
-            keptBottomY = Math.max(chinY, Math.min(bottomY, bestRunStart - margin));
-          }
-        }
-      }
-    }
-  }
-
-  // The tight left/right bound of *only the kept rows* — if a removed neck
-  // flared into shoulders wider than the head, the original full-content
-  // bounding box would leave dead space on both sides once those rows are
-  // gone, shrinking the face within the pendant for no reason.
-  let minX = width;
-  let maxX = -1;
-  for (let y = topY; y <= keptBottomY; y++) {
-    if (rowMinX[y] === -1) continue;
-    if (rowMinX[y] < minX) minX = rowMinX[y];
-    if (rowMaxX[y] > maxX) maxX = rowMaxX[y];
-  }
-  if (maxX === -1) return null;
-
-  return { left: minX, top: topY, width: maxX - minX + 1, height: keptBottomY - topY + 1 };
 }
 
 /**
@@ -288,11 +101,7 @@ async function liftBackgroundToWhite(input: Buffer): Promise<Buffer> {
  * Measured on the photo, where the subject is a solid silhouette against
  * flat white, instead of on hatched line art.
  *
- * `computeFaceCropBox` above is not the right test here: it looks for a
- * cylindrical neck plateau, because it has to survive being handed a picture
- * that is *already* head-only, where cutting at the jaw would shave the chin.
- *
- * Nor is a narrow neck the right thing to look for on a photo. Measured on
+ * A narrow neck is not the right thing to look for on a photo. Measured on
  * six different photo edits of the same portrait: on a head turned to one
  * side, with hair and a beard, the silhouette does not pinch at the neck at
  * all — it holds the head's own width and then simply STEPS OUT into the
@@ -915,10 +724,7 @@ export async function cutBelowJawline(
  * every near-white pixel to transparent, ramping alpha across the threshold
  * band so anti-aliased line edges don't get a hard, jagged cutout.
  */
-export async function makeTransparentMasterSketch(
-  input: Buffer,
-  options: MasterSketchOptions = {},
-): Promise<MasterSketch> {
+export async function makeTransparentMasterSketch(input: Buffer): Promise<MasterSketch> {
   const opaque = await sharp(input).flatten({ background: '#ffffff' }).toColourspace('srgb').toBuffer();
   const flattened = sharp(await liftBackgroundToWhite(opaque));
 
@@ -976,18 +782,7 @@ export async function makeTransparentMasterSketch(
     data[i + 3] = alpha;
   }
 
-  let source = sharp(data, { raw: { width: info.width, height: info.height, channels } });
-
-  if (options.cropBelowJaw) {
-    const box = computeFaceCropBox(data, info.width, info.height, channels, true);
-    // A tight, exact rectangle extract — no colour-matching heuristics
-    // involved, unlike the earlier `trim` calls above, since the box was
-    // already found by direct pixel geometry.
-    if (box && (box.left > 0 || box.top > 0 || box.width < info.width || box.height < info.height)) {
-      source = source.extract(box);
-    }
-  }
-
+  const source = sharp(data, { raw: { width: info.width, height: info.height, channels } });
   const composed = await source.png({ compressionLevel: 9 }).toBuffer({ resolveWithObject: true });
 
   return {
