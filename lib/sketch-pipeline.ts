@@ -29,7 +29,7 @@ import { Type } from '@google/genai';
 import { generateImageFromImage, generateJsonFromImage, type GenerateImageResult } from './gemini';
 import { readImageJob, submitImageJob } from './gemini-batch';
 import { cropPhotoToHead, cutBelowJawline } from './image-processing';
-import { findJawline } from './jawline';
+import { findJawline, type Jawline } from './jawline';
 import { roughInkTrace, type Region } from './ink-filter';
 import { roundDilate } from './distance-transform';
 import { unmirror } from './orientation';
@@ -106,27 +106,29 @@ async function touchUp(input: SketchInput, retry = false): Promise<GenerateImage
  * fails are the pixel heuristics used, which need shoulders in the frame
  * and a full beard to find anything.
  */
-async function cutToHead(edited: Buffer, mimeType: string): Promise<Buffer> {
+async function cutToHead(edited: Buffer, mimeType: string): Promise<{ photo: Buffer; jaw: Jawline | null }> {
   const jaw = await findJawline(edited, mimeType);
   if (jaw) {
     console.info(`[sketch] face: jawline found (${jaw.points.length} points, ${jaw.keep.length} earrings kept), cutting below it`);
-    return cutBelowJawline(edited, jaw.points, jaw.keep);
+    return { photo: await cutBelowJawline(edited, jaw.points, jaw.keep), jaw };
   }
   console.info('[sketch] face: no usable jawline, using the pixel cut');
-  return cropPhotoToHead(edited);
+  return { photo: await cropPhotoToHead(edited), jaw: null };
 }
 
 /**
  * The touched-up photo as the drawing step needs it: unmirrored against the
- * original, and cut to the head for a Face Pendant. The edit itself is read
- * from its job rather than stored anywhere, which costs one API read and no
- * infrastructure.
+ * original, and cut to the head for a Face Pendant, with the jawline it was
+ * cut along.
  */
-async function touchedUpPhoto(edited: GenerateImageResult, original: Uint8Array, category: CategoryId): Promise<Buffer> {
+async function touchedUpPhoto(
+  edited: GenerateImageResult,
+  original: Uint8Array,
+  category: CategoryId,
+): Promise<{ photo: Buffer; jaw: Jawline | null }> {
   const checked = await unmirror(Buffer.from(original), Buffer.from(edited.bytes));
   if (checked.flipped) console.info(`[sketch] ${category}: photo edit came back mirrored, flipped it back`);
-  const photo = checked.image;
-  return CROP_TO_HEAD_CATEGORIES.has(category) ? cutToHead(photo, 'image/png') : photo;
+  return CROP_TO_HEAD_CATEGORIES.has(category) ? cutToHead(checked.image, 'image/png') : { photo: checked.image, jaw: null };
 }
 
 const FACES_PROMPT = `Everything below is on a 0-1000 scale (y down, x right).
@@ -318,6 +320,38 @@ async function clipToHead(image: Buffer, mask: string): Promise<Buffer> {
   return sharp(data, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
 }
 
+/** Left under the jawline in the drawing, as a fraction of its height: enough for the tips of a beard drawn a touch low, not enough for a throat. */
+const DRAWING_JAW_MARGIN = 0.006;
+
+/**
+ * Whites out the drawing below the jawline the photo was cut along — the
+ * chin, or the bottom of the beard. The head mask alone follows the photo's
+ * feathered cut and a margin past it, and the inker drew a throat, a collar
+ * edge and the start of the neck into that band on a bearded man and on a
+ * woman. Only between the line's two ends: outside them the head mask
+ * already stops the neck at the ear lobe, and a woman's hair that falls
+ * below her jaw has to stay. Earrings hanging below the lobe stay too.
+ */
+async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer> {
+  const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const points = jaw.points.map((p) => ({ x: p.x * (width - 1), y: p.y * (height - 1) }));
+  const margin = height * DRAWING_JAW_MARGIN;
+  const kept = jaw.keep.map((b) => ({ left: b.left * width, right: b.right * width, top: b.top * height, bottom: b.bottom * height }));
+  let segment = 0;
+  for (let x = Math.ceil(points[0].x); x <= Math.min(width - 1, points[points.length - 1].x); x++) {
+    while (segment < points.length - 2 && points[segment + 1].x < x) segment++;
+    const a = points[segment];
+    const b = points[segment + 1];
+    const lineY = a.y + (b.y - a.y) * (b.x === a.x ? 0 : (x - a.x) / (b.x - a.x));
+    for (let y = Math.max(0, Math.ceil(lineY + margin)); y < height; y++) {
+      if (kept.some((k) => x >= k.left && x <= k.right && y >= k.top && y <= k.bottom)) continue;
+      data[y * width + x] = 255;
+    }
+  }
+  return sharp(data, { raw: { width, height, channels: 1 } }).png().toBuffer();
+}
+
 /** Sampling temperature for the inker. See the note where it is used. */
 const INK_TEMPERATURE = 0.1;
 
@@ -332,7 +366,7 @@ export async function startSketch(input: SketchInput): Promise<string> {
     console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
     edited = await touchUp(input, true);
   }
-  const photo = await touchedUpPhoto(edited, input.imageBytes, input.category);
+  const { photo, jaw } = await touchedUpPhoto(edited, input.imageBytes, input.category);
   const faces = await findFaces(photo);
   // A head-only style is all face, so it is traced whole; the hair facts
   // still apply.
@@ -355,7 +389,9 @@ export async function startSketch(input: SketchInput): Promise<string> {
       temperature: INK_TEMPERATURE,
     },
     `inking ${input.category}`,
-    CROP_TO_HEAD_CATEGORIES.has(input.category) ? { head: await headMask(photo) } : undefined,
+    CROP_TO_HEAD_CATEGORIES.has(input.category)
+      ? { head: await headMask(photo), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep }) } : {}) }
+      : undefined,
   );
 }
 
@@ -368,5 +404,7 @@ export async function collectInked(inkJob: string, category: CategoryId): Promis
   const inked = await readImageJob(inkJob, `inking ${category}`, { count: true });
   const grey = await sharp(Buffer.from(inked.bytes)).flatten({ background: '#ffffff' }).greyscale().png().toBuffer();
   const head = inked.metadata?.head;
-  return head ? clipToHead(grey, head) : grey;
+  const clipped = head ? await clipToHead(grey, head) : grey;
+  const jaw = inked.metadata?.jaw;
+  return jaw ? clipBelowJaw(clipped, JSON.parse(jaw) as Jawline) : clipped;
 }
