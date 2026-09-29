@@ -6,19 +6,38 @@
  */
 
 import sharp from 'sharp';
-import { roundDilate } from './distance-transform';
-import type { Jawline } from './jawline';
+import { roundDilate, roundErode } from './distance-transform';
+import { fillHoles } from './silhouette-geometry';
+import { inOval } from './image-processing';
+import type { Jawline, KeepBox } from './jawline';
 
 /** Width of the head mask carried with a Face Pendant's inking job; see headMask. */
 const HEAD_MASK_WIDTH = 256;
-/** How far past the photo's own head outline the drawing may reach, as a fraction of its width — room for flyaway hair and a line drawn a touch wide. */
-const HEAD_MASK_MARGIN = 0.02;
-/** A pixel of the cut photo this bright, connected to its border, is background. */
-const HEAD_MASK_WHITE = 240;
+/** How far past the head's shape the drawing may reach, as a fraction of its width — room for a line drawn a touch wide. */
+const HEAD_MASK_MARGIN = 0.012;
+/**
+ * Anything of the photo's outline thinner than twice this, as a fraction of
+ * its width, is not part of the head's shape: loose strands of hair, wisps
+ * blowing out to the side. Kept narrower than a jhumka (about 5%): at 3%
+ * a run whose earrings went unboxed lost both of them here. Left in, the drawing inked every one of them and
+ * the cut line bulged out round them, so a woman's pendant was the shape of
+ * her flyaway hair rather than of her head.
+ */
+const HEAD_MASK_STRAY = 0.015;
+/**
+ * A pixel of the cut photo this bright, connected to its border, is
+ * background. Not just the white: the flyaway hair round a woman's head,
+ * light against a bright sky, was a halo thick enough to survive
+ * HEAD_MASK_STRAY at 240, and the cut line bulged round it. At 200 the halo
+ * goes and a man's sunlit cheek stays; at 160 his cheek went too.
+ */
+const HEAD_MASK_WHITE = 200;
 
 /**
- * Where the head is, from the cut photo: everything that is not the white
- * background, grown by a small margin. Returned as a tiny PNG in base64 so it
+ * The shape of the head, from the cut photo: everything that is not the
+ * white background, opened to drop loose strands and wisps (HEAD_MASK_STRAY),
+ * with each earring's oval added back — a jhumka is about as narrow as a
+ * strand — and grown by a small margin. Returned as a tiny PNG in base64 so it
  * can travel inside the inking job's metadata and come back with the result.
  *
  * The photo is cut cleanly at the jaw before anything is drawn, and the trace
@@ -26,7 +45,7 @@ const HEAD_MASK_WHITE = 240;
  * his beard. A rule in the prompt had not stopped it, so the drawing is now
  * clipped to the head afterwards, on pixels.
  */
-export async function headMask(photo: Buffer): Promise<string> {
+export async function headMask(photo: Buffer, earrings: KeepBox[] = []): Promise<string> {
   const { data, info } = await sharp(photo)
     .flatten({ background: '#ffffff' })
     .resize({ width: HEAD_MASK_WIDTH })
@@ -57,18 +76,156 @@ export async function headMask(photo: Buffer): Promise<string> {
   }
   const subject = new Uint8Array(n);
   for (let i = 0; i < n; i++) subject[i] = background[i] ? 0 : 1;
-  const grown = roundDilate(subject, width, height, Math.round(width * HEAD_MASK_MARGIN));
+  const stray = Math.round(width * HEAD_MASK_STRAY);
+  const shape = roundDilate(roundErode(subject, width, height, stray), width, height, stray);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (earrings.some((b) => inOval({ left: b.left * width, right: b.right * width, top: b.top * height, bottom: b.bottom * height }, x, y))) {
+        shape[y * width + x] = 1;
+      }
+    }
+  }
+  const grown = roundDilate(shape, width, height, Math.round(width * HEAD_MASK_MARGIN));
   const out = Buffer.alloc(n);
   for (let i = 0; i < n; i++) out[i] = grown[i] ? 255 : 0;
   return (await sharp(out, { raw: { width, height, channels: 1 } }).png().toBuffer()).toString('base64');
 }
 
-/** Whites out every pixel of `image` that falls outside the head mask. The drawing and the photo share their framing, so the mask is simply stretched to fit. */
-export async function clipToHead(image: Buffer, mask: string): Promise<Buffer> {
+/**
+ * Where the photo sits in the drawing: photo point (px, py) lands on drawing
+ * point (dx, dy), scaled by k, all as fractions of each image's size. The
+ * inker is asked to keep the photo's framing and nearly always does — but
+ * one run in about fifteen came back drawn twice as large, filling the
+ * frame, and the head shape and jaw line, laid on in the photo's framing,
+ * cut that face off at the eyes.
+ */
+export interface Alignment {
+  k: number;
+  px: number;
+  py: number;
+  dx: number;
+  dy: number;
+}
+
+export const ALIGNED: Alignment = { k: 1, px: 0, py: 0, dx: 0, dy: 0 };
+
+/** A drawing whose scale differs from the photo's by less than this fraction is taken to be in the photo's framing. */
+const ALIGN_TOLERANCE = 0.15;
+/** Width both shapes are compared at. */
+const ALIGN_WIDTH = 96;
+/** Scales tried either side of the first estimate, and the step between them. */
+const ALIGN_SCALE_RANGE = 0.2;
+const ALIGN_SCALE_STEP = 0.02;
+/** Shifts tried either side of the first estimate, as a fraction of the width. */
+const ALIGN_SHIFT_RANGE = 0.08;
+
+/** A shape as a low-resolution mask: dark pixels of `image`, or light ones when `light`. */
+async function shapeOf(image: Buffer, light: boolean): Promise<{ mask: Uint8Array; width: number; height: number }> {
+  const { data, info } = await sharp(image).greyscale().resize({ width: ALIGN_WIDTH }).raw().toBuffer({ resolveWithObject: true });
+  const mask = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) mask[i] = (light ? data[i] >= 128 : data[i] < 160) ? 1 : 0;
+  return { mask, width: info.width, height: info.height };
+}
+
+/**
+ * How the photo sits in `drawing`, found by laying the photo's head shape
+ * over the drawing's filled-in shape. A first guess matches their areas and
+ * centres; scales and shifts around it are then tried and the one covering
+ * most (by intersection over union) is kept. Matching the boxes the two
+ * shapes fill was tried first and was thrown by the inker drawing the hair
+ * a different width: the lined-up cut still took a cheek. ALIGNED unless the
+ * scale found is off by more than ALIGN_TOLERANCE.
+ */
+export async function alignDrawing(drawing: Buffer, mask: string): Promise<Alignment> {
+  const head = await shapeOf(Buffer.from(mask, 'base64'), true);
+  const ink = await shapeOf(drawing, false);
+  const { width, height } = ink;
+  const drawn = fillHoles(roundDilate(ink.mask, width, height, 2), width, height);
+  // The mask is stretched to the drawing's frame, as clipToHead lays it on.
+  const photo = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      photo[y * width + x] = head.mask[Math.min(head.height - 1, Math.floor((y * head.height) / height)) * head.width + Math.min(head.width - 1, Math.floor((x * head.width) / width))];
+    }
+  }
+  const moments = (m: Uint8Array) => {
+    let n = 0;
+    let sx = 0;
+    let sy = 0;
+    for (let i = 0; i < m.length; i++) {
+      if (!m[i]) continue;
+      n++;
+      sx += i % width;
+      sy += Math.floor(i / width);
+    }
+    return { n, cx: n ? sx / n : 0, cy: n ? sy / n : 0 };
+  };
+  const p = moments(photo);
+  const d = moments(drawn);
+  if (!p.n || !d.n) return ALIGNED;
+
+  // Photo pixel (x, y) lands on drawing pixel (d.cx + (x - p.cx) * k + tx, ...).
+  const overlap = (k: number, tx: number, ty: number) => {
+    let both = 0;
+    let either = 0;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const px = Math.round(p.cx + (x - d.cx - tx) / k);
+        const py = Math.round(p.cy + (y - d.cy - ty) / k);
+        const inPhoto = px >= 0 && py >= 0 && px < width && py < height && photo[py * width + px] === 1;
+        const inDrawn = drawn[y * width + x] === 1;
+        if (inPhoto && inDrawn) both++;
+        if (inPhoto || inDrawn) either++;
+      }
+    }
+    return either ? both / either : 0;
+  };
+  const guess = Math.sqrt(d.n / p.n);
+  const range = Math.round(width * ALIGN_SHIFT_RANGE);
+  let best = { score: overlap(1, p.cx - d.cx, p.cy - d.cy), k: 1, tx: p.cx - d.cx, ty: p.cy - d.cy };
+  for (let k = guess * (1 - ALIGN_SCALE_RANGE); k <= guess * (1 + ALIGN_SCALE_RANGE); k += guess * ALIGN_SCALE_STEP) {
+    for (let tx = -range; tx <= range; tx += 2) {
+      for (let ty = -range; ty <= range; ty += 2) {
+        const score = overlap(k, tx, ty);
+        if (score > best.score) best = { score, k, tx, ty };
+      }
+    }
+  }
+  if (Math.abs(best.k - 1) < ALIGN_TOLERANCE) return ALIGNED;
+  console.info(`[sketch] face: the drawing came back ${best.k.toFixed(2)}x the photo's size (overlap ${best.score.toFixed(2)})`);
+  // In fractions: photo point (p.cx, p.cy) lands on drawing point (d.cx + tx, d.cy + ty).
+  return { k: best.k, px: p.cx / width, py: p.cy / height, dx: (d.cx + best.tx) / width, dy: (d.cy + best.ty) / height };
+}
+
+/** A jawline in the photo, moved to where it falls in the drawing. */
+export function alignJaw(jaw: Jawline, a: Alignment): Jawline {
+  if (a === ALIGNED) return jaw;
+  const x = (v: number) => a.dx + (v - a.px) * a.k;
+  const y = (v: number) => a.dy + (v - a.py) * a.k;
+  return {
+    points: jaw.points.map((p) => ({ x: x(p.x), y: y(p.y) })),
+    keep: jaw.keep.map((b) => ({ left: x(b.left), top: y(b.top), right: x(b.right), bottom: y(b.bottom) })),
+  };
+}
+
+/** Whites out every pixel of `image` that falls outside the head mask, laid on where `a` says the photo sits. */
+export async function clipToHead(image: Buffer, mask: string, a: Alignment = ALIGNED): Promise<Buffer> {
   const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });
-  const keep = await sharp(Buffer.from(mask, 'base64')).resize(info.width, info.height, { fit: 'fill' }).greyscale().raw().toBuffer();
-  for (let i = 0; i < data.length; i++) if (keep[i] < 128) data[i] = 255;
-  return sharp(data, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
+  const { width, height } = info;
+  const scaledWidth = Math.max(1, Math.round(width * a.k));
+  const scaledHeight = Math.max(1, Math.round(height * a.k));
+  const ox = Math.round((a.dx - a.px * a.k) * width);
+  const oy = Math.round((a.dy - a.py * a.k) * height);
+  const scaled = await sharp(Buffer.from(mask, 'base64')).resize(scaledWidth, scaledHeight, { fit: 'fill' }).greyscale().raw().toBuffer();
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const mx = x - ox;
+      const my = y - oy;
+      const inside = mx >= 0 && my >= 0 && mx < scaledWidth && my < scaledHeight && scaled[my * scaledWidth + mx] >= 128;
+      if (!inside) data[y * width + x] = 255;
+    }
+  }
+  return sharp(data, { raw: { width, height, channels: 1 } }).png().toBuffer();
 }
 
 /** Left under the jawline in the drawing, as a fraction of its height, whatever is drawn there. */
@@ -118,15 +275,16 @@ const DRAWN_JAW_SOLID = 0.7;
  */
 const JAW_CUT_SMOOTHING = 0.015;
 /**
- * Past each end of the line the cut carries on for this fraction of the
- * width, falling away at JAW_CUT_TAPER_SLOPE, and then stops. Stopping dead
- * at the end left a vertical cliff in the sideburn under a man's ear — the
- * step in the jaw that showed in the cut line. The fall is steep enough to
- * pass under an ear lobe the inker drew a little low, and short enough to
- * leave a woman's hair falling past her jaw alone.
+ * Past each end of the line the cut holds the end's height for JAW_CUT_LEVEL
+ * of the width — the ear lobe and an earring hanging from it — then curves
+ * up around the head, rising by (distance past that)² / (this fraction of
+ * the width). Rising straight from the end clipped a woman's ear lobe. The pendant is the shape of the face — hair falling past the
+ * jaw to the shoulders, cut on a slant, made a tail on the cut line. Carried
+ * on as a curve rather than stopped at the end, which left a vertical cliff
+ * in the sideburn under a man's ear.
  */
-const JAW_CUT_TAPER = 0.04;
-const JAW_CUT_TAPER_SLOPE = 1.5;
+const JAW_CUT_RISE = 0.1;
+const JAW_CUT_LEVEL = 0.05;
 
 /**
  * The jaw outline the inker drew under the traced line, as the row just
@@ -195,9 +353,11 @@ function findDrawnJaw(ink: (x: number, y: number) => boolean, lineY: Float64Arra
  * edge and the start of the neck into that band on a bearded man and on a
  * woman. Just under the line, ink that is still as dense as a beard is kept
  * down to where the beard thins out; lone strokes are not. The cut is then
- * smoothed into one curve and tapered off past the line's ends, where the
- * head mask takes over: it stops the neck at the ear lobe and keeps a
- * woman's hair falling below her jaw. Earrings hanging below the lobe stay.
+ * smoothed into one curve and carried on past the line's ends, curving up
+ * around the head (JAW_CUT_RISE), so the piece ends in the shape of the
+ * face rather than of the hair. Earrings hanging below the lobe stay:
+ * the oval in each earring's box, since the box itself kept the hair behind
+ * a jhumka as a black rectangle.
  */
 export async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer> {
   const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });
@@ -249,11 +409,13 @@ export async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer>
   }
 
   // Tapered past both ends, then averaged into one curve.
-  const taper = Math.round(width * JAW_CUT_TAPER);
-  const from = Math.max(0, first - taper);
-  const to = Math.min(width - 1, last + taper);
-  for (let x = from; x < first; x++) raw[x] = raw[first] + (first - x) * JAW_CUT_TAPER_SLOPE;
-  for (let x = last + 1; x <= to; x++) raw[x] = raw[last] + (x - last) * JAW_CUT_TAPER_SLOPE;
+  const from = 0;
+  const to = width - 1;
+  const rise = width * JAW_CUT_RISE;
+  const level = width * JAW_CUT_LEVEL;
+  const past = (d: number) => Math.max(0, d - level) ** 2 / rise;
+  for (let x = from; x < first; x++) raw[x] = raw[first] - past(first - x);
+  for (let x = last + 1; x <= to; x++) raw[x] = raw[last] - past(x - last);
   const s = Math.max(1, Math.round(width * JAW_CUT_SMOOTHING));
   const kept = jaw.keep.map((b) => ({ left: b.left * width, right: b.right * width, top: b.top * height, bottom: b.bottom * height }));
   for (let x = from; x <= to; x++) {
@@ -264,7 +426,7 @@ export async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer>
       n++;
     }
     for (let y = Math.max(0, Math.ceil(total / n)); y < height; y++) {
-      if (kept.some((k) => x >= k.left && x <= k.right && y >= k.top && y <= k.bottom)) continue;
+      if (kept.some((k) => inOval(k, x, y))) continue;
       data[y * width + x] = 255;
     }
   }

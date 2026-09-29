@@ -30,7 +30,7 @@ import { generateImageFromImage, generateJsonFromImage, type GenerateImageResult
 import { readImageJob, submitImageJob } from './gemini-batch';
 import { cropPhotoToHead, cutBelowJawline } from './image-processing';
 import { findJawline, type Jawline } from './jawline';
-import { clipBelowJaw, clipToHead, headMask } from './head-clip';
+import { ALIGNED, alignDrawing, alignJaw, clipBelowJaw, clipToHead, headMask } from './head-clip';
 import { roughInkTrace, type Region } from './ink-filter';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
@@ -131,11 +131,16 @@ async function touchedUpPhoto(
   return CROP_TO_HEAD_CATEGORIES.has(category) ? cutToHead(checked.image, 'image/png') : { photo: checked.image, jaw: null };
 }
 
+/** What is asked about forehead marks and moles, in the first look at the photo and again in each close-up. */
+const MARKS_QUESTION = `- "marks": every mark on that person's forehead or in the parting of their hair — a bindi or pottu, kumkum, sandal paste, a tilak, sindoor — starting with HOW MANY separate marks there are, then each one on its own by colour, shape, size and place, top to bottom (for example "two marks: a short horizontal orange streak of kumkum high on the forehead, and a small round dark dot between the eyebrows"), or exactly "none" if there is none. Many people wear two, one above the other; count them before you answer. Look closely at every forehead; do not assume a mark from clothes, jewellery or where someone seems to be from.`;
+const MOLES_QUESTION = `- "moles": every mole, beauty spot or birthmark on that person's cheeks, chin, jaw, nose or around the mouth, however small — including one among stubble or a beard — each by place and size (for example "a small dark mole on the left cheek, just beside the moustache"), or exactly "none" if the skin has none. Look over the whole face closely before answering; freckles, pores and shadows are not moles.`;
+
 const FACES_PROMPT = `Everything below is on a 0-1000 scale (y down, x right).
 Return "people": one entry for EVERY person in this photo, including babies and people partly hidden, each with:
 - "head": the bounding box [ymin, xmin, ymax, xmax] of the head, from the top of the hair to the chin or the bottom of the beard, and from ear to ear;
 - "hair": that person's hair exactly as it looks in this photo, always covering all three of: its LENGTH; its TEXTURE, which is always one of curly, wavy or straight (say where, if it differs, e.g. "curly on top"); and how it is WORN (loose, tied back, plaited, in a bun, cropped short at the sides). For example "short, curly on top, cropped short at the sides" or "long, straight and smooth, tied back in a bun". Describe only what you can see; do not guess.
-- "marks": any mark on that person's forehead or in the parting of their hair — a bindi or pottu, kumkum, sandal paste, a tilak, sindoor — described by its shape, size and place (for example "a small round dot between the eyebrows and a short horizontal line of sandal paste above it"), or exactly "none" if there is none. Look closely at every forehead; do not assume a mark from clothes, jewellery or where someone seems to be from.
+${MARKS_QUESTION}
+${MOLES_QUESTION}
 - "eyes": whether each eye is open, half-closed or closed in this photo (for example "both open, narrowed in a smile"). A person squinting in a smile has both eyes open.
 Return "hands": one bounding box [ymin, xmin, ymax, xmax] for every visible hand. Empty lists when there are none.`;
 
@@ -150,9 +155,10 @@ const FACES_SCHEMA = {
           head: { type: Type.ARRAY, items: { type: Type.NUMBER } },
           hair: { type: Type.STRING },
           marks: { type: Type.STRING },
+          moles: { type: Type.STRING },
           eyes: { type: Type.STRING },
         },
-        required: ['head', 'hair', 'marks', 'eyes'],
+        required: ['head', 'hair', 'marks', 'moles', 'eyes'],
       },
     },
     hands: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
@@ -167,6 +173,7 @@ const FACE_MARGIN = 0.15;
 interface PersonFacts {
   hair: string;
   marks: string;
+  moles: string;
   eyes: string;
 }
 
@@ -175,6 +182,54 @@ interface Faces {
   regions: Region[];
   /** Each person, left to right, for the inker. */
   people: PersonFacts[];
+}
+
+const CLOSE_UP_PROMPT = `This is a close-up of one person's face, cut from a larger photo.
+Return:
+${MARKS_QUESTION}
+${MOLES_QUESTION}`;
+
+const CLOSE_UP_SCHEMA = {
+  type: Type.OBJECT,
+  properties: { marks: { type: Type.STRING }, moles: { type: Type.STRING } },
+  required: ['marks', 'moles'],
+};
+
+/** Width the close-up of a head is enlarged to before it is looked at. */
+const CLOSE_UP_WIDTH = 768;
+
+/**
+ * Forehead marks and moles, asked again of a close-up of one head. Seen in
+ * the whole photo, a woman's tiny dark dot under her kumkum streak was
+ * missed on half the checks — the "only one pottu" drawings — and seen
+ * close up it was not. Cut from the original photo, which the edit may
+ * have softened; the edit keeps its framing, so the head is in the same
+ * place. Undefined if the close-up could not be read.
+ */
+async function closeUp(original: Uint8Array, head: Region): Promise<{ marks: string; moles: string } | undefined> {
+  try {
+    const { width = 0, height = 0 } = await sharp(original).metadata();
+    const left = Math.max(0, Math.floor(head.left * width));
+    const top = Math.max(0, Math.floor(head.top * height));
+    const right = Math.min(width, Math.ceil(head.right * width));
+    const bottom = Math.min(height, Math.ceil(head.bottom * height));
+    if (right - left < 8 || bottom - top < 8) return undefined;
+    const crop = await sharp(original)
+      .extract({ left, top, width: right - left, height: bottom - top })
+      .resize({ width: CLOSE_UP_WIDTH })
+      .png()
+      .toBuffer();
+    const answer = (await generateJsonFromImage({ prompt: CLOSE_UP_PROMPT, image: { bytes: crop, mimeType: 'image/png' }, schema: CLOSE_UP_SCHEMA })) as {
+      marks?: unknown;
+      moles?: unknown;
+    } | null;
+    const marks = typeof answer?.marks === 'string' ? answer.marks.trim() : '';
+    const moles = typeof answer?.moles === 'string' ? answer.moles.trim() : '';
+    return marks && moles ? { marks, moles } : undefined;
+  } catch (error) {
+    console.info(`[sketch] close-up of a face could not be read, keeping the first look: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
 }
 
 function toRegion(box: unknown): Region | null {
@@ -195,26 +250,32 @@ function toRegion(box: unknown): Region | null {
  * which the filter takes as "treat the whole photo as face": the careful way
  * round.
  */
-async function findFaces(photo: Buffer): Promise<Faces | undefined> {
+async function findFaces(photo: Buffer, original: Uint8Array): Promise<Faces | undefined> {
   try {
     const answer = (await generateJsonFromImage({ prompt: FACES_PROMPT, image: { bytes: photo, mimeType: 'image/png' }, schema: FACES_SCHEMA })) as {
-      people?: { head?: unknown; hair?: unknown; marks?: unknown; eyes?: unknown }[];
+      people?: { head?: unknown; hair?: unknown; marks?: unknown; moles?: unknown; eyes?: unknown }[];
       hands?: unknown[];
     } | null;
     const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
     const people = (Array.isArray(answer?.people) ? answer.people : [])
       .map((person) => ({
         region: toRegion(person?.head),
-        facts: { hair: text(person?.hair), marks: text(person?.marks), eyes: text(person?.eyes) },
+        facts: { hair: text(person?.hair), marks: text(person?.marks), moles: text(person?.moles), eyes: text(person?.eyes) },
       }))
       .filter((person): person is { region: Region; facts: PersonFacts } => person.region !== null)
       .sort((x, y) => x.region.left + x.region.right - (y.region.left + y.region.right));
+    await Promise.all(
+      people.map(async (person) => {
+        const close = await closeUp(original, person.region);
+        if (close) Object.assign(person.facts, close);
+      }),
+    );
     const hands = (Array.isArray(answer?.hands) ? answer.hands : []).map(toRegion).filter((r): r is Region => r !== null);
     const regions = [...people.map((person) => person.region), ...hands];
     if (regions.length === 0) return undefined;
     console.info(
       `[sketch] ${people.length} faces and ${hands.length} hands kept exactly as traced; ${people
-        .map((p) => `hair: ${p.facts.hair}; marks: ${p.facts.marks}; eyes: ${p.facts.eyes}`)
+        .map((p) => `hair: ${p.facts.hair}; marks: ${p.facts.marks}; moles: ${p.facts.moles}; eyes: ${p.facts.eyes}`)
         .join(' | ')}`,
     );
     return { regions, people: people.map((person) => person.facts) };
@@ -225,7 +286,7 @@ async function findFaces(photo: Buffer): Promise<Faces | undefined> {
 }
 
 /**
- * What the photo shows about each person — hair, forehead marks, eyes —
+ * What the photo shows about each person — hair, forehead marks, moles, eyes —
  * stated to the inker as fact, person by person. General rules were not
  * enough: a hair rule passed two test runs and the next production run still
  * gave a smooth-haired woman curls; the "never add a mark" rule did not stop
@@ -234,14 +295,20 @@ async function findFaces(photo: Buffer): Promise<Faces | undefined> {
  * model follows it — the lesson of the old bindi check, applied to all three.
  */
 function personFacts(people: PersonFacts[]): string {
-  if (people.length === 0 || people.some((p) => !p.hair || !p.marks || !p.eyes)) return '';
+  if (people.length === 0 || people.some((p) => !p.hair || !p.marks || !p.moles || !p.eyes)) return '';
   const place = (i: number) =>
     people.length === 1 ? 'The person' : i === 0 ? 'The person furthest to the LEFT' : i === people.length - 1 ? 'The person furthest to the RIGHT' : `Person ${i + 1} from the left`;
   return [
     'EACH PERSON, CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND. Draw exactly this for each person and nothing else — not what you think suits them, and not what the person next to them has:',
     ...people.map((p, i) => {
       const marks = /^none\.?$/i.test(p.marks) ? 'NO mark of any kind on the forehead or in the hair parting — leave the forehead completely clean' : `forehead marks: ${p.marks}`;
-      return `- ${place(i)}: hair ${p.hair}; ${marks}; eyes ${p.eyes}.`;
+      // Asked for because a woman was drawn with a mole on a clear cheek,
+      // on every run: a faint spot in the pencils, inked as a mole. Stated
+      // flatly: worded softer ("only where image 2 plainly shows one") the
+      // mole came back. The cost is that a small real mole the check misses
+      // (a man's, beside his goatee, on half the checks) is left out too.
+      const moles = /^none\.?$/i.test(p.moles) ? 'NO mole or spot anywhere on the face — ink none, whatever specks the pencils have' : `moles: ${p.moles}`;
+      return `- ${place(i)}: hair ${p.hair}; ${marks}; ${moles}; eyes ${p.eyes}.`;
     }),
   ].join('\n');
 }
@@ -273,7 +340,7 @@ export async function startSketch(input: SketchInput): Promise<string> {
     edited = await touchUp(input, true);
   }
   const { photo, jaw } = await touchedUpPhoto(edited, input.imageBytes, input.category);
-  const faces = await findFaces(photo);
+  const faces = await findFaces(photo, input.imageBytes);
   // A head-only style is all face, so it is traced whole; the hair facts
   // still apply.
   const headOnly = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category);
@@ -296,21 +363,35 @@ export async function startSketch(input: SketchInput): Promise<string> {
     },
     `inking ${input.category}`,
     CROP_TO_HEAD_CATEGORIES.has(input.category)
-      ? { head: await headMask(photo), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep }) } : {}) }
+      ? { head: await headMask(photo, jaw?.keep), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep }) } : {}) }
       : undefined,
   );
 }
 
 /**
+ * Thrown when the inked drawing came back in a different framing from the
+ * photo. The head shape and jaw line are laid on in the photo's framing,
+ * and lining them up with a drawing twice the size was tried and still cut
+ * a chin off at the lip; drawing it again is what works. The browser starts
+ * the sketch over once (lib/sketch-client.ts).
+ */
+export class ReframeNeeded extends Error {}
+
+/**
  * The inked artwork, forced to greyscale. The prompt asks for black ink only,
  * but a red kumkum mark came back faintly red in testing; metal has no
  * colour, so the colour is taken out here rather than trusted to the model.
+ * `redo` allows a mis-framed Face Pendant drawing to be thrown back
+ * (ReframeNeeded); on the second attempt it is lined up as well as can be.
  */
-export async function collectInked(inkJob: string, category: CategoryId): Promise<Buffer> {
+export async function collectInked(inkJob: string, category: CategoryId, { redo = false } = {}): Promise<Buffer> {
   const inked = await readImageJob(inkJob, `inking ${category}`, { count: true });
   const grey = await sharp(Buffer.from(inked.bytes)).flatten({ background: '#ffffff' }).greyscale().png().toBuffer();
   const head = inked.metadata?.head;
-  const clipped = head ? await clipToHead(grey, head) : grey;
+  if (!head) return grey;
+  const aligned = await alignDrawing(grey, head);
+  if (aligned !== ALIGNED && redo) throw new ReframeNeeded('The drawing came back out of frame.');
+  const clipped = await clipToHead(grey, head, aligned);
   const jaw = inked.metadata?.jaw;
-  return jaw ? clipBelowJaw(clipped, JSON.parse(jaw) as Jawline) : clipped;
+  return jaw ? clipBelowJaw(clipped, alignJaw(JSON.parse(jaw) as Jawline, aligned)) : clipped;
 }

@@ -19,6 +19,7 @@
  * returns null and the pixel heuristics are used instead.
  */
 
+import sharp from 'sharp';
 import { Type } from '@google/genai';
 import { generateJsonFromImage } from './gemini';
 
@@ -57,6 +58,7 @@ Return "head": the bounding box [ymin, xmin, ymax, xmax] of the WHOLE head — t
 
 Return "jaw": 9 to 15 points, in order from the left side of the image to the right, tracing the lower outline of the head — the line where the head ends and the neck begins. Start just under one ear lobe, follow the edge of the jaw (or the bottom edge of the beard, if the beard hangs lower than the jaw) down around the chin, and back up to just under the other ear lobe. If an ear is hidden, start where the jaw meets the hairline on that side. The line has to reach out to BOTH sides of the head: it runs from ear to ear, not from cheek to cheek, and its lowest point is the bottom of the chin, not the crease under the lip. On a baby, a child or a face seen from above the chin is soft and tucked in — follow the bottom edge of the cheeks and chin all the same.
 Also return "ear_lobes": the lowest point [y, x] of each ear lobe that is visible (zero, one or two points).
+Also return "beard": true if there is any beard, goatee or stubble on the chin or jaw, false for a clean-shaven chin.
 Also return "earrings": one bounding box [ymin, xmin, ymax, xmax] on the same 0-1000 scale for each earring that hangs below the ear lobe, or an empty list if there are none.`;
 
 const JAW_SCHEMA = {
@@ -66,8 +68,9 @@ const JAW_SCHEMA = {
     jaw: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
     ear_lobes: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
     earrings: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
+    beard: { type: Type.BOOLEAN },
   },
-  required: ['head', 'jaw', 'ear_lobes', 'earrings'],
+  required: ['head', 'jaw', 'ear_lobes', 'earrings', 'beard'],
 };
 
 const MIN_POINTS = 5;
@@ -109,6 +112,149 @@ const MAX_LOBE_DISTANCE = 0.2;
 
 function isPair(value: unknown): value is [number, number] {
   return Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === 'number' && Number.isFinite(n));
+}
+
+/** How far above the traced chin its real lower edge is looked for, as a fraction of the traced line's width. */
+const CHIN_SEARCH = 0.22;
+/** Rows either side of a candidate edge whose brightness is compared, as a fraction of the line's width: a soft chin fades into its shadow over about this much. */
+const CHIN_EDGE_SPAN = 0.06;
+/** Columns either side of the chin's lowest point that are measured, as a fraction of the line's width; the edge runs level across them. */
+const CHIN_EDGE_BAND = 0.08;
+/** How square the chin-shaped floor is: 2 is a parabola from lobe to chin, higher keeps the corners of the jaw fuller. */
+const CHIN_FLOOR_SHAPE = 3;
+/** The step from lit chin to the shadow under it has to be at least this much darker (0-255) to be trusted. */
+const CHIN_EDGE_MIN = 15;
+
+/**
+ * Raises a clean-shaven jaw line to the chin's own lower edge.
+ *
+ * Asked for the bottom of the chin, the model traced a woman's full chin
+ * along the bottom of the shadow under it — on her neck, 3% of the photo
+ * below the chin itself — however the prompt put it. The band of neck kept
+ * by that traced as a black crescent, and the drawing gave her a heavier,
+ * longer chin than she has. The chin's edge is plain in the pixels, though:
+ * lit skin above, shadow below. It is measured in a strip across the lowest
+ * point of the line, where it runs level, as the sharpest step from light
+ * to dark above the traced point, and no point of the line is left below
+ * a chin-shaped floor through it. The edge is found in the photo itself, so it lands in the same place
+ * however the model's guess varies.
+ *
+ * Not on a beard: its top edge, below a lit cheek, is exactly such a step
+ * and raising the line to it would shave the beard off.
+ */
+async function raiseToChinEdge(photo: Uint8Array, points: JawPoint[]): Promise<void> {
+  const { data, info } = await sharp(photo).greyscale().raw().toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const first = points[0].x * width;
+  const last = points[points.length - 1].x * width;
+  const span = last - first;
+  const chin = points.reduce((low, p) => (p.y > low.y ? p : low));
+  const cx = chin.x * width;
+  const traced = Math.round(chin.y * height);
+  const search = Math.round(span * CHIN_SEARCH);
+  const k = Math.max(2, Math.round(span * CHIN_EDGE_SPAN));
+  const x0 = Math.max(0, Math.round(cx - span * CHIN_EDGE_BAND));
+  const x1 = Math.min(width - 1, Math.round(cx + span * CHIN_EDGE_BAND));
+
+  const rows = new Float64Array(traced + k + 2);
+  for (let y = Math.max(0, traced - search - k); y < rows.length; y++) {
+    let total = 0;
+    for (let x = x0; x <= x1; x++) total += data[Math.min(height - 1, y) * width + x];
+    rows[y] = total / (x1 - x0 + 1);
+  }
+  let best = 0;
+  let edge = traced;
+  for (let y = traced; y >= Math.max(k, traced - search); y--) {
+    let drop = 0;
+    for (let j = 1; j <= k; j++) drop += rows[y - j] - rows[y + j];
+    drop /= k;
+    if (drop > best) {
+      best = drop;
+      edge = y;
+    }
+  }
+  if (best < CHIN_EDGE_MIN || edge >= traced) return;
+  // A floor, not a lift: nothing of a face hangs below the bottom of its
+  // chin, so every point below it comes up to it, and points already above
+  // it stay where they were traced. Lifting the line as a whole pulled one
+  // run into a cheek and dented another into a W. The floor is shaped like
+  // a chin, lowest at the edge and rising in a U to each end of the line:
+  // flat, it gave her a square chin.
+  const bottom = edge / height;
+  const left = points[0];
+  const right = points[points.length - 1];
+  console.info(`[sketch] clean-shaven chin: raised the chin ${((100 * (traced - edge)) / height).toFixed(1)}% of the photo to its own edge (step ${best.toFixed(0)})`);
+  for (const p of points) {
+    const end = p.x < chin.x ? left : right;
+    const reach = Math.abs(end.x - chin.x);
+    const t = reach > 0 ? Math.min(1, Math.abs(p.x - chin.x) / reach) : 0;
+    const floor = bottom - Math.max(0, bottom - end.y) * t ** CHIN_FLOOR_SHAPE;
+    if (p.y > floor) p.y = floor;
+  }
+}
+
+const EARRING_PROMPT = `This is a close-up of one person's head, cut from a larger photo. Everything below is on a 0-1000 scale of THIS image (y down, x right).
+Return "earrings": one bounding box [ymin, xmin, ymax, xmax] for each earring that hangs below an ear lobe — a jhumka, a drop, a hoop — covering the whole earring from the lobe to its lowest bead or bell, or an empty list if there are none. Look closely at both ears, including one partly hidden by hair.`;
+
+const EARRING_SCHEMA = {
+  type: Type.OBJECT,
+  properties: { earrings: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } } },
+  required: ['earrings'],
+};
+
+/** Width the close-up of the head is enlarged to before the earrings are looked for. */
+const EARRING_CLOSE_UP_WIDTH = 768;
+/** Room kept round the head in that close-up, as fractions of the head's size: out past the ears, and down to where a long jhumka ends. */
+const EARRING_CLOSE_UP_SIDES = 0.2;
+const EARRING_CLOSE_UP_BELOW = 0.35;
+
+type Box = { left: number; top: number; right: number; bottom: number };
+
+/** Earring boxes from a model's answer, on the 0-1000 scale of `frame` (fractions of the photo), as fractions of the photo. */
+function readEarrings(value: unknown, frame: Box): KeepBox[] {
+  if (!Array.isArray(value)) return [];
+  const w = frame.right - frame.left;
+  const h = frame.bottom - frame.top;
+  return value
+    .filter((b): b is number[] => Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === 'number' && Number.isFinite(n)))
+    .map(([top, left, bottom, right]) => ({
+      left: frame.left + (left / 1000) * w,
+      top: frame.top + (top / 1000) * h,
+      right: frame.left + (right / 1000) * w,
+      bottom: frame.top + (bottom / 1000) * h,
+    }))
+    .filter((b) => b.right > b.left && b.bottom > b.top && b.right - b.left < MAX_EARRING && b.bottom - b.top < MAX_EARRING);
+}
+
+/** The earrings in a close-up of `head` (fractions of the photo), or none if that could not be read. */
+async function closeUpEarrings(photo: Uint8Array, head: Box): Promise<KeepBox[]> {
+  try {
+    const { width = 0, height = 0 } = await sharp(photo).metadata();
+    const hw = head.right - head.left;
+    const hh = head.bottom - head.top;
+    const frame = {
+      left: Math.max(0, head.left - hw * EARRING_CLOSE_UP_SIDES),
+      top: Math.max(0, head.top),
+      right: Math.min(1, head.right + hw * EARRING_CLOSE_UP_SIDES),
+      bottom: Math.min(1, head.bottom + hh * EARRING_CLOSE_UP_BELOW),
+    };
+    const left = Math.floor(frame.left * width);
+    const top = Math.floor(frame.top * height);
+    const cropWidth = Math.min(width - left, Math.ceil((frame.right - frame.left) * width));
+    const cropHeight = Math.min(height - top, Math.ceil((frame.bottom - frame.top) * height));
+    if (cropWidth < 8 || cropHeight < 8) return [];
+    const crop = await sharp(photo).extract({ left, top, width: cropWidth, height: cropHeight }).resize({ width: EARRING_CLOSE_UP_WIDTH }).png().toBuffer();
+    const answer = await generateJsonFromImage({ prompt: EARRING_PROMPT, image: { bytes: crop, mimeType: 'image/png' }, schema: EARRING_SCHEMA });
+    return readEarrings((answer as { earrings?: unknown } | null)?.earrings, {
+      left: left / width,
+      top: top / height,
+      right: (left + cropWidth) / width,
+      bottom: (top + cropHeight) / height,
+    });
+  } catch (error) {
+    console.info(`[sketch] close-up of the ears could not be read, keeping the first look: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
 }
 
 /**
@@ -204,12 +350,23 @@ export async function findJawline(photo: Uint8Array, mimeType: string): Promise<
     }
   }
 
-  const boxes = (answer as { earrings?: unknown }).earrings;
-  const keep: KeepBox[] = Array.isArray(boxes)
-    ? boxes
-        .filter((b): b is number[] => Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === 'number' && Number.isFinite(n)))
-        .map(([top, left, bottom, right]) => ({ left: left / 1000, top: top / 1000, right: right / 1000, bottom: bottom / 1000 }))
-        .filter((b) => b.right > b.left && b.bottom > b.top && b.right - b.left < MAX_EARRING && b.bottom - b.top < MAX_EARRING)
-    : [];
+  if ((answer as { beard?: unknown }).beard === false) await raiseToChinEdge(photo, points);
+
+  // The earrings are looked for again in a close-up of the head, and both
+  // answers kept. In a half-length photo a jhumka is a few pixels wide, and
+  // for one woman two answers in a row came back with none; a Face Pendant
+  // loses whatever earring is not boxed.
+  const keep = readEarrings((answer as { earrings?: unknown }).earrings, { left: 0, top: 0, right: 1, bottom: 1 });
+  const found = head ? await closeUpEarrings(photo, head) : [];
+  for (const box of found) {
+    const same = keep.find((k) => box.left < k.right && k.left < box.right && box.top < k.bottom && k.top < box.bottom);
+    if (!same) keep.push(box);
+    else {
+      same.left = Math.min(same.left, box.left);
+      same.top = Math.min(same.top, box.top);
+      same.right = Math.max(same.right, box.right);
+      same.bottom = Math.max(same.bottom, box.bottom);
+    }
+  }
   return { points, keep };
 }

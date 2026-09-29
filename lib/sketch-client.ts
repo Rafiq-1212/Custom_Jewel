@@ -24,9 +24,13 @@ const POLL_MS = 5000;
  */
 const GIVE_UP_MS = 20 * 60_000;
 
+/** The server asked for the drawing to be done again (it came back out of frame). */
+class RedoSketch extends Error {}
+
 async function post(body: FormData): Promise<Record<string, unknown>> {
   const response = await fetch('/api/sketch', { method: 'POST', body });
   const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  if (json?.redo === true) throw new RedoSketch();
   if (!json || !response.ok || json.success !== true) {
     throw new SketchError(typeof json?.error === 'string' ? json.error : 'Something went wrong making the sketch. Please try again.');
   }
@@ -68,11 +72,25 @@ export interface SketchRequest {
   cancelled: () => boolean;
 }
 
-/** The finished artwork as a data URL, or null if the run was cancelled. */
-export async function runSketch(request: SketchRequest): Promise<string | null> {
+/**
+ * The finished artwork as a data URL, or null if the run was cancelled. A
+ * Face Pendant drawing that came back out of frame is started over once;
+ * the second attempt is told so, and is kept whatever its framing.
+ */
+export async function runSketch(request: SketchRequest, attempt = 1): Promise<string | null> {
+  try {
+    return await sketchOnce(request, attempt);
+  } catch (error) {
+    if (error instanceof RedoSketch && attempt === 1 && !request.cancelled()) return runSketch(request, 2);
+    throw error;
+  }
+}
+
+async function sketchOnce(request: SketchRequest, attempt: number): Promise<string | null> {
   const form = (action: string, extra: Record<string, string> = {}): FormData => {
     const data = new FormData();
     data.set('action', action);
+    data.set('attempt', String(attempt));
     data.set('file', request.file);
     data.set('category', request.category);
     for (const [key, value] of Object.entries(extra)) data.set(key, value);

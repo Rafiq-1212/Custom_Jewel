@@ -538,6 +538,16 @@ const HAIR_LUMINANCE = 90;
  */
 const HAIR_MIN_WIDTH = 0.06;
 
+/** Whether (x, y) falls inside the oval that fits in box `b`. */
+export function inOval(b: { left: number; top: number; right: number; bottom: number }, x: number, y: number): boolean {
+  const rx = (b.right - b.left) / 2;
+  const ry = (b.bottom - b.top) / 2;
+  if (rx <= 0 || ry <= 0) return false;
+  const dx = (x - (b.left + b.right) / 2) / rx;
+  const dy = (y - (b.top + b.bottom) / 2) / ry;
+  return dx * dx + dy * dy <= 1;
+}
+
 /** Clears every piece of `hair` narrower than `HAIR_MIN_WIDTH` of `headWidth`. */
 function keepOnlyWideHair(hair: Uint8Array, width: number, height: number, headWidth: number): void {
   const minWidth = headWidth * HAIR_MIN_WIDTH;
@@ -594,8 +604,9 @@ function keepOnlyWideHair(hair: Uint8Array, width: number, height: number, headW
  * from above and goes with the rest, and nothing at all survives below the
  * chin.
  *
- * `keep` boxes (earrings hanging below the lobe) keep what is in them,
- * except dark pixels, which are hair and follow the hair rule instead.
+ * `keep` boxes (earrings hanging below the lobe) keep what is in the oval
+ * inside them, dark or light, unless it is hair hanging down, which follows
+ * the hair rule.
  *
  * `jaw` and `keep` are in fractions of the photo; `jaw` is sorted left to right.
  */
@@ -707,7 +718,12 @@ export async function cutBelowJawline(
       if (hair[p]) {
         // Connected hair fades out at the chin instead of at the lobe.
         toWhite = Math.max(0, Math.min(1, (y - (chinY - feather)) / feather));
-      } else if (luminanceAt(p) >= HAIR_LUMINANCE && kept.some((b) => x >= b.left && x <= b.right && y >= b.top && y <= b.bottom)) {
+      } else if (kept.some((b) => inOval(b, x, y))) {
+        // Dark pixels too: oxidised-silver jhumkas are as dark as hair, and
+        // whiting them out as hair left a woman's earrings speckled and
+        // sliced off at the lobe, and the drawing gave her half a jhumka.
+        // The oval in the box, not the box: kept whole, the box brought the
+        // hair behind the earring with it as a black rectangle.
         continue;
       }
       if (toWhite <= 0) continue;

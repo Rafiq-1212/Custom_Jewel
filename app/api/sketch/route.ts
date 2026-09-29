@@ -8,7 +8,9 @@
  *
  *   POST  action=start    edit, trace, submit inking  -> { inkJob }
  *   GET   ?job=...        is the inking finished?     -> { state }
- *   POST  action=collect  read the inked artwork      -> { image }
+ *   POST  action=collect  read the inked artwork      -> { image }, or
+ *                                                      { redo: true } once, if
+ *                                                      it came back out of frame
  *
  * Nothing is kept on the server between those calls. The browser holds the
  * job name and the photograph it already has.
@@ -22,7 +24,7 @@ import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
-import { collectInked, startSketch } from '@/lib/sketch-pipeline';
+import { collectInked, ReframeNeeded, startSketch } from '@/lib/sketch-pipeline';
 import { validateImageBytes } from '@/lib/validation';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
@@ -144,7 +146,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         // Deterministic post-processing, not AI: crop the white margin and
         // turn the background transparent (lib/image-processing.ts). A Face
         // Pendant was already clipped to the head in collectInked.
-        const master = await makeTransparentMasterSketch(await collectInked(inkJob, category));
+        const master = await makeTransparentMasterSketch(await collectInked(inkJob, category, { redo: formData.get('attempt') !== '2' }));
         return Response.json({
           success: true,
           stage: 'done',
@@ -152,6 +154,11 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         });
       });
     } catch (error) {
+      // Not a failure the operator sees: the browser draws it again.
+      if (error instanceof ReframeNeeded) {
+        console.info('[sketch collect] drawing came back out of frame, asking the browser to draw it again');
+        return Response.json({ success: false, redo: true, error: 'Drawing it again.' }, { status: 409 });
+      }
       return failFromGemini(error, 'collect');
     }
   }
