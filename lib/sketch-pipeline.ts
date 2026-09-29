@@ -30,8 +30,8 @@ import { generateImageFromImage, generateJsonFromImage, type GenerateImageResult
 import { readImageJob, submitImageJob } from './gemini-batch';
 import { cropPhotoToHead, cutBelowJawline } from './image-processing';
 import { findJawline, type Jawline } from './jawline';
+import { clipBelowJaw, clipToHead, headMask } from './head-clip';
 import { roughInkTrace, type Region } from './ink-filter';
-import { roundDilate } from './distance-transform';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, ENHANCE_RETRY_NOTE, INK_PROMPT } from './sketch-prompts';
@@ -257,140 +257,6 @@ function personFacts(people: PersonFacts[]): string {
  * (408 -> 340) with the same amount of ink and every forehead mark intact.
  */
 const SMOOTHING_WINDOW = 3;
-
-/** Width of the head mask carried with a Face Pendant's inking job; see headMask. */
-const HEAD_MASK_WIDTH = 256;
-/** How far past the photo's own head outline the drawing may reach, as a fraction of its width — room for flyaway hair and a line drawn a touch wide. */
-const HEAD_MASK_MARGIN = 0.02;
-/** A pixel of the cut photo this bright, connected to its border, is background. */
-const HEAD_MASK_WHITE = 240;
-
-/**
- * Where the head is, from the cut photo: everything that is not the white
- * background, grown by a small margin. Returned as a tiny PNG in base64 so it
- * can travel inside the inking job's metadata and come back with the result.
- *
- * The photo is cut cleanly at the jaw before anything is drawn, and the trace
- * ends there too — but the inker still drew a man's collar and shirt under
- * his beard. A rule in the prompt had not stopped it, so the drawing is now
- * clipped to the head afterwards, on pixels.
- */
-async function headMask(photo: Buffer): Promise<string> {
-  const { data, info } = await sharp(photo)
-    .flatten({ background: '#ffffff' })
-    .resize({ width: HEAD_MASK_WIDTH })
-    .greyscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const width = info.width;
-  const height = info.height;
-  const n = width * height;
-  const background = new Uint8Array(n);
-  const stack = new Int32Array(n);
-  let top = 0;
-  const claim = (i: number) => {
-    if (!background[i] && data[i] >= HEAD_MASK_WHITE) {
-      background[i] = 1;
-      stack[top++] = i;
-    }
-  };
-  for (let x = 0; x < width; x++) { claim(x); claim(n - width + x); }
-  for (let y = 0; y < height; y++) { claim(y * width); claim(y * width + width - 1); }
-  while (top) {
-    const i = stack[--top];
-    const x = i % width;
-    if (x > 0) claim(i - 1);
-    if (x < width - 1) claim(i + 1);
-    if (i >= width) claim(i - width);
-    if (i < n - width) claim(i + width);
-  }
-  const subject = new Uint8Array(n);
-  for (let i = 0; i < n; i++) subject[i] = background[i] ? 0 : 1;
-  const grown = roundDilate(subject, width, height, Math.round(width * HEAD_MASK_MARGIN));
-  const out = Buffer.alloc(n);
-  for (let i = 0; i < n; i++) out[i] = grown[i] ? 255 : 0;
-  return (await sharp(out, { raw: { width, height, channels: 1 } }).png().toBuffer()).toString('base64');
-}
-
-/** Whites out every pixel of `image` that falls outside the head mask. The drawing and the photo share their framing, so the mask is simply stretched to fit. */
-async function clipToHead(image: Buffer, mask: string): Promise<Buffer> {
-  const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });
-  const keep = await sharp(Buffer.from(mask, 'base64')).resize(info.width, info.height, { fit: 'fill' }).greyscale().raw().toBuffer();
-  for (let i = 0; i < data.length; i++) if (keep[i] < 128) data[i] = 255;
-  return sharp(data, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
-}
-
-/** Left under the jawline in the drawing, as a fraction of its height, whatever is drawn there. */
-const DRAWING_JAW_MARGIN = 0.006;
-/**
- * How far below the jawline a beard may carry on, as a fraction of the
- * drawing's height. The traced line is the model's guess at the bottom of
- * the beard and the inker draws its own beard a little lower in places; a
- * hard cut on the line sliced a man's goatee off in a straight edge.
- */
-const DRAWING_BEARD_REACH = 0.035;
-/** Half-width of the window ink density is measured over, as a fraction of the drawing's width. */
-const BEARD_WINDOW = 0.012;
-/**
- * Ink coverage that counts as beard. Stubble and a goatee are a mass of
- * strokes, well over this; a throat line, a collar edge or the side of a
- * neck is one stroke crossing an otherwise empty window, well under it.
- */
-const BEARD_DENSITY = 0.4;
-
-/**
- * Whites out the drawing below the jawline the photo was cut along — the
- * chin, or the bottom of the beard. The head mask alone follows the photo's
- * feathered cut and a margin past it, and the inker drew a throat, a collar
- * edge and the start of the neck into that band on a bearded man and on a
- * woman. Just under the line, ink that is still as dense as a beard is kept
- * down to where the beard thins out; lone strokes are not. Only between the
- * line's two ends: outside them the head mask already stops the neck at the
- * ear lobe, and a woman's hair that falls below her jaw has to stay.
- * Earrings hanging below the lobe stay too.
- */
-async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer> {
-  const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });
-  const { width, height } = info;
-
-  // Summed-area table of ink, for the density of any window in O(1).
-  const sums = new Float64Array((width + 1) * (height + 1));
-  for (let y = 0; y < height; y++) {
-    let row = 0;
-    for (let x = 0; x < width; x++) {
-      row += data[y * width + x] < 128 ? 1 : 0;
-      sums[(y + 1) * (width + 1) + x + 1] = sums[y * (width + 1) + x + 1] + row;
-    }
-  }
-  const r = Math.max(2, Math.round(width * BEARD_WINDOW));
-  const density = (x: number, y: number) => {
-    const x0 = Math.max(0, x - r);
-    const y0 = Math.max(0, y - r);
-    const x1 = Math.min(width, x + r + 1);
-    const y1 = Math.min(height, y + r + 1);
-    const ink = sums[y1 * (width + 1) + x1] - sums[y0 * (width + 1) + x1] - sums[y1 * (width + 1) + x0] + sums[y0 * (width + 1) + x0];
-    return ink / ((x1 - x0) * (y1 - y0));
-  };
-
-  const points = jaw.points.map((p) => ({ x: p.x * (width - 1), y: p.y * (height - 1) }));
-  const margin = height * DRAWING_JAW_MARGIN;
-  const reach = height * DRAWING_BEARD_REACH;
-  const kept = jaw.keep.map((b) => ({ left: b.left * width, right: b.right * width, top: b.top * height, bottom: b.bottom * height }));
-  let segment = 0;
-  for (let x = Math.ceil(points[0].x); x <= Math.min(width - 1, points[points.length - 1].x); x++) {
-    while (segment < points.length - 2 && points[segment + 1].x < x) segment++;
-    const a = points[segment];
-    const b = points[segment + 1];
-    const lineY = a.y + (b.y - a.y) * (b.x === a.x ? 0 : (x - a.x) / (b.x - a.x));
-    let from = Math.max(0, Math.ceil(lineY + margin));
-    while (from < height && from < lineY + reach && density(x, from) >= BEARD_DENSITY) from++;
-    for (let y = from; y < height; y++) {
-      if (kept.some((k) => x >= k.left && x <= k.right && y >= k.top && y <= k.bottom)) continue;
-      data[y * width + x] = 255;
-    }
-  }
-  return sharp(data, { raw: { width, height, channels: 1 } }).png().toBuffer();
-}
 
 /** Sampling temperature for the inker. See the note where it is used. */
 const INK_TEMPERATURE = 0.1;
