@@ -320,23 +320,61 @@ async function clipToHead(image: Buffer, mask: string): Promise<Buffer> {
   return sharp(data, { raw: { width: info.width, height: info.height, channels: 1 } }).png().toBuffer();
 }
 
-/** Left under the jawline in the drawing, as a fraction of its height: enough for the tips of a beard drawn a touch low, not enough for a throat. */
+/** Left under the jawline in the drawing, as a fraction of its height, whatever is drawn there. */
 const DRAWING_JAW_MARGIN = 0.006;
+/**
+ * How far below the jawline a beard may carry on, as a fraction of the
+ * drawing's height. The traced line is the model's guess at the bottom of
+ * the beard and the inker draws its own beard a little lower in places; a
+ * hard cut on the line sliced a man's goatee off in a straight edge.
+ */
+const DRAWING_BEARD_REACH = 0.035;
+/** Half-width of the window ink density is measured over, as a fraction of the drawing's width. */
+const BEARD_WINDOW = 0.012;
+/**
+ * Ink coverage that counts as beard. Stubble and a goatee are a mass of
+ * strokes, well over this; a throat line, a collar edge or the side of a
+ * neck is one stroke crossing an otherwise empty window, well under it.
+ */
+const BEARD_DENSITY = 0.4;
 
 /**
  * Whites out the drawing below the jawline the photo was cut along — the
  * chin, or the bottom of the beard. The head mask alone follows the photo's
  * feathered cut and a margin past it, and the inker drew a throat, a collar
  * edge and the start of the neck into that band on a bearded man and on a
- * woman. Only between the line's two ends: outside them the head mask
- * already stops the neck at the ear lobe, and a woman's hair that falls
- * below her jaw has to stay. Earrings hanging below the lobe stay too.
+ * woman. Just under the line, ink that is still as dense as a beard is kept
+ * down to where the beard thins out; lone strokes are not. Only between the
+ * line's two ends: outside them the head mask already stops the neck at the
+ * ear lobe, and a woman's hair that falls below her jaw has to stay.
+ * Earrings hanging below the lobe stay too.
  */
 async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer> {
   const { data, info } = await sharp(image).greyscale().raw().toBuffer({ resolveWithObject: true });
   const { width, height } = info;
+
+  // Summed-area table of ink, for the density of any window in O(1).
+  const sums = new Float64Array((width + 1) * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let row = 0;
+    for (let x = 0; x < width; x++) {
+      row += data[y * width + x] < 128 ? 1 : 0;
+      sums[(y + 1) * (width + 1) + x + 1] = sums[y * (width + 1) + x + 1] + row;
+    }
+  }
+  const r = Math.max(2, Math.round(width * BEARD_WINDOW));
+  const density = (x: number, y: number) => {
+    const x0 = Math.max(0, x - r);
+    const y0 = Math.max(0, y - r);
+    const x1 = Math.min(width, x + r + 1);
+    const y1 = Math.min(height, y + r + 1);
+    const ink = sums[y1 * (width + 1) + x1] - sums[y0 * (width + 1) + x1] - sums[y1 * (width + 1) + x0] + sums[y0 * (width + 1) + x0];
+    return ink / ((x1 - x0) * (y1 - y0));
+  };
+
   const points = jaw.points.map((p) => ({ x: p.x * (width - 1), y: p.y * (height - 1) }));
   const margin = height * DRAWING_JAW_MARGIN;
+  const reach = height * DRAWING_BEARD_REACH;
   const kept = jaw.keep.map((b) => ({ left: b.left * width, right: b.right * width, top: b.top * height, bottom: b.bottom * height }));
   let segment = 0;
   for (let x = Math.ceil(points[0].x); x <= Math.min(width - 1, points[points.length - 1].x); x++) {
@@ -344,7 +382,9 @@ async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer> {
     const a = points[segment];
     const b = points[segment + 1];
     const lineY = a.y + (b.y - a.y) * (b.x === a.x ? 0 : (x - a.x) / (b.x - a.x));
-    for (let y = Math.max(0, Math.ceil(lineY + margin)); y < height; y++) {
+    let from = Math.max(0, Math.ceil(lineY + margin));
+    while (from < height && from < lineY + reach && density(x, from) >= BEARD_DENSITY) from++;
+    for (let y = from; y < height; y++) {
       if (kept.some((k) => x >= k.left && x <= k.right && y >= k.top && y <= k.bottom)) continue;
       data[y * width + x] = 255;
     }

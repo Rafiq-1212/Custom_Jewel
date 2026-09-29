@@ -167,7 +167,7 @@ export default function Home() {
   React.useEffect(() => {
     if (!masterSketch) return;
     let cancelled = false;
-    extractSilhouetteContour(masterSketch)
+    extractSilhouetteContour(masterSketch, { sealEdges: activeCategoryId !== 'face' })
       .then((result) => {
         if (!cancelled) setContour(result);
       })
@@ -178,7 +178,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [masterSketch]);
+  }, [masterSketch, activeCategoryId]);
 
   const handleFileSelected = (selected: File) => {
     if (originalImage) URL.revokeObjectURL(originalImage);

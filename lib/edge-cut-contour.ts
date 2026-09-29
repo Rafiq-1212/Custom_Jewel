@@ -247,7 +247,13 @@ function stampBail(
   }
 }
 
-export async function extractSilhouetteContour(sketchDataUrl: string): Promise<SilhouetteContour> {
+/**
+ * `sealEdges` is for artwork the frame cuts off — a chest-up portrait ending
+ * at the bottom row. A Face Pendant is a head with nothing cut off, and
+ * sealing it put a straight wall down the side of the face and a flat base
+ * under the chin: a block the shape of a neck in the cut line.
+ */
+export async function extractSilhouetteContour(sketchDataUrl: string, { sealEdges = true } = {}): Promise<SilhouetteContour> {
   const image = await decodeImage(sketchDataUrl);
   const naturalWidth = image.naturalWidth;
   const naturalHeight = image.naturalHeight;
@@ -276,7 +282,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string): Promise<S
   const bridgeRadius = Math.max(3, Math.round(largerAnalysisDim * 0.015));
 
   mask = roundDilate(mask, analysisWidth, analysisHeight, bridgeRadius);
-  mask = sealBorderGaps(mask, analysisWidth, analysisHeight, bridgeRadius);
+  if (sealEdges) mask = sealBorderGaps(mask, analysisWidth, analysisHeight, bridgeRadius);
   mask = fillHoles(mask, analysisWidth, analysisHeight);
   mask = roundErode(mask, analysisWidth, analysisHeight, Math.max(0, bridgeRadius - 1));
   mask = largestComponentMask(mask, analysisWidth, analysisHeight);
