@@ -81,7 +81,7 @@ export function DownloadPanel({
           contour,
           rimColor,
           transform,
-          necklace: true,
+          zoomedOut: true,
         });
         downloadFile(`preview-${slug(designLabel)}-${selected}.png`, blob);
       }

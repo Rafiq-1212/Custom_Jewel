@@ -45,28 +45,26 @@ const MOCKUP_RASTER_SCALE = 25;
 const CROP_PADDING = 0.08;
 
 /**
- * The product photo shows the pendant on its chain, small, the way it is
- * actually worn and sold — not filling the frame. A 25 mm pendant shown the
- * size of a phone screen invites people to judge a hand-sized engraving at
- * ten times its real size. The tight pendant image is placed on a larger
- * canvas at this fraction of the picture's height, low and centred, with the
- * space above left for the chain. Placed in the input rather than asked for
- * in words, for the same reason as the jump ring: the model keeps the size
- * and position it is given.
+ * The product photo shows the pendant small, with plenty of background round
+ * it — not filling the frame. A 25 mm pendant shown the size of a phone
+ * screen invites people to judge a hand-sized engraving at ten times its
+ * real size. The tight pendant image is placed in the middle of a larger
+ * canvas at this fraction of the picture's height. Placed in the input
+ * rather than asked for in words, for the same reason as the jump ring: the
+ * model keeps the size and position it is given. (It used to hang on a
+ * chain as well; the client wanted the chain gone and the distance kept.)
  */
-const NECKLACE_PENDANT_HEIGHT = 0.42;
-/** Where the bottom of the pendant sits, as a fraction of the picture's height. */
-const NECKLACE_PENDANT_BOTTOM = 0.9;
-/** The necklace picture's width to height. */
-const NECKLACE_ASPECT = 0.85;
+const WIDE_PENDANT_HEIGHT = 0.42;
+/** The wide picture's width to height. */
+const WIDE_ASPECT = 0.85;
 
-/** `image` placed small and low on a larger canvas of `background`, leaving room above for a chain. */
-async function onNecklaceCanvas(image: Buffer, background: string): Promise<Buffer> {
+/** `image` placed small in the middle of a larger canvas of `background`. */
+async function onWideCanvas(image: Buffer, background: string): Promise<Buffer> {
   const { width = 1, height = 1 } = await sharp(image).metadata();
-  const canvasHeight = Math.round(height / NECKLACE_PENDANT_HEIGHT);
-  const canvasWidth = Math.max(width + 2, Math.round(canvasHeight * NECKLACE_ASPECT));
+  const canvasHeight = Math.round(height / WIDE_PENDANT_HEIGHT);
+  const canvasWidth = Math.max(width + 2, Math.round(canvasHeight * WIDE_ASPECT));
   const left = Math.round((canvasWidth - width) / 2);
-  const top = Math.round(canvasHeight * NECKLACE_PENDANT_BOTTOM - height);
+  const top = Math.round((canvasHeight - height) / 2);
   return sharp({ create: { width: canvasWidth, height: canvasHeight, channels: 3, background } })
     .composite([{ input: image, left, top }])
     .png()
@@ -270,7 +268,7 @@ function buildMockupPrompt(request: DesignRequest): string {
   const plate =
     request.designType === 'edge-cut'
       ? `This is a SILHOUETTE-CUT pendant: the flat metal plate is cut a few millimetres outside the outline of the engraved artwork, following its shape — that irregular outline, with its small metal border, IS the edge of the pendant. Keep it exactly; do not put the artwork on a round, heart or any other backing plate, and do not add a frame. The plate includes its own hanging tab, cut from the same flat sheet with a round hole through it, and a plain round jump ring threaded through that hole. Both are already drawn in image 1, in their exact places. Render the ring as what it is: a loop of round ${material.label.toLowerCase()} wire, thicker and rounder than the flat plate, catching the light along its curve, passing through the hole so that the bottom of the wire is inside the hole and the rest of the loop stands clear above the tab. It stays exactly where image 1 puts it, which is directly above that hole and NOT at the top centre of the plate: the hole sits off to one side, above a head, and that is where the pendant hangs from. Add no second ring, no bail and no loop anywhere else on the metal. THE METAL PLATE HAS EXACTLY ONE HOLE, the one in image 1: never cut a second hole anywhere, and never punch one through the portrait.`
-      : `The plate is a ${PENDANT_SHAPES[request.shape].label.toLowerCase()} shape. Keep its exact outline and proportions. Add a small matching ${material.label.toLowerCase()} bail (a hanging loop) at the top centre so it can hang on a chain. Do not cut any hole through the plate itself.`;
+      : `The plate is a ${PENDANT_SHAPES[request.shape].label.toLowerCase()} shape. Keep its exact outline and proportions. Add a small matching ${material.label.toLowerCase()} bail (a hanging loop) at the top centre. Do not cut any hole through the plate itself.`;
 
   const rimHex =
     request.designType === 'standard' && PENDANT_SHAPES[request.shape].supportsRim
@@ -292,8 +290,8 @@ Render this EXACT pendant as a photorealistic, high-end product photograph for a
 ${rim ? `- ${rim}\n` : ''}- Nothing else may be added to the piece.
 - ENGRAVING DETAIL (most important): reproduce the engraving line for line from image 2. ${material.mockupEngraving} Every black area in image 2 is deeply engraved and must look DARK in the photo: hair, beards, eyebrows, eyes, shading and clothing patterns keep all their dark strokes and dark masses, at the same thickness and the same density as image 2. A mass of hair stays a mass, not a few loose strands. Never lighten, thin out, fade or polish over any engraved area, and never replace a dark hair area with plain shiny metal. Only the white areas of image 2 are bare metal.
 - The engraving must remain EXACTLY as shown: the same faces, the same line-art, the same position and size on the plate. Do not redraw, restyle, beautify, sharpen or move the portrait. Do not add any text, dates, names, hallmarks, purity stamps (no "925", no "22k"), gems or extra decoration anywhere on the piece.
-- Present it as a NECKLACE, the classic catalogue shot: lying flat and front-facing on a plain, soft, light cream studio background with a gentle shadow, hanging from a fine, delicate ${material.label.toLowerCase()} chain. The chain passes through the ${request.designType === 'edge-cut' ? 'jump ring' : 'bail'} and rises from it in a gentle V, both sides running up and out of the top edge of the picture.
-- THE PENDANT STAYS SMALL, exactly the size and in exactly the place image 1 puts it: in the lower middle of the picture, with the empty space above it for the chain. Never enlarge it, never move it to the centre, never zoom in on it. The whole pendant stays inside the picture with background all round it; only the chain runs off the top edge.
+- Present it as the classic catalogue shot: the pendant alone, lying flat and front-facing on a plain, soft, light cream studio background with a gentle shadow. NO chain, necklace, cord or thread of any kind, and no hands or props.
+- THE PENDANT STAYS SMALL, exactly the size and in exactly the place image 1 puts it: in the middle of the picture with plenty of empty background all round it. Never enlarge it, never zoom in on it, never crop it.
 
 Output only the rendered image.`;
 }
@@ -315,8 +313,8 @@ export async function startPendantMockup(request: DesignRequest): Promise<string
     {
       prompt: buildMockupPrompt(request),
       images: [
-        { bytes: await onNecklaceCanvas(composite, BACKGROUND), mimeType: 'image/png' },
-        { bytes: await onNecklaceCanvas(engraving, '#ffffff'), mimeType: 'image/png' },
+        { bytes: await onWideCanvas(composite, BACKGROUND), mimeType: 'image/png' },
+        { bytes: await onWideCanvas(engraving, '#ffffff'), mimeType: 'image/png' },
       ],
     },
     `mockup ${request.material}`,

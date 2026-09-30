@@ -19,6 +19,9 @@ if (typeof window !== 'undefined') {
   throw new Error('lib/rhino-export.ts was imported into a browser bundle. This module is server-only.');
 }
 
+/** The oldest Rhino the file has to open in. */
+const RHINO_FILE_VERSION = 5;
+
 export type RhinoLayerName = 'CUT' | 'ENGRAVE';
 
 export interface RhinoPolylineSpec {
@@ -71,5 +74,10 @@ export async function buildRhino3dm(polylines: RhinoPolylineSpec[]): Promise<Uin
     doc.objects().addCurve(curve, attributes);
   }
 
-  return doc.toByteArray();
+  // Rhino 5 format: the client's workshop runs Rhino 5, which refused the
+  // default (Rhino 8) file as "created by a newer version of Rhinoceros".
+  // Every later Rhino still opens it, and polylines on layers lose nothing.
+  const options = new rhino.File3dmWriteOptions();
+  options.version = RHINO_FILE_VERSION;
+  return doc.toByteArrayOptions(options);
 }
