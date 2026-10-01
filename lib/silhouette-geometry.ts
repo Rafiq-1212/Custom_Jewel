@@ -208,6 +208,35 @@ export function fillHoles(mask: Uint8Array, width: number, height: number): Uint
 }
 
 /**
+ * Fills every pixel that has foreground either side of it on its row, or
+ * above and below it in its column — a solid shape that cannot leak through
+ * a gap in its outline the way `fillHoles` does. Either, not both: a child's
+ * lips are strokes of their own, dropped as strays before this runs, and
+ * with her cheek open on one side a row through her mouth had nothing to
+ * its right, so requiring both cut a slot through her mouth.
+ */
+export function fillSpans(mask: Uint8Array, width: number, height: number): Uint8Array {
+  const rows = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    const extent = rowExtent(mask, width, y);
+    if (extent) rows.fill(1, y * width + extent.minX, y * width + extent.maxX + 1);
+  }
+  const out = new Uint8Array(width * height);
+  for (let x = 0; x < width; x++) {
+    let top = -1;
+    let bottom = -1;
+    for (let y = 0; y < height; y++) {
+      if (!mask[y * width + x]) continue;
+      if (top < 0) top = y;
+      bottom = y;
+    }
+    for (let y = Math.max(0, top); top >= 0 && y <= bottom; y++) out[y * width + x] = 1;
+  }
+  for (let i = 0; i < out.length; i++) if (mask[i] || rows[i]) out[i] = 1;
+  return out;
+}
+
+/**
  * Seals a subject that is cut off by the image edge. The master sketch is
  * trimmed tight to its ink (lib/image-processing.ts), so a chest-up portrait
  * ends exactly where the torso meets the bottom row — with outline strokes

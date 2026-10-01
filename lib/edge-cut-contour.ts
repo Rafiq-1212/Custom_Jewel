@@ -59,6 +59,7 @@ import { roundClose, roundDilate, roundErode } from './distance-transform';
 import {
   boundingBoxOf,
   fillHoles,
+  fillSpans,
   largestComponentMask,
   maskToSmoothContour,
   sealBorderGaps,
@@ -307,8 +308,14 @@ export async function extractSilhouetteContour(sketchDataUrl: string, { sealEdge
     // on the bottom row; bridged inside the frame, the grow-and-shrink was
     // cut off by that edge and the chin came out squared off in the cut line.
     mask = padMask(mask, analysisWidth, analysisHeight, pad);
+    // Filled as a solid shape, not by flooding from outside. A head's
+    // outline is often open — a child's cheek drawn with light shading and
+    // no line — and the flood ran in through the gap and carved a notch from
+    // the cheek to the nose; the drawing is painted inside the cut line, so
+    // her mouth and nose vanished. Strays go first, so they cannot stretch it.
     mask = roundDilate(mask, paddedWidth, paddedHeight, bridgeRadius);
-    mask = fillHoles(mask, paddedWidth, paddedHeight);
+    mask = largestComponentMask(mask, paddedWidth, paddedHeight);
+    mask = fillSpans(mask, paddedWidth, paddedHeight);
     mask = roundErode(mask, paddedWidth, paddedHeight, Math.max(0, bridgeRadius - 1));
     mask = largestComponentMask(mask, paddedWidth, paddedHeight);
   }

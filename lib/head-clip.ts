@@ -246,6 +246,15 @@ const BEARD_WINDOW = 0.012;
  */
 const BEARD_DENSITY = 0.4;
 /**
+ * How far out from the middle of the jaw line a beard may carry on below it,
+ * as a fraction of the way to each end: in full to BEARD_FULL, fading to
+ * nothing at BEARD_NONE. A hard stop left a tick of ink at the corner of a
+ * beard, where the smoothed cut still dipped; stopping much nearer the
+ * middle would cut off the corner of a goatee again.
+ */
+const BEARD_FULL = 0.5;
+const BEARD_NONE = 0.8;
+/**
  * How far below the traced line the drawn jaw outline is looked for, as a
  * fraction of the drawing's height. The inker draws a solid outline along
  * the jaw, and on a man's photo it ran up to 2% below the traced line near
@@ -267,6 +276,8 @@ const DRAWN_JAW_DEPTH = 0.004;
 const DRAWN_JAW_BEND = 0.35;
 /** The drawn outline has to be at least this solid (fraction of its columns inked, over a short stretch) to be cut under. */
 const DRAWN_JAW_SOLID = 0.7;
+/** The thickest the drawn outline can be, as a fraction of the height measured down a column — a steep stroke reads thicker that way. */
+const DRAWN_JAW_STROKE = 0.012;
 
 /**
  * The cut is averaged over this half-width, as a fraction of the drawing's
@@ -333,6 +344,7 @@ function findDrawnJaw(ink: (x: number, y: number) => boolean, lineY: Float64Arra
   // Only a solid run is an outline; below it, the stroke's own thickness.
   const out = new Float64Array(lineY.length).fill(Number.NaN);
   const stretch = Math.max(3, Math.round(band / 2));
+  const maxStroke = Math.max(3, Math.round(height * DRAWN_JAW_STROKE));
   for (let c = 0; c < columns; c++) {
     let inked = 0;
     let n = 0;
@@ -340,7 +352,13 @@ function findDrawnJaw(ink: (x: number, y: number) => boolean, lineY: Float64Arra
     if (inked / n < DRAWN_JAW_SOLID) continue;
     const x = first + c;
     let y = Math.round(lineY[x]) + path[c] - above;
+    const start = y;
     while (y < height && ink(x, y)) y++;
+    // An outline is a stroke. A run of ink much longer than one is a line
+    // down the neck, or a shadow, carrying on from it: cut under that and
+    // the cut followed it down, leaving a stub below a beard and a black
+    // wedge under an ear.
+    if (y - start > maxStroke) continue;
     out[x] = y;
   }
   return out;
@@ -404,7 +422,12 @@ export async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer>
   const raw = new Float64Array(width);
   for (let x = first; x <= last; x++) {
     let from = Math.max(0, Math.ceil(lineY[x] + margin));
-    while (from < height && from < lineY[x] + reach && density(x, from) >= BEARD_DENSITY) from++;
+    // A beard hangs below the chin, not below the jaw by the ears: out
+    // there, dense ink under the line was a shadow under the ear, kept as
+    // beard.
+    const out = Math.abs(x - (first + last) / 2) / ((last - first) / 2);
+    const beardReach = reach * Math.min(1, Math.max(0, (BEARD_NONE - out) / (BEARD_NONE - BEARD_FULL)));
+    while (from < height && from < lineY[x] + beardReach && density(x, from) >= BEARD_DENSITY) from++;
     raw[x] = Number.isNaN(drawn[x]) ? from : Math.max(from, drawn[x] + 1);
   }
 
