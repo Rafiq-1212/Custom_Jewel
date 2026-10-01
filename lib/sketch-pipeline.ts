@@ -175,6 +175,9 @@ interface PersonFacts {
   marks: string;
   moles: string;
   eyes: string;
+  /** From the close-up only; empty when it could not be read. */
+  brows?: string;
+  mouth?: string;
 }
 
 interface Faces {
@@ -187,12 +190,14 @@ interface Faces {
 const CLOSE_UP_PROMPT = `This is a close-up of one person's face, cut from a larger photo.
 Return:
 ${MARKS_QUESTION}
-${MOLES_QUESTION}`;
+${MOLES_QUESTION}
+- "brows": the eyebrows exactly as they are in this photo — thick or thin, straight or arched, how far apart, level or raised (for example "thick, nearly straight, low over the eyes"). For a baby, often faint and sparse.
+- "mouth": the mouth exactly as it is — closed or parted, how far, whether any teeth show, the lips' fullness, and whether the corners turn up, down or stay level (for example "lips slightly parted, no teeth, corners level").`;
 
 const CLOSE_UP_SCHEMA = {
   type: Type.OBJECT,
-  properties: { marks: { type: Type.STRING }, moles: { type: Type.STRING } },
-  required: ['marks', 'moles'],
+  properties: { marks: { type: Type.STRING }, moles: { type: Type.STRING }, brows: { type: Type.STRING }, mouth: { type: Type.STRING } },
+  required: ['marks', 'moles', 'brows', 'mouth'],
 };
 
 /** Width the close-up of a head is enlarged to before it is looked at. */
@@ -206,7 +211,7 @@ const CLOSE_UP_WIDTH = 768;
  * have softened; the edit keeps its framing, so the head is in the same
  * place. Undefined if the close-up could not be read.
  */
-async function closeUp(original: Uint8Array, head: Region): Promise<{ marks: string; moles: string } | undefined> {
+async function closeUp(original: Uint8Array, head: Region): Promise<Partial<PersonFacts> | undefined> {
   try {
     const { width = 0, height = 0 } = await sharp(original).metadata();
     const left = Math.max(0, Math.floor(head.left * width));
@@ -222,10 +227,14 @@ async function closeUp(original: Uint8Array, head: Region): Promise<{ marks: str
     const answer = (await generateJsonFromImage({ prompt: CLOSE_UP_PROMPT, image: { bytes: crop, mimeType: 'image/png' }, schema: CLOSE_UP_SCHEMA })) as {
       marks?: unknown;
       moles?: unknown;
+      brows?: unknown;
+      mouth?: unknown;
     } | null;
-    const marks = typeof answer?.marks === 'string' ? answer.marks.trim() : '';
-    const moles = typeof answer?.moles === 'string' ? answer.moles.trim() : '';
-    return marks && moles ? { marks, moles } : undefined;
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    const marks = text(answer?.marks);
+    const moles = text(answer?.moles);
+    if (!marks || !moles) return undefined;
+    return { marks, moles, brows: text(answer?.brows), mouth: text(answer?.mouth) };
   } catch (error) {
     console.info(`[sketch] close-up of a face could not be read, keeping the first look: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
@@ -275,7 +284,7 @@ async function findFaces(photo: Buffer, original: Uint8Array): Promise<Faces | u
     if (regions.length === 0) return undefined;
     console.info(
       `[sketch] ${people.length} faces and ${hands.length} hands kept exactly as traced; ${people
-        .map((p) => `hair: ${p.facts.hair}; marks: ${p.facts.marks}; moles: ${p.facts.moles}; eyes: ${p.facts.eyes}`)
+        .map((p) => `hair: ${p.facts.hair}; marks: ${p.facts.marks}; moles: ${p.facts.moles}; eyes: ${p.facts.eyes}; brows: ${p.facts.brows ?? '?'}; mouth: ${p.facts.mouth ?? '?'}`)
         .join(' | ')}`,
     );
     return { regions, people: people.map((person) => person.facts) };
@@ -307,8 +316,17 @@ function personFacts(people: PersonFacts[]): string {
       // flatly: worded softer ("only where image 2 plainly shows one") the
       // mole came back. The cost is that a small real mole the check misses
       // (a man's, beside his goatee, on half the checks) is left out too.
-      const moles = /^none\.?$/i.test(p.moles) ? 'NO mole or spot anywhere on the face — ink none, whatever specks the pencils have' : `moles: ${p.moles}`;
-      return `- ${place(i)}: hair ${p.hair}; ${marks}; ${moles}; eyes ${p.eyes}.`;
+      // A real mole is drawn at its size: told only that a man had one, the
+      // inker drew a bold round spot several times its size.
+      const moles = /^none\.?$/i.test(p.moles)
+        ? 'NO mole or spot anywhere on the face — ink none, whatever specks the pencils have'
+        : `moles: ${p.moles} — ink each as the tiny dot it is, no bigger than in image 2, never a bold round spot`;
+      // Brows and mouth stated as facts, like the hair: drawn from the rules
+      // alone they came back as a generic, prettier face — a baby given
+      // arched brows, long lashes and a shaped smile she does not have.
+      const brows = p.brows ? `; eyebrows ${p.brows}` : '';
+      const mouth = p.mouth ? `; mouth ${p.mouth}` : '';
+      return `- ${place(i)}: hair ${p.hair}; ${marks}; ${moles}; eyes ${p.eyes}${brows}${mouth}.`;
     }),
   ].join('\n');
 }
