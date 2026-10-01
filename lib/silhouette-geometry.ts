@@ -1,5 +1,3 @@
-'use client';
-
 /**
  * Shared binary-mask and contour-tracing primitives used by both silhouette
  * extractors:
