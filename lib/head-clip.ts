@@ -203,6 +203,7 @@ export function alignJaw(jaw: Jawline, a: Alignment): Jawline {
   const x = (v: number) => a.dx + (v - a.px) * a.k;
   const y = (v: number) => a.dy + (v - a.py) * a.k;
   return {
+    ...jaw,
     points: jaw.points.map((p) => ({ x: x(p.x), y: y(p.y) })),
     keep: jaw.keep.map((b) => ({ left: x(b.left), top: y(b.top), right: x(b.right), bottom: y(b.bottom) })),
   };
@@ -425,8 +426,10 @@ export async function clipBelowJaw(image: Buffer, jaw: Jawline): Promise<Buffer>
     // A beard hangs below the chin, not below the jaw by the ears: out
     // there, dense ink under the line was a shadow under the ear, kept as
     // beard.
+    // None at all on a clean chin: a baby's necklace, just under her chin,
+    // was dense enough to be kept as beard.
     const out = Math.abs(x - (first + last) / 2) / ((last - first) / 2);
-    const beardReach = reach * Math.min(1, Math.max(0, (BEARD_NONE - out) / (BEARD_NONE - BEARD_FULL)));
+    const beardReach = jaw.beard === false ? 0 : reach * Math.min(1, Math.max(0, (BEARD_NONE - out) / (BEARD_NONE - BEARD_FULL)));
     while (from < height && from < lineY[x] + beardReach && density(x, from) >= BEARD_DENSITY) from++;
     raw[x] = Number.isNaN(drawn[x]) ? from : Math.max(from, drawn[x] + 1);
   }

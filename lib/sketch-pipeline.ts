@@ -381,7 +381,7 @@ export async function startSketch(input: SketchInput): Promise<string> {
     },
     `inking ${input.category}`,
     CROP_TO_HEAD_CATEGORIES.has(input.category)
-      ? { head: await headMask(photo, jaw?.keep), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep }) } : {}) }
+      ? { head: await headMask(photo, jaw?.keep), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep, beard: jaw.beard }) } : {}) }
       : undefined,
   );
 }

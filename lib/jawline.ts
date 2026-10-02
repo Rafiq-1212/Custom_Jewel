@@ -50,6 +50,8 @@ export interface Jawline {
    * woman's portrait without this.
    */
   keep: KeepBox[];
+  /** Whether the chin has any beard; a clean chin is cut right under its outline. */
+  beard?: boolean;
 }
 
 const JAW_PROMPT = `This photo shows one person's head. Everything below is on a 0-1000 scale (y down, x right).
@@ -194,12 +196,16 @@ async function raiseToChinEdge(photo: Uint8Array, points: JawPoint[]): Promise<v
 }
 
 const EARRING_PROMPT = `This is a close-up of one person's head, cut from a larger photo. Everything below is on a 0-1000 scale of THIS image (y down, x right).
-Return "earrings": one bounding box [ymin, xmin, ymax, xmax] for each earring that hangs below an ear lobe — a jhumka, a drop, a hoop — covering the whole earring from the lobe to its lowest bead or bell, or an empty list if there are none. Look closely at both ears, including one partly hidden by hair.`;
+Return "earrings": one bounding box [ymin, xmin, ymax, xmax] for each earring that hangs below an ear lobe — a jhumka, a drop, a hoop — covering the whole earring from the lobe to its lowest bead or bell, or an empty list if there are none. Look closely at both ears, including one partly hidden by hair.
+Also return "ears": one bounding box [ymin, xmin, ymax, xmax] for each ear you can see, from the top of the ear to the bottom of its lobe and from its outer edge to where it meets the head, or an empty list if both are hidden.`;
 
 const EARRING_SCHEMA = {
   type: Type.OBJECT,
-  properties: { earrings: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } } },
-  required: ['earrings'],
+  properties: {
+    earrings: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
+    ears: { type: Type.ARRAY, items: { type: Type.ARRAY, items: { type: Type.NUMBER } } },
+  },
+  required: ['earrings', 'ears'],
 };
 
 /** Width the close-up of the head is enlarged to before the earrings are looked for. */
@@ -226,7 +232,19 @@ function readEarrings(value: unknown, frame: Box): KeepBox[] {
     .filter((b) => b.right > b.left && b.bottom > b.top && b.right - b.left < MAX_EARRING && b.bottom - b.top < MAX_EARRING);
 }
 
-/** The earrings in a close-up of `head` (fractions of the photo), or none if that could not be read. */
+/**
+ * Grown round each ear's box, as a fraction of its size, so the oval kept
+ * inside it reaches the ear's own outline and the tip of the lobe.
+ */
+const EAR_MARGIN = 0.25;
+
+/**
+ * The earrings and ears in a close-up of `head` (fractions of the photo), or
+ * none if that could not be read. The ears are kept like earrings: the cut
+ * under the jaw holds level past the jaw line and then curves up round the
+ * head, and on a baby whose jaw line ended halfway up the ear it took the
+ * bottom half of the ear with it.
+ */
 async function closeUpEarrings(photo: Uint8Array, head: Box): Promise<KeepBox[]> {
   try {
     const { width = 0, height = 0 } = await sharp(photo).metadata();
@@ -245,12 +263,13 @@ async function closeUpEarrings(photo: Uint8Array, head: Box): Promise<KeepBox[]>
     if (cropWidth < 8 || cropHeight < 8) return [];
     const crop = await sharp(photo).extract({ left, top, width: cropWidth, height: cropHeight }).resize({ width: EARRING_CLOSE_UP_WIDTH }).png().toBuffer();
     const answer = await generateJsonFromImage({ prompt: EARRING_PROMPT, image: { bytes: crop, mimeType: 'image/png' }, schema: EARRING_SCHEMA });
-    return readEarrings((answer as { earrings?: unknown } | null)?.earrings, {
-      left: left / width,
-      top: top / height,
-      right: (left + cropWidth) / width,
-      bottom: (top + cropHeight) / height,
+    const seen = { left: left / width, top: top / height, right: (left + cropWidth) / width, bottom: (top + cropHeight) / height };
+    const ears = readEarrings((answer as { ears?: unknown } | null)?.ears, seen).map((b) => {
+      const mx = (b.right - b.left) * EAR_MARGIN;
+      const my = (b.bottom - b.top) * EAR_MARGIN;
+      return { left: b.left - mx, top: b.top - my, right: b.right + mx, bottom: b.bottom + my };
     });
+    return [...readEarrings((answer as { earrings?: unknown } | null)?.earrings, seen), ...ears];
   } catch (error) {
     console.info(`[sketch] close-up of the ears could not be read, keeping the first look: ${error instanceof Error ? error.message : String(error)}`);
     return [];
@@ -352,8 +371,8 @@ export async function findJawline(photo: Uint8Array, mimeType: string): Promise<
 
   if ((answer as { beard?: unknown }).beard === false) await raiseToChinEdge(photo, points);
 
-  // The earrings are looked for again in a close-up of the head, and both
-  // answers kept. In a half-length photo a jhumka is a few pixels wide, and
+  // The earrings are looked for again in a close-up of the head, with the
+  // ears, and both answers kept. In a half-length photo a jhumka is a few pixels wide, and
   // for one woman two answers in a row came back with none; a Face Pendant
   // loses whatever earring is not boxed.
   const keep = readEarrings((answer as { earrings?: unknown }).earrings, { left: 0, top: 0, right: 1, bottom: 1 });
@@ -368,5 +387,5 @@ export async function findJawline(photo: Uint8Array, mimeType: string): Promise<
       same.bottom = Math.max(same.bottom, box.bottom);
     }
   }
-  return { points, keep };
+  return { points, keep, beard: (answer as { beard?: unknown }).beard !== false };
 }
