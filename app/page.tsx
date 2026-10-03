@@ -260,7 +260,8 @@ export default function Home() {
 
   const isGenerating = status === 'generating';
   const hasSketch = masterSketch !== null;
-  const activeContour = selectedDesignType === 'edge-cut' ? contour : null;
+  // A frame shape (the heart) cuts its windows round the portrait, so it needs the outline too.
+  const activeContour = selectedDesignType === 'edge-cut' || PENDANT_SHAPES[selectedShape].frame ? contour : null;
   const shapeSupportsRim = selectedDesignType === 'standard' && PENDANT_SHAPES[selectedShape].supportsRim;
   const effectiveRim: RimColorId = shapeSupportsRim ? rimColor : 'none';
   const designLabel =

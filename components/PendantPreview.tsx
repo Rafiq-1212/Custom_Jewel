@@ -200,7 +200,7 @@ function paintDimensionalPendant(
     ctx.clip(shapePath);
     ctx.strokeStyle = rimHex;
     ctx.lineWidth = RIM_BAND_WIDTH * 2;
-    ctx.stroke(shapePath);
+    ctx.stroke(new Path2D(geometry.rimPath));
     ctx.restore();
   }
 

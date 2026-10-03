@@ -32,6 +32,21 @@ export interface PendantShape {
    * the AI mockup — the cut/engrave files are the same plate either way.
    */
   supportsRim: boolean;
+  /**
+   * Set for a shape the workshop makes as an open FRAME rather than a solid
+   * plate: a band of metal round the edge, the portrait standing inside it
+   * and the space between cut clean through (lib/frame-cut.ts). All in
+   * viewBox units.
+   */
+  frame?: {
+    /** Width of the band of metal left round the edge. */
+    band: number;
+    /** The box the portrait is fitted inside, whole. */
+    area: { x: number; y: number; width: number; height: number };
+    /** The hanging tab: a disc joined to the top of the frame, and the hole through it for the bail. */
+    tab: { cx: number; cy: number; r: number };
+    hole: { cx: number; cy: number; r: number };
+  };
 }
 
 function roundedRectPath(x: number, y: number, w: number, h: number, r: number): string {
@@ -82,6 +97,15 @@ export const PENDANT_SHAPES: Record<ShapeId, PendantShape> = {
     path: 'M50 111 C32 96 9 80 9 58 C9 41 22 31 35 31 C43 31 48 36 50 41 C52 36 57 31 65 31 C78 31 91 41 91 58 C91 80 68 96 50 111 Z',
     engravingArea: { x: 27, y: 45, width: 46, height: 46 },
     supportsRim: true,
+    // Measured against the workshop's own heart: a band about 8% of the
+    // width, and a small round tab over the notch between the lobes, low
+    // enough to close the notch behind it.
+    frame: {
+      band: 7,
+      area: { x: 26, y: 50, width: 48, height: 49 },
+      tab: { cx: 50, cy: 35, r: 6.5 },
+      hole: { cx: 50, cy: 33.2, r: 2.4 },
+    },
   },
   bar: {
     id: 'bar',

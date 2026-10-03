@@ -18,7 +18,9 @@
  * mockup and in the exported SVG/DXF/3DM, with nothing computed twice.
  */
 
-import { PENDANT_SHAPES, type PendantTransform, type ShapeId } from './pendant-shapes';
+import { frameWindows } from './frame-cut';
+import { PENDANT_SHAPES, PENDANT_VIEWBOX, type PendantTransform, type ShapeId } from './pendant-shapes';
+import { flattenPath } from './svg-path-flatten';
 
 export interface Point {
   x: number;
@@ -57,6 +59,12 @@ export interface SilhouetteContour {
   rings: Point[][];
   /** Closed curves that are cut OUT of the plate — the ring's hole. */
   holes: Point[][];
+  /**
+   * The body's outline alone, before the hanging ring is joined to it. A
+   * frame pendant (lib/frame-cut.ts) stands the portrait inside a frame that
+   * has its own tab, so it wants the figure without one.
+   */
+  body?: Point[];
   imageWidth: number;
   imageHeight: number;
 }
@@ -199,6 +207,64 @@ function measureCircle(points: Point[]): { cx: number; cy: number; r: number } |
   return r > 0 ? { cx, cy, r } : null;
 }
 
+interface Disc {
+  cx: number;
+  cy: number;
+  r: number;
+}
+
+function circlePoints(c: Disc, segments = 64): Point[] {
+  return Array.from({ length: segments }, (_, i) => {
+    const angle = (i / segments) * Math.PI * 2;
+    return { x: c.cx + c.r * Math.cos(angle), y: c.cy + c.r * Math.sin(angle) };
+  });
+}
+
+function insidePolygon(p: Point, polygon: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, n = polygon.length; i < n; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % n];
+    if (a.y > p.y !== b.y > p.y && p.x < a.x + ((p.y - a.y) * (b.x - a.x)) / (b.y - a.y)) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * `outline` with `disc` joined on, as one closed curve: the outline where it
+ * runs outside the disc, and the disc's edge where it runs outside the
+ * outline. For a disc that crosses the outline exactly twice — a hanging tab
+ * sat over a heart's notch — which is the only way it is used.
+ */
+function joinDisc(outline: Point[], disc: Disc): Point[] {
+  const inDisc = (p: Point) => Math.hypot(p.x - disc.cx, p.y - disc.cy) < disc.r;
+  const n = outline.length;
+  // Start the walk just after the stretch of outline the disc covers.
+  let start = -1;
+  for (let i = 0; i < n; i++) {
+    if (inDisc(outline[i]) && !inDisc(outline[(i + 1) % n])) start = (i + 1) % n;
+  }
+  if (start < 0) return outline;
+  const kept: Point[] = [];
+  for (let k = 0; k < n; k++) {
+    const p = outline[(start + k) % n];
+    if (inDisc(p)) break;
+    kept.push(p);
+  }
+  // The disc's own edge outside the outline, run from where the outline
+  // left off round to where it began.
+  const ring = circlePoints(disc);
+  const free = ring.map((p) => !insidePolygon(p, outline));
+  const first = free.findIndex((f, i) => f && !free[(i + ring.length - 1) % ring.length]);
+  if (first < 0) return outline;
+  const arc: Point[] = [];
+  for (let k = 0; k < ring.length && free[(first + k) % ring.length]; k++) arc.push(ring[(first + k) % ring.length]);
+  const end = kept[kept.length - 1];
+  const nearStart = Math.hypot(arc[0].x - end.x, arc[0].y - end.y);
+  const nearEnd = Math.hypot(arc[arc.length - 1].x - end.x, arc[arc.length - 1].y - end.y);
+  return [...kept, ...(nearStart <= nearEnd ? arc : arc.reverse())];
+}
+
 /** Shown in place of a traced silhouette while one hasn't been computed yet (or failed to). */
 function placeholderPath(area: Rect): string {
   const cx = area.x + area.width / 2;
@@ -239,6 +305,12 @@ export interface PendantGeometry {
    * from a soldered bail instead and has no hole at all.
    */
   hangingHole: { cx: number; cy: number; r: number } | null;
+  /**
+   * The plate's outer edge alone, where an enamel band runs. The same as
+   * `outerPath` except on a frame pendant, whose `outerPath` also holds the
+   * windows and the tab: enamel goes round the frame, not round every window.
+   */
+  rimPath: string;
   label: string;
 }
 
@@ -262,12 +334,39 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
 
   if (designType === 'standard') {
     const shapeDef = PENDANT_SHAPES[shape];
+    const frame = shapeDef.frame;
+    const outline = frame && contour?.body ? flattenPath(shapeDef.path)[0] : undefined;
+    if (frame && contour?.body && outline) {
+      // A frame: the plate with its tab joined on as ONE outline (a tab
+      // drawn as its own circle would be cut along the plate's edge behind
+      // it, and fall off), the tab's hole, and the windows cut between the
+      // band and the portrait. The hole and windows are wound against the
+      // outline, so the nonzero rule takes them away.
+      const plate = joinDisc(outline, frame.tab);
+      const positive = signedArea(plate) >= 0;
+      const portrait = transformPoints(contour.body, contour.imageWidth, contour.imageHeight, frame.area, transform, 'contain');
+      const windows = frameWindows(outline, portrait, frame.band, PENDANT_VIEWBOX.width, PENDANT_VIEWBOX.height);
+      return {
+        outerPath: [
+          pointsToPath(plate),
+          pointsToPath(windTo(circlePoints(frame.hole), !positive)),
+          ...windows.map((points) => pointsToPath(windTo(points, !positive))),
+        ].join(' '),
+        engravingArea: frame.area,
+        fitMode: 'contain',
+        hasDecorativeRim: true,
+        hangingHole: frame.hole,
+        rimPath: shapeDef.path,
+        label: shapeDef.label,
+      };
+    }
     return {
       outerPath: shapeDef.path,
       engravingArea,
       fitMode: 'cover',
       hasDecorativeRim: true,
       hangingHole: null,
+      rimPath: shapeDef.path,
       label: shapeDef.label,
     };
   }
@@ -296,6 +395,7 @@ export function resolvePendantGeometry(input: ResolvePendantGeometryInput): Pend
     fitMode: 'contain',
     hasDecorativeRim: false,
     hangingHole,
+    rimPath: outerPath,
     label: 'Cut to shape',
   };
 }

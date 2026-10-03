@@ -25,7 +25,7 @@ export interface DesignRequest {
   transform: PendantTransform;
   engravingArea: Rect;
   designType: DesignType;
-  /** Required when `designType` is 'edge-cut'; `null` otherwise. */
+  /** Required when `designType` is 'edge-cut'; also sent for a frame shape (the heart), and `null` otherwise. */
   contour: SilhouetteContour | null;
   rimColor: RimColorId;
   category: CategoryId | null;
@@ -82,6 +82,7 @@ function isSilhouetteContour(value: unknown): value is SilhouetteContour {
   if (typeof c.imageHeight !== 'number' || c.imageHeight <= 0) return false;
   if (!isPointList(c.points)) return false;
   const isCurveList = (v: unknown) => Array.isArray(v) && v.length <= MAX_HOLES && v.every(isPointList);
+  if (c.body !== undefined && !isPointList(c.body)) return false;
   return isCurveList(c.rings) && isCurveList(c.holes);
 }
 
@@ -106,6 +107,11 @@ export function parseDesignRequest(body: unknown): ParseResult {
     if (!isSilhouetteContour(b.contour)) {
       return { ok: false, error: 'The cut line isn\'t ready yet. Choose "Cut to shape" again and retry.' };
     }
+    contour = b.contour;
+  } else if (b.contour !== null && b.contour !== undefined) {
+    // A frame shape (the heart) cuts its windows round the portrait's own
+    // outline, so a catalogue shape may carry one too.
+    if (!isSilhouetteContour(b.contour)) return { ok: false, error: 'Something went wrong. Please try again.' };
     contour = b.contour;
   }
 

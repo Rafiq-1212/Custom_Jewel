@@ -330,6 +330,12 @@ export async function extractSilhouetteContour(sketchDataUrl: string, { sealEdge
   if (!box) {
     throw new Error('We couldn\'t find a clear outline in this sketch.');
   }
+  // The body alone, before the ring is joined to it: a frame pendant stands
+  // the portrait inside a frame with a tab of its own (lib/frame-cut.ts).
+  const body = maskToSmoothContour(mask, paddedWidth, paddedHeight, {
+    epsilonFraction: TRACE_EPSILON_FRACTION,
+    smoothingIterations: TRACE_SMOOTHING_ITERATIONS,
+  });
 
   // The ring sits at the top centre of the piece and must be ATTACHED ON
   // BOTH SIDES. The outline's top is measured separately under the left and
@@ -400,6 +406,7 @@ export async function extractSilhouetteContour(sketchDataUrl: string, { sealEdge
     points: smoothed.map(toLocal),
     rings: [],
     holes: [circlePoints(ringCx, ringCy, ringOuter * RING_HOLE_RATIO, RING_SEGMENTS).map(toLocal)],
+    ...(body ? { body: body.map(toLocal) } : {}),
     imageWidth: naturalWidth,
     imageHeight: naturalHeight,
   };
