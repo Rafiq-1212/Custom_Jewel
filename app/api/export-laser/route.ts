@@ -2,11 +2,14 @@
  * POST /api/export-laser
  *
  * Turns the already-generated masterSketch into manufacturing files: SVG,
- * DXF and Rhino 3DM, plus a transparent PNG. No AI call happens here — see
- * the big comment in lib/laser-export.ts for the full pipeline. This route
- * exists only because vectorizing (potrace), rasterizing (sharp) and writing
- * .3dm (rhino3dm WASM) all need Node, not because anything here talks to
- * Gemini.
+ * DXF and Rhino 3DM, plus a transparent PNG — see the big comment in
+ * lib/laser-export.ts for the full pipeline. Vectorizing (potrace),
+ * rasterizing (sharp) and writing .3dm (rhino3dm WASM) all need Node.
+ *
+ * The one thing done to the artwork here, and only here, is taking the fine
+ * shading off the faces (lib/face-clean.ts): it engraves as dark patches.
+ * The sketch on screen and the product photo keep it. That step looks at
+ * the drawing with a text model to find the faces; no picture is redrawn.
  *
  * For Silhouette Cut designs, the traced outline (`contour`) is computed
  * once, client-side, by lib/edge-cut-contour.ts and sent here as plain data
@@ -15,15 +18,28 @@
  * app has already been burned by once (see lib/pendant-geometry.ts).
  */
 
+import { withCostLog } from '@/lib/cost';
 import { parseDesignRequest } from '@/lib/design-request';
+import { cleanFaceShading } from '@/lib/face-clean';
 import { buildLaserExportAssets } from '@/lib/laser-export';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 function fail(message: string, status: number): Response {
   return Response.json({ success: false, error: message }, { status });
+}
+
+/** The sketch (a data URL) with the face shading removed; the sketch itself if that fails. */
+async function withoutFaceShading(sketch: string): Promise<string> {
+  try {
+    const cleaned = await cleanFaceShading(Buffer.from(sketch.slice(sketch.indexOf(',') + 1), 'base64'));
+    return `data:image/png;base64,${cleaned.toString('base64')}`;
+  } catch (error) {
+    console.error('[export-laser] face shading left as drawn:', error instanceof Error ? error.message : error);
+    return sketch;
+  }
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -41,7 +57,8 @@ export async function POST(request: Request): Promise<Response> {
   const widthMm = typeof widthMmRaw === 'number' && widthMmRaw > 0 && widthMmRaw <= 200 ? widthMmRaw : undefined;
 
   try {
-    const result = await buildLaserExportAssets({ ...parsed.value, widthMm });
+    const sketch = await withCostLog('production files', () => withoutFaceShading(parsed.value.sketch));
+    const result = await buildLaserExportAssets({ ...parsed.value, sketch, widthMm });
     return Response.json({ success: true, ...result });
   } catch (error) {
     console.error('[export-laser]', error instanceof Error ? error.message : error);
