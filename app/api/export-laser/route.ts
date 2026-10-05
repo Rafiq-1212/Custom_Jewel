@@ -18,6 +18,7 @@
  * app has already been burned by once (see lib/pendant-geometry.ts).
  */
 
+import { archive, orderFolder, zip } from '@/lib/archive';
 import { withCostLog } from '@/lib/cost';
 import { parseDesignRequest } from '@/lib/design-request';
 import { cleanFaceShading } from '@/lib/face-clean';
@@ -59,6 +60,19 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const sketch = await withCostLog('production files', () => withoutFaceShading(parsed.value.sketch));
     const result = await buildLaserExportAssets({ ...parsed.value, sketch, widthMm });
+    // Kept in the cloud with the rest of the order, zipped (lib/archive.ts).
+    await archive(
+      orderFolder(parsed.value.sketch),
+      'production-files.zip',
+      zip([
+        { name: 'pendant.svg', data: Buffer.from(result.svg, 'utf8') },
+        { name: 'pendant.dxf', data: Buffer.from(result.dxf, 'utf8') },
+        { name: 'pendant.3dm', data: Buffer.from(result.threeDmBase64, 'base64') },
+        { name: 'engraving.png', data: Buffer.from(result.pngDataUrl.slice(result.pngDataUrl.indexOf(',') + 1), 'base64') },
+      ]),
+      'application/zip',
+      { latestOnly: true },
+    );
     return Response.json({ success: true, ...result });
   } catch (error) {
     console.error('[export-laser]', error instanceof Error ? error.message : error);

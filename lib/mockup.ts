@@ -21,6 +21,7 @@
 
 import sharp from 'sharp';
 import { readImageJob, submitImageJob } from './gemini-batch';
+import { archive, isOrderFolder, orderFolder } from './archive';
 import { PENDANT_MATERIALS, RIM_BAND_WIDTH, RIM_COLORS } from './materials';
 import { PENDANT_CATEGORIES } from './pendant-categories';
 import { resolvePendantGeometry, type PendantGeometry } from './pendant-geometry';
@@ -316,6 +317,8 @@ export async function startPendantMockup(request: DesignRequest): Promise<string
       ],
     },
     `mockup ${request.material}`,
+    // Where the finished photo is to be kept; it comes back with the job.
+    { order: orderFolder(request.sketch) },
   );
 }
 
@@ -324,5 +327,9 @@ export async function collectPendantMockup(name: string, material: string): Prom
   // Counted here: this is the only read of the job, so it is the one that
   // carries the cost of the picture.
   const result = await readImageJob(name, `mockup ${material}`, { count: true });
+  const folder = result.metadata?.order;
+  if (isOrderFolder(folder)) {
+    await archive(folder, `product-${material}.${result.mimeType === 'image/jpeg' ? 'jpg' : 'png'}`, result.bytes, result.mimeType);
+  }
   return { dataUrl: `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString('base64')}` };
 }

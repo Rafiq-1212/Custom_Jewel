@@ -19,6 +19,7 @@
  * appears in any response.
  */
 
+import { archive, orderFolder } from '@/lib/archive';
 import { withCostLog } from '@/lib/cost';
 import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
@@ -147,6 +148,13 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         // turn the background transparent (lib/image-processing.ts). A Face
         // Pendant was already clipped to the head in collectInked.
         const master = await makeTransparentMasterSketch(await collectInked(inkJob, category, { redo: formData.get('attempt') !== '2' }));
+        // Kept in the cloud with the photo it was made from (lib/archive.ts).
+        const folder = orderFolder(master.buffer);
+        const extension = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+        await Promise.all([
+          archive(folder, `photo.${extension}`, bytes, file.type || 'image/jpeg'),
+          archive(folder, 'sketch.png', master.buffer, 'image/png'),
+        ]);
         return Response.json({
           success: true,
           stage: 'done',
