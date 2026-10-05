@@ -20,12 +20,13 @@
  */
 
 import { archive, orderFolder } from '@/lib/archive';
-import { withCostLog } from '@/lib/cost';
+import { costSoFar, withCostLog } from '@/lib/cost';
 import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
 import { collectInked, ReframeNeeded, startSketch } from '@/lib/sketch-pipeline';
+import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchStarted } from '@/lib/tracking';
 import { validateImageBytes } from '@/lib/validation';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
@@ -131,7 +132,14 @@ export async function POST(request: globalThis.Request): Promise<Response> {
   if (action === 'start') {
     try {
       return await withCostLog(`sketch ${category}`, async () => {
-        const inkJob = await startSketch(input);
+        let inkJob: string;
+        try {
+          inkJob = await startSketch(input);
+        } catch (error) {
+          await trackSketchFailed(undefined, error instanceof Error ? error.message : String(error), costSoFar());
+          throw error;
+        }
+        await trackSketchStarted(inkJob, category, costSoFar());
         return Response.json({ success: true, stage: 'inking', inkJob });
       });
     } catch (error) {
@@ -147,14 +155,23 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         // Deterministic post-processing, not AI: crop the white margin and
         // turn the background transparent (lib/image-processing.ts). A Face
         // Pendant was already clipped to the head in collectInked.
-        const master = await makeTransparentMasterSketch(await collectInked(inkJob, category, { redo: formData.get('attempt') !== '2' }));
+        let inked: Buffer;
+        try {
+          inked = await collectInked(inkJob, category, { redo: formData.get('attempt') !== '2' });
+        } catch (error) {
+          if (error instanceof ReframeNeeded) await trackEvent({ kind: 'sketch_redo', generationId: inkJob, detail: category, costUsd: costSoFar() });
+          else await trackSketchFailed(inkJob, error instanceof Error ? error.message : String(error), costSoFar());
+          throw error;
+        }
+        const master = await makeTransparentMasterSketch(inked);
         // Kept in the cloud with the photo it was made from (lib/archive.ts).
         const folder = orderFolder(master.buffer);
         const extension = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
-        await Promise.all([
+        const [, saved] = await Promise.all([
           archive(folder, `photo.${extension}`, bytes, file.type || 'image/jpeg'),
           archive(folder, 'sketch.png', master.buffer, 'image/png'),
         ]);
+        await trackSketchDone(inkJob, folder, costSoFar(), saved);
         return Response.json({
           success: true,
           stage: 'done',

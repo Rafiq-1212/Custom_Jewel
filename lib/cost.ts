@@ -114,6 +114,11 @@ export function recordCall(name: string, usd: number): void {
   tally.getStore()?.calls.push({ name, usd });
 }
 
+/** What the current request has spent so far, in dollars; zero outside `withCostLog`. */
+export function costSoFar(): number {
+  return tally.getStore()?.calls.reduce((sum, call) => sum + call.usd, 0) ?? 0;
+}
+
 function money(usd: number): string {
   return `$${usd.toFixed(4)} = ₹${(usd * inrPerUsd()).toFixed(2)}`;
 }

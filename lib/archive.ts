@@ -56,7 +56,8 @@ export function isOrderFolder(value: unknown): value is string {
 }
 
 /**
- * Saves one file into an order's folder. Never throws.
+ * Saves one file into an order's folder and returns where it went, or null
+ * if it was not saved. Never throws.
  *
  * Normally under the time it was made, so every product photo is kept. With
  * `latestOnly` the name is fixed and a newer file replaces the older one:
@@ -69,14 +70,16 @@ export async function archive(
   body: string | Uint8Array,
   contentType: string,
   { latestOnly = false } = {},
-): Promise<void> {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+): Promise<string | null> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
   const path = latestOnly ? `${folder}/${name}` : `${folder}/${shopTime(new Date()).time}-${name}`;
   try {
     await put(path, bytesOf(body), { access: 'private', contentType, addRandomSuffix: false, allowOverwrite: true });
     console.info(`[archive] saved ${path}`);
+    return path;
   } catch (error) {
     console.error(`[archive] could not save ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
   }
 }
 

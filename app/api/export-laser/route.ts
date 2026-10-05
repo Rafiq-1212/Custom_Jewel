@@ -19,9 +19,10 @@
  */
 
 import { archive, orderFolder, zip } from '@/lib/archive';
-import { withCostLog } from '@/lib/cost';
+import { costSoFar, withCostLog } from '@/lib/cost';
 import { parseDesignRequest } from '@/lib/design-request';
 import { cleanFaceShading } from '@/lib/face-clean';
+import { trackEvent } from '@/lib/tracking';
 import { buildLaserExportAssets } from '@/lib/laser-export';
 
 export const runtime = 'nodejs';
@@ -58,11 +59,17 @@ export async function POST(request: Request): Promise<Response> {
   const widthMm = typeof widthMmRaw === 'number' && widthMmRaw > 0 && widthMmRaw <= 200 ? widthMmRaw : undefined;
 
   try {
-    const sketch = await withCostLog('production files', () => withoutFaceShading(parsed.value.sketch));
+    let spent = 0;
+    const sketch = await withCostLog('production files', async () => {
+      const cleaned = await withoutFaceShading(parsed.value.sketch);
+      spent = costSoFar();
+      return cleaned;
+    });
     const result = await buildLaserExportAssets({ ...parsed.value, sketch, widthMm });
     // Kept in the cloud with the rest of the order, zipped (lib/archive.ts).
-    await archive(
-      orderFolder(parsed.value.sketch),
+    const folder = orderFolder(parsed.value.sketch);
+    const file = await archive(
+      folder,
       'production-files.zip',
       zip([
         { name: 'pendant.svg', data: Buffer.from(result.svg, 'utf8') },
@@ -73,6 +80,7 @@ export async function POST(request: Request): Promise<Response> {
       'application/zip',
       { latestOnly: true },
     );
+    await trackEvent({ kind: 'production_files', folder, detail: parsed.value.designType, costUsd: spent, file });
     return Response.json({ success: true, ...result });
   } catch (error) {
     console.error('[export-laser]', error instanceof Error ? error.message : error);
