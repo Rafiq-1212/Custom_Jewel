@@ -10,6 +10,7 @@ const NAV = [
   { href: '/generate', label: 'Create a pendant' },
   { href: '/customers', label: 'Customers and tries' },
   { href: '/revenue', label: 'Revenue' },
+  { href: '/account', label: 'Account' },
 ];
 
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
@@ -26,7 +27,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           ))}
         </nav>
         <div className="mt-auto border-t border-slate-100 px-5 py-4">
-          <div className="truncate text-xs text-slate-500">{admin.email}</div>
+          <Link href="/account" className="block truncate text-xs text-slate-500 underline-offset-2 hover:underline">
+            {admin.email}
+          </Link>
           <form action={signOut}>
             <button type="submit" className="mt-1 text-sm text-slate-700 underline-offset-2 hover:underline">
               Sign out

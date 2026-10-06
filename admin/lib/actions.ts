@@ -1,6 +1,5 @@
 'use server';
 
-import { timingSafeEqual } from 'node:crypto';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
@@ -33,35 +32,23 @@ export async function signOut(): Promise<void> {
   redirect('/login');
 }
 
-/** Whether the first account still has to be made. */
-export async function needsSetup(): Promise<boolean> {
-  const rows = await db()`select count(*)::int as n from "user"`;
-  return rows[0].n === 0;
-}
-
-function sameCode(given: string, expected: string): boolean {
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-/** Makes the first admin account. Works once: only while there are no accounts, and only with the setup code. */
-export async function setUp(_previous: FormState, form: FormData): Promise<FormState> {
-  const code = field(form, 'code');
-  const name = field(form, 'name');
-  const email = field(form, 'email');
-  const password = field(form, 'password');
-  const expected = process.env.ADMIN_SETUP_CODE ?? '';
-  if (!(await needsSetup())) return { error: 'Setup is already done. Sign in instead.' };
-  if (!expected || !sameCode(code, expected)) return { error: 'That setup code isn\'t right.' };
-  if (!name || !email.includes('@')) return { error: 'Enter your name and a real email address.' };
-  if (password.length < 10) return { error: 'Use a password of at least 10 characters.' };
+/**
+ * Replaces the signed-in admin's password. Every device is signed out,
+ * this one included, and the sign-in page says to use the new password.
+ */
+export async function changePassword(_previous: FormState, form: FormData): Promise<FormState> {
+  await requireAdmin();
+  const current = field(form, 'current');
+  const next = field(form, 'next');
+  if (!current || !next) return { error: 'Enter your current password and a new one.' };
+  if (next.length < 10) return { error: 'Use a new password of at least 10 characters.' };
   try {
-    await auth().api.signUpEmail({ body: { name, email, password } });
+    await auth().api.changePassword({ body: { currentPassword: current, newPassword: next, revokeOtherSessions: true }, headers: await headers() });
+    await auth().api.signOut({ headers: await headers() }).catch(() => undefined);
   } catch {
-    return { error: 'We couldn\'t create the account. Please try again.' };
+    return { error: 'Your current password isn\'t right.' };
   }
-  redirect('/login');
+  redirect('/login?changed=1');
 }
 
 /** Gives a customer their tries back. */

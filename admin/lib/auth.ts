@@ -3,9 +3,9 @@
  * in the shared database.
  *
  * Nobody can sign themselves up. The public sign-up address is closed
- * (app/api/auth/[...all]/route.ts); the one way an account is made is the
- * setup page (app/setup), which needs the setup code from this project's
- * environment and works only while there are no accounts at all.
+ * (app/api/auth/[...all]/route.ts); the one way an account is made is
+ * scripts/seed-admin.mjs, run by whoever runs the project. The password is
+ * changed from the Account screen.
  */
 
 import { betterAuth } from 'better-auth';
