@@ -8,7 +8,7 @@
  *   orders/2026-10-05/ab12cd34ef/1432-photo.jpg              the customer's photo
  *                                1432-sketch.png             the drawing
  *                                1436-product-gold.png       each product photo
- *                                production-files.zip        SVG, DXF, 3DM, PNG (the latest)
+ *                                production-files.zip        DXF, SVG, PNG (the latest)
  *
  * The folder is named from the sketch itself (a short hash of it), so the
  * three routes that save — sketch, product photo, production files — land in
@@ -84,9 +84,9 @@ export async function archive(
 }
 
 /**
- * A .zip of `files`. The production files are large as they stand — a DXF and
- * a 3DM of one pendant run to 25 MB between them — and compress to a
- * fraction of that; one zip per export also keeps the set together.
+ * A .zip of `files`. The production files are large as they stand — the DXF
+ * of one pendant runs to 10 MB — and compress to a third of that; one zip
+ * per export also keeps the set together.
  */
 export function zip(files: { name: string; data: Uint8Array }[]): Buffer {
   // The time on every entry, in the zip format's own packing (local time, two-second steps).

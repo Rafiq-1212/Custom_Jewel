@@ -19,6 +19,7 @@
  * appears in any response.
  */
 
+import { after } from 'next/server';
 import { archive, orderFolder } from '@/lib/archive';
 import { costSoFar, withCostLog } from '@/lib/cost';
 import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
@@ -164,14 +165,18 @@ export async function POST(request: globalThis.Request): Promise<Response> {
           throw error;
         }
         const master = await makeTransparentMasterSketch(inked);
-        // Kept in the cloud with the photo it was made from (lib/archive.ts).
+        // Kept in the cloud with the photo it was made from (lib/archive.ts),
+        // once the sketch has gone back: the operator never waits on a save.
         const folder = orderFolder(master.buffer);
         const extension = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
-        const [, saved] = await Promise.all([
-          archive(folder, `photo.${extension}`, bytes, file.type || 'image/jpeg'),
-          archive(folder, 'sketch.png', master.buffer, 'image/png'),
-        ]);
-        await trackSketchDone(inkJob, folder, costSoFar(), saved);
+        const spent = costSoFar();
+        after(async () => {
+          const [, saved] = await Promise.all([
+            archive(folder, `photo.${extension}`, bytes, file.type || 'image/jpeg'),
+            archive(folder, 'sketch.png', master.buffer, 'image/png'),
+          ]);
+          await trackSketchDone(inkJob, folder, spent, saved);
+        });
         return Response.json({
           success: true,
           stage: 'done',

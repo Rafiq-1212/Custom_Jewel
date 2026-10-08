@@ -10,7 +10,7 @@ pendant:
    silver or gold.
 3. **A realistic product photo** of the finished pendant for your online
    store.
-4. **Files for production:** 3DM for Rhino, DXF for the laser cutter, and SVG.
+4. **Files for production:** a DXF for the laser software, and an SVG.
 
 ```bash
 npm install
@@ -36,7 +36,7 @@ issue, not a bug.
 | 6. Preview | Compare silver and gold, and check the cut layout (black engraving, red cut line, ring) | Drawn instantly in the browser |
 | 7. Adjust the artwork | Zoom, rotate and move the drawing | Drawn instantly in the browser |
 | 8. Product photo | Click **Make silver photo** or **Make gold photo** | **Second AI call**, once for each metal you click, about 13 seconds |
-| 9. Files for production | Click **Get production files** | 3DM, DXF and SVG. No AI |
+| 9. Files for production | Click **Get production files** | DXF and SVG. No AI |
 | 10. Download a preview | Pick the sketch or a metal preview | PNG with a see-through background. No AI |
 
 **Cost per design:** one AI call for the sketch, plus one for each product
@@ -70,7 +70,7 @@ or octagonal pendant. Heart and round can also have a red or blue enamel rim
 |---|---|---|---|
 | Sketch | PNG, see-through background | Gemini, then cleaned up | Reference artwork |
 | Product photo | PNG or JPEG (whichever Gemini returns; the file name matches) | Gemini, from a flat drawing of the exact design | Your online store |
-| Production files | **3DM**, **DXF**, SVG | Traced to vectors, no AI | Rhino and the laser cutter |
+| Production files | **DXF**, SVG | The cut layout traced to vectors, artwork unaltered, no AI | The laser software |
 | Cut layout | PNG, white background | Drawn in the browser from the same shapes as the files | Checking the cut line and ring before production |
 | Preview image | PNG, see-through background | Drawn in the browser | Sharing quickly |
 
@@ -81,8 +81,8 @@ default. You can resize them in your software.
   including the ring, plus the ring's hole.
 - **ENGRAVE** (black): the drawing, traced to closed curves.
 
-They're flat 2D curves with no depth. Extruding and finishing happen in
-Rhino. The DXF and 3DM contain exactly the same shapes.
+They're flat 2D curves with no depth, and they are the cut layout as it is
+shown on screen: nothing in the drawing is cleaned up or removed on the way.
 
 Always look over each product photo before posting it. Gemini is told not to
 change the engraving or add text or hallmarks, but it's still an AI image.
@@ -150,7 +150,7 @@ Make product photo ────────────────────�
 
 Get production files ───────────────────▶ POST /api/export-laser
                                             lib/laser-export.ts (sharp + potrace)
-◀── SVG + DXF + 3DM ──────────────────────  lib/dxf-writer.ts, lib/rhino-export.ts
+◀── DXF + SVG ────────────────────────────  lib/dxf-writer.ts
 ```
 
 All the shape maths lives in `lib/pendant-geometry.ts`. The previews, the cut
@@ -169,7 +169,7 @@ app/
   page.tsx                          the whole page, steps 1 to 10
   api/generate-image/route.ts       photo → sketch (first AI call)
   api/render-mockup/route.ts        design → product photo (second AI call)
-  api/export-laser/route.ts         design → SVG, DXF and 3DM
+  api/export-laser/route.ts         design → DXF and SVG
   api/edge-cut/remove-background/   unused remove.bg route
 components/
   PhotoCropper.tsx                  the crop box in step 1
@@ -191,8 +191,8 @@ lib/
   pendant-categories.ts             the catalogue
   mockup.ts                         product photo drawing and instructions
   laser-export.ts                   tracing and building the SVG and DXF
-  dxf-writer.ts, rhino-export.ts    DXF and 3DM writers
-  svg-path-flatten.ts               turns curves into lines for DXF and 3DM
+  dxf-writer.ts                     DXF writer
+  svg-path-flatten.ts               turns curves into lines for the DXF
   design-request.ts                 checks requests for the two design routes
   pendant-storage.ts                keeps your work across a page reload
   validation.ts                     photo type and size checks

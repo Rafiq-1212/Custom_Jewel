@@ -32,7 +32,7 @@ function caption(name: string): string {
   if (name.includes('sketch')) return 'Sketch';
   if (name.includes('product-gold')) return 'Product photo, gold';
   if (name.includes('product-silver')) return 'Product photo, silver';
-  if (name.includes('production-files')) return 'Production files (SVG, DXF, 3DM, PNG)';
+  if (name.includes('production-files')) return 'Production files (DXF, SVG, PNG)';
   return name;
 }
 

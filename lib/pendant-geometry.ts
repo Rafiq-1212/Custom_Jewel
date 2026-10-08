@@ -15,7 +15,7 @@
  * applies the *exact* same rotate+scale+translate `fitArtwork` implies to
  * those points — so the traced cut boundary always tracks the artwork in
  * lockstep as the customer zooms, pans or rotates it, on the canvas, in the
- * mockup and in the exported SVG/DXF/3DM, with nothing computed twice.
+ * mockup and in the exported DXF/SVG, with nothing computed twice.
  */
 
 import { frameWindows } from './frame-cut';

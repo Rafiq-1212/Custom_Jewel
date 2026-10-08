@@ -1,6 +1,6 @@
 /**
  * The one description of "the design the customer is looking at" that the
- * browser sends to the server — shared by `/api/export-laser` (SVG/DXF/3DM)
+ * browser sends to the server — shared by `/api/export-laser` (DXF/SVG)
  * and `/api/render-mockup` (AI product photo), so both validate the same
  * fields the same way and neither can drift from the other.
  *

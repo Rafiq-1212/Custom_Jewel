@@ -5,7 +5,7 @@
  * reference files show: the engraving artwork in black, and the cut
  * boundary (with the hanging ring and its hole, for Silhouette Cut) as a
  * thin red line, on white. It is drawn from exactly the geometry the
- * SVG/DXF/3DM export uses (lib/pendant-geometry.ts), so what's on screen is
+ * DXF/SVG export uses (lib/pendant-geometry.ts), so what's on screen is
  * what the laser will cut and engrave. No metal rendering, no AI.
  */
 

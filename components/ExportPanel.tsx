@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * Manufacturing files: SVG, DXF and Rhino 3DM for the cutter and the CAD
- * operator. Built from the bare artwork (traced via potrace) and the cut
- * outline, not from a picture of a metal pendant — which genuinely needs
- * the server (vectorization, .3dm writing). See lib/laser-export.ts. Product
+ * Manufacturing files: a DXF for the laser software, and an SVG. Built
+ * from the bare artwork (traced via potrace) and the cut outline — the cut
+ * layout as vectors, with the artwork exactly as drawn — which needs the
+ * server for the vectorization. See lib/laser-export.ts. Product
  * images live in components/MockupPanel.tsx and components/DownloadPanel.tsx.
  *
  * The server resolves the *same* geometry (lib/pendant-geometry.ts) from the
@@ -24,16 +24,8 @@ import { PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/penda
 interface VectorAssets {
   svg: string;
   dxf: string;
-  threeDmBase64: string;
   widthMm: number;
   heightMm: number;
-}
-
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mimeType });
 }
 
 export function ExportPanel({
@@ -112,7 +104,8 @@ export function ExportPanel({
     <div className="flex flex-col gap-3">
       <p className="text-xs text-slate-500">
         Files for making the pendant, measured in millimetres. The red line is where the metal gets cut and the black
-        is what gets engraved. Use the DXF for the laser cutter, the 3DM for Rhino, and the SVG for anything else.
+        is what gets engraved, exactly as in the cut layout above. Use the DXF for the laser software and the SVG for
+        anything else.
       </p>
       {error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
@@ -130,9 +123,6 @@ export function ExportPanel({
         </button>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => downloadFile(`${baseName}.3dm`, base64ToBlob(assets.threeDmBase64, 'application/octet-stream'))} className={fileButton}>
-            Download 3DM (Rhino)
-          </button>
           <button type="button" onClick={() => downloadFile(`${baseName}.dxf`, assets.dxf, 'application/dxf')} className={fileButton}>
             Download DXF (laser cutter)
           </button>

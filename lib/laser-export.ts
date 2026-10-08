@@ -1,17 +1,17 @@
 /**
- * Manufacturing export assets: SVG, DXF, Rhino 3DM and a transparent PNG.
+ * Manufacturing export assets: DXF, SVG and a transparent PNG.
  *
  * This is Operation 2 territory — deterministic geometry and raster
  * processing on the existing `masterSketch`, never a new AI call. It runs
  * once per "Prepare files" click, on demand, using exactly the shape +
  * transform the customer is currently looking at in the live preview.
  *
- * DXF and 3DM carry the same content — the CUT perimeter and the ENGRAVE
- * artwork as closed polylines in millimetres, Y-up — because that is what
- * the client's two downstream tools consume: the laser controller reads the
- * DXF, and their jewellery CAD (Rhino) takes the .3dm curves to extrude and
- * finish. Neither carries relief/depth: a 2D sketch has no credible depth to
- * invent, and that modelling is the CAD operator's step (lib/rhino-export.ts).
+ * The DXF is the cut layout as vectors: the CUT perimeter and the ENGRAVE
+ * artwork as closed polylines in millimetres, Y-up, which is what the
+ * workshop's laser software reads. The artwork goes in exactly as it is
+ * drawn — nothing is cleaned, thinned or removed on the way. (A Rhino .3dm
+ * of the same curves was made too, and a step that took the fine shading
+ * off faces; the client asked for the plain DXF instead.)
  *
  * PIPELINE
  * ========
@@ -37,7 +37,6 @@
  *        v
  *   flatten every curve to polylines, scale to real-world millimeters,
  *   write LWPOLYLINE / CIRCLE entities                                (deliverable 2: DXF)
- *   the same polylines as Rhino PolylineCurves on CUT/ENGRAVE layers (deliverable 4: 3DM)
  */
 
 import sharp from 'sharp';
@@ -52,7 +51,6 @@ import {
   type SilhouetteContour,
 } from './pendant-geometry';
 import { PENDANT_VIEWBOX, type PendantTransform, type ShapeId } from './pendant-shapes';
-import { buildRhino3dm, type RhinoPolylineSpec } from './rhino-export';
 import { flattenPath, type Point } from './svg-path-flatten';
 
 if (typeof window !== 'undefined') {
@@ -266,8 +264,6 @@ export interface LaserExportInput {
 export interface LaserExportResult {
   svg: string;
   dxf: string;
-  /** Rhino .3dm file (binary), base64-encoded. */
-  threeDmBase64: string;
   /** Transparent PNG of the same transformed, shape-clipped artwork, as a data URL. */
   pngDataUrl: string;
   widthMm: number;
@@ -343,15 +339,5 @@ export async function buildLaserExportAssets(input: LaserExportInput): Promise<L
 
   const dxf = buildDxf(dxfPolylines, dxfCircles);
 
-  // 3DM: the exact same millimetre, Y-up polylines as the DXF, so the two
-  // files can never disagree about the part.
-  const rhinoPolylines: RhinoPolylineSpec[] = dxfPolylines.map((p) => ({
-    points: p.points,
-    layer: p.layer,
-    closed: p.closed,
-  }));
-  const threeDm = await buildRhino3dm(rhinoPolylines);
-  const threeDmBase64 = Buffer.from(threeDm).toString('base64');
-
-  return { svg, dxf, threeDmBase64, pngDataUrl, widthMm, heightMm };
+  return { svg, dxf, pngDataUrl, widthMm, heightMm };
 }

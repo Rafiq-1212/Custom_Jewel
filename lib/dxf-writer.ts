@@ -2,8 +2,7 @@
  * Minimal DXF (AutoCAD Drawing Exchange Format) writer.
  *
  * Laser cutters (LightBurn, RDWorks, LaserGRBL, …) read DXF as one of their
- * few genuinely native vector formats — unlike a Rhino .3dm, which is a 3D
- * CAD interchange format no laser controller consumes directly. This writer
+ * few genuinely native vector formats. This writer
  * targets exactly what a laser job needs and nothing else: `LWPOLYLINE` for
  * every cut/engrave outline and `CIRCLE` for round features, on two layers
  * (CUT for the pendant perimeter and bail, ENGRAVE for the artwork) so the

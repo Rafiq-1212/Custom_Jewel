@@ -15,7 +15,7 @@
  *   Operation 2 — product customisation (everything below `masterSketch`)
  *     design type, shape, metal, enamel rim, zoom/position/rotation are all
  *     plain React state. <PendantPreview> paints them on a canvas, entirely
- *     client-side. /api/export-laser (SVG/DXF/3DM) is vectorization of the
+ *     client-side. /api/export-laser (DXF/SVG) is vectorization of the
  *     existing sketch, never a new generation.
  *
  *   Operation 3 — product mockup (components/MockupPanel.tsx)

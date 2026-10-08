@@ -21,6 +21,7 @@
 
 import sharp from 'sharp';
 import { readImageJob, submitImageJob } from './gemini-batch';
+import { after } from 'next/server';
 import { archive, isOrderFolder, orderFolder } from './archive';
 import { costSoFar } from './cost';
 import { trackEvent } from './tracking';
@@ -329,10 +330,14 @@ export async function collectPendantMockup(name: string, material: string): Prom
   // Counted here: this is the only read of the job, so it is the one that
   // carries the cost of the picture.
   const result = await readImageJob(name, `mockup ${material}`, { count: true });
-  const folder = result.metadata?.order;
-  const file = isOrderFolder(folder)
-    ? await archive(folder, `product-${material}.${result.mimeType === 'image/jpeg' ? 'jpg' : 'png'}`, result.bytes, result.mimeType)
-    : null;
-  await trackEvent({ kind: 'product_photo', folder: isOrderFolder(folder) ? folder : undefined, detail: material, costUsd: costSoFar(), file });
+  // Kept in the cloud once the photo has gone back: the operator never waits on a save.
+  const folder = isOrderFolder(result.metadata?.order) ? result.metadata.order : undefined;
+  const spent = costSoFar();
+  after(async () => {
+    const file = folder
+      ? await archive(folder, `product-${material}.${result.mimeType === 'image/jpeg' ? 'jpg' : 'png'}`, result.bytes, result.mimeType)
+      : null;
+    await trackEvent({ kind: 'product_photo', folder, detail: material, costUsd: spent, file });
+  });
   return { dataUrl: `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString('base64')}` };
 }
