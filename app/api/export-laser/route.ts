@@ -3,9 +3,15 @@
  *
  * Turns the already-generated masterSketch into manufacturing files: a DXF
  * and an SVG, plus a transparent PNG — see the big comment in
- * lib/laser-export.ts for the full pipeline. No AI call happens here, and
- * the artwork is not altered: the files are the cut layout as vectors.
- * Vectorizing (potrace) and rasterizing (sharp) both need Node.
+ * lib/laser-export.ts for the full pipeline. Vectorizing (potrace) and
+ * rasterizing (sharp) both need Node.
+ *
+ * One thing is done to the artwork here, and only here: the fine shading on
+ * the skin of faces is taken out (lib/face-clean.ts), because it engraves
+ * as dark patches wherever a face is in shadow. Eyes, eyebrows, nose,
+ * mouth, beards and outlines are kept, and the sketch on screen and the
+ * product photo are untouched. That step looks at the drawing with a text
+ * model to find the faces; nothing is redrawn.
  *
  * For Silhouette Cut designs, the traced outline (`contour`) is computed
  * once, client-side, by lib/edge-cut-contour.ts and sent here as plain data
@@ -16,7 +22,9 @@
 
 import { after } from 'next/server';
 import { archive, orderFolder, zip } from '@/lib/archive';
+import { costSoFar, withCostLog } from '@/lib/cost';
 import { parseDesignRequest } from '@/lib/design-request';
+import { cleanFaceShading } from '@/lib/face-clean';
 import { trackEvent } from '@/lib/tracking';
 import { buildLaserExportAssets } from '@/lib/laser-export';
 
@@ -26,6 +34,17 @@ export const maxDuration = 60;
 
 function fail(message: string, status: number): Response {
   return Response.json({ success: false, error: message }, { status });
+}
+
+/** The sketch (a data URL) with the face shading removed; the sketch itself if that fails. */
+async function withoutFaceShading(sketch: string): Promise<string> {
+  try {
+    const cleaned = await cleanFaceShading(Buffer.from(sketch.slice(sketch.indexOf(',') + 1), 'base64'));
+    return `data:image/png;base64,${cleaned.toString('base64')}`;
+  } catch (error) {
+    console.error('[export-laser] face shading left as drawn:', error instanceof Error ? error.message : error);
+    return sketch;
+  }
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -43,7 +62,13 @@ export async function POST(request: Request): Promise<Response> {
   const widthMm = typeof widthMmRaw === 'number' && widthMmRaw > 0 && widthMmRaw <= 200 ? widthMmRaw : undefined;
 
   try {
-    const result = await buildLaserExportAssets({ ...parsed.value, widthMm });
+    let spent = 0;
+    const sketch = await withCostLog('production files', async () => {
+      const cleaned = await withoutFaceShading(parsed.value.sketch);
+      spent = costSoFar();
+      return cleaned;
+    });
+    const result = await buildLaserExportAssets({ ...parsed.value, sketch, widthMm });
     // Kept in the cloud with the rest of the order, zipped (lib/archive.ts),
     // once the files have gone back. The download used to wait on this, and
     // a slow upload held ten megabytes of finished files for minutes.
@@ -60,7 +85,7 @@ export async function POST(request: Request): Promise<Response> {
         'application/zip',
         { latestOnly: true },
       );
-      await trackEvent({ kind: 'production_files', folder, detail: parsed.value.designType, costUsd: 0, file });
+      await trackEvent({ kind: 'production_files', folder, detail: parsed.value.designType, costUsd: spent, file });
     });
     return Response.json({ success: true, ...result });
   } catch (error) {

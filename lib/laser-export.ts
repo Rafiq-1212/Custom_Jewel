@@ -8,10 +8,11 @@
  *
  * The DXF is the cut layout as vectors: the CUT perimeter and the ENGRAVE
  * artwork as closed polylines in millimetres, Y-up, which is what the
- * workshop's laser software reads. The artwork goes in exactly as it is
- * drawn — nothing is cleaned, thinned or removed on the way. (A Rhino .3dm
- * of the same curves was made too, and a step that took the fine shading
- * off faces; the client asked for the plain DXF instead.)
+ * workshop's laser software reads. The artwork goes in as it is handed to
+ * this module; the one alteration made for production, taking the fine
+ * shading off faces, happens before it gets here (lib/face-clean.ts, called
+ * from the route). (A Rhino .3dm of the same curves was made too; the client
+ * asked for the DXF alone.)
  *
  * PIPELINE
  * ========

@@ -21,7 +21,7 @@ const MIN_WINDOW_HALF_WIDTH = 1.1;
 const MIN_WINDOW_AREA = 14;
 
 /** Even-odd scanline fill of a closed polygon, in raster cells. */
-function fillPolygon(mask: Uint8Array, width: number, height: number, points: Point[]): void {
+export function fillPolygon(mask: Uint8Array, width: number, height: number, points: Point[]): void {
   for (let y = 0; y < height; y++) {
     const yc = y + 0.5;
     const crossings: number[] = [];
