@@ -132,7 +132,7 @@ async function touchedUpPhoto(
 }
 
 /** What is asked about forehead marks and moles, in the first look at the photo and again in each close-up. */
-const MARKS_QUESTION = `- "marks": every mark on that person's forehead or in the parting of their hair — a bindi or pottu, kumkum, sandal paste, a tilak, sindoor — starting with HOW MANY separate marks there are, then each one on its own by colour, shape, size and place, top to bottom (for example "two marks: a short horizontal orange streak of kumkum high on the forehead, and a small round dark dot between the eyebrows"), or exactly "none" if there is none. Many people wear two, one above the other; count them before you answer. Look closely at every forehead; do not assume a mark from clothes, jewellery or where someone seems to be from.`;
+const MARKS_QUESTION = `- "marks": every mark on that person's forehead or in the parting of their hair — a bindi or pottu, kumkum, sandal paste, a tilak, sindoor — starting with HOW MANY separate marks there are, then each one on its own, top to bottom, by colour (and whether it is LIGHTER or DARKER than the skin round it), shape, place, and SIZE MEASURED AGAINST THAT PERSON'S OWN EYE — the iris is the coloured circle of the eye (for example "two marks: a short horizontal orange streak of kumkum high on the forehead, darker than the skin, about as wide as one eye; and a round dark dot between the eyebrows, half as wide as an iris"), or exactly "none" if there is none. Measure, do not guess: most dots are smaller than an iris, and a mark is never reported bigger than it is. Many people wear two, one above the other; count them before you answer. Look closely at every forehead; do not assume a mark from clothes, jewellery or where someone seems to be from.`;
 const MOLES_QUESTION = `- "moles": every mole, beauty spot or birthmark on that person's cheeks, chin, jaw, nose or around the mouth, however small — including one among stubble or a beard — each by place and size (for example "a small dark mole on the left cheek, just beside the moustache"), or exactly "none" if the skin has none. Look over the whole face closely before answering; freckles, pores and shadows are not moles.`;
 
 const FACES_PROMPT = `Everything below is on a 0-1000 scale (y down, x right).
@@ -310,7 +310,13 @@ function personFacts(people: PersonFacts[]): string {
   return [
     'EACH PERSON, CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND. Draw exactly this for each person and nothing else — not what you think suits them, and not what the person next to them has:',
     ...people.map((p, i) => {
-      const marks = /^none\.?$/i.test(p.marks) ? 'NO mark of any kind on the forehead or in the hair parting — leave the forehead completely clean' : `forehead marks: ${p.marks}`;
+      // Each mark comes measured against the person's own iris, and is to be
+      // inked at that size: told only "a small pale dot and a small dark
+      // dot", the inker drew a ring as wide as an eye and a spot as big as
+      // an iris, on a girl whose two dots are each a fraction of that.
+      const marks = /^none\.?$/i.test(p.marks)
+        ? 'NO mark of any kind on the forehead or in the hair parting — leave the forehead completely clean'
+        : `forehead marks: ${p.marks} — ink exactly that many and no other, each at the size stated and NO BIGGER: hold it against the iris of this person's eye as you draw it, and a mark stated as smaller than an iris must fit INSIDE that iris with room to spare. A mark lighter than the skin is a fine open outline of that size with nothing inside it; a darker one is a solid shape of that size. Never a wide ring, an oval, a bold spot or a blob`;
       // Asked for because a woman was drawn with a mole on a clear cheek,
       // on every run: a faint spot in the pencils, inked as a mole. Stated
       // flatly: worded softer ("only where image 2 plainly shows one") the

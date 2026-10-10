@@ -15,7 +15,7 @@
  *
  *   - shading is removed only where BOTH answers put skin;
  *   - nothing is touched where EITHER answer put the mouth, spectacles, a
- *     mark or facial hair (or, on a small face, an eye or an eyebrow).
+ *     mark or facial hair (or, on smaller faces, an eye or an eyebrow).
  *
  * What goes is then decided on pixels, and it is only ever HATCHING: several
  * fine strokes side by side. A line on its own — a jaw, the side of a nose,
@@ -94,8 +94,10 @@ export interface FaceMap {
   agreed?: Point[];
   /** Mouth, spectacles and marks: left exactly as drawn. */
   solid: Box[];
-  /** Eyes and eyebrows: left exactly as drawn on a small face; on a large one only the shading round them goes. */
+  /** The eyes: left exactly as drawn except on a large face, where only the shading round them goes. */
   eyes: Box[];
+  /** The eyebrows: left exactly as drawn on a tiny face; otherwise kept as solid masses with their hairs. */
+  brows: Box[];
   /** The nose: only plain shading is removed inside it, never one of its own lines. */
   nose: Box[];
   /** Beards and moustaches: left exactly as drawn. */
@@ -146,7 +148,8 @@ export async function findFaceMaps(drawing: Buffer): Promise<FaceMap[]> {
     maps.push({
       skin,
       solid: [...boxes(face.glasses, face.marks), ...(mouth ? [mouth] : [])],
-      eyes: [...eyes, ...boxes(face.brows)],
+      eyes,
+      brows: boxes(face.brows),
       nose: nose ? [nose] : [],
       hair: outlines,
       beardFrom,
@@ -175,7 +178,7 @@ const THIN_RADIUS_PX = 2;
  * shading. Grown out everywhere, it took a man's temple and a baby's curls.
  */
 const SKIN_GROW_BELOW = 0.12;
-const SKIN_GROW_ABOVE = 0.02;
+const SKIN_GROW_ABOVE = 0.05;
 /**
  * Wherever heavy strokes sit close together — a head of hair, a beard — is
  * not skin, whatever the outlines say, as fractions of the face's width:
@@ -199,8 +202,20 @@ const WHOLE_SHARE = 0.7;
  */
 const MESH_STROKES = 3;
 const MESH_HATCHED = 0.7;
-/** A face narrower than this many pixels is small: its eyes and eyebrows are protected outright. */
-const SMALL_FACE = 400;
+/**
+ * Faces come in three sizes, in pixels of width. Under TINY_FACE (a baby, or
+ * four people on one pendant) the eyes and eyebrows are protected outright
+ * and only straight hatching goes. Under SMALL_FACE the eyes alone are
+ * protected: with the eyebrows' boxes protected as well, the shading down a
+ * temple, which runs through those boxes, was all kept. From SMALL_FACE up
+ * (each face of a couple) nothing but the mouth, spectacles and marks is
+ * protected outright, and round an eye the shading goes and its lines stay.
+ * SMALL_FACE sits between what was measured: at 298 px a woman's eyes came
+ * out clean and whole, at 271 px a baby's eyebrows, drawn as a few fine
+ * hairs, were thinned away.
+ */
+const TINY_FACE = 230;
+const SMALL_FACE = 285;
 /**
  * Hatching is told from a line on its own by counting strokes: a pixel is in
  * hatching when a straight probe either side of it, in some direction,
@@ -238,7 +253,15 @@ const SHORT = 0.06;
 /** On a large face the same, but shorter still: the hatching round the eyes is itself short. */
 const SHORT_BIG = 0.035;
 /** The longest a curved stroke may be and still count as shading, as a fraction of the face's width. */
-const CURVED_MAX = 0.22;
+const CURVED_MAX = 0.28;
+/**
+ * On the nose a curved stroke is shading only when this much of it is in the
+ * thick of hatching, and it keeps clear of the bottom NOSE_BASE of the nose:
+ * the nose's own lines are fine and curved too, and the nostrils and the
+ * line under them are drawn with hatching hung all along them.
+ */
+const NOSE_HATCHED = 0.85;
+const NOSE_BASE = 0.4;
 const SHORT_PX = 14;
 /** Inside the box of the nose or an eye a stroke this short (fraction of the face's width) always stays: the edge of a nostril, a lash. */
 const NOSE_SHORT = 0.05;
@@ -286,6 +309,7 @@ export function agreeFaces(first: FaceMap[], second: FaceMap[]): FaceMap[] {
       agreed: other.skin,
       solid: [...face.solid, ...other.solid],
       eyes: [...face.eyes, ...other.eyes],
+      brows: [...face.brows, ...other.brows],
       nose: [...face.nose, ...other.nose],
       hair: [...face.hair, ...other.hair],
       beardFrom: beards.length ? Math.min(...beards) : null,
@@ -309,9 +333,10 @@ export async function removeFaceShading(sketch: Buffer, faces: FaceMap[]): Promi
   for (const face of faces) {
     const faceWidth = widthOf(face);
     const own = new Uint8Array(width * height);
-    // On a small face the eyes are a few fine lines close together, which is
-    // what hatching looks like, so there they are not judged at all.
-    for (const box of faceWidth < SMALL_FACE ? [...face.solid, ...face.eyes] : face.solid) {
+    // The smaller the face, the less of it is judged at all: its eyes are a
+    // few fine lines close together, which is what hatching looks like.
+    const guarded = faceWidth < TINY_FACE ? [...face.solid, ...face.eyes, ...face.brows] : faceWidth < SMALL_FACE ? [...face.solid, ...face.eyes] : face.solid;
+    for (const box of guarded) {
       const left = Math.max(0, Math.floor(box.left * width));
       const right = Math.min(width - 1, Math.ceil(box.right * width));
       for (let y = Math.max(0, Math.floor(box.top * height)); y <= Math.min(height - 1, Math.ceil(box.bottom * height)); y++) {
@@ -331,7 +356,7 @@ export async function removeFaceShading(sketch: Buffer, faces: FaceMap[]): Promi
 
   let removed = 0;
   for (const face of faces) removed += cleanOneFace(data, width, height, channels, face, protect);
-  console.info(`[export] face shading removed from ${faces.length} faces (${removed} px of ink)`);
+  console.info(`[export] face shading removed from ${faces.length} faces, ${faces.map((face) => Math.round(widthOf(face))).join(', ')} px wide (${removed} px of ink)`);
   return sharp(data, { raw: { width, height, channels } }).png().toBuffer();
 }
 
@@ -441,11 +466,13 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
     }
     return mask;
   };
-  // The nose alone: its own lines are fine and curved, and are never taken
-  // for the curved shading that is removed round an eye.
+  // The nose alone: its own lines are fine and curved, and are not taken
+  // for the curved shading that is removed round an eye unless they lie in
+  // hatching from end to end, up beside the bridge.
   const noseOnly = boxMask(face.nose);
+  const noseBase = boxMask(face.nose.map((box) => ({ ...box, top: box.bottom - (box.bottom - box.top) * NOSE_BASE })));
   const nose = new Uint8Array(w * h);
-  for (const box of [...face.nose, ...face.eyes]) {
+  for (const box of [...face.nose, ...face.eyes, ...face.brows]) {
     const left = Math.max(0, Math.floor(box.left * width - x0));
     const right = Math.min(w - 1, Math.ceil(box.right * width - x0));
     for (let y = Math.max(0, Math.floor(box.top * height - y0)); y <= Math.min(h - 1, Math.ceil(box.bottom * height - y0)); y++) {
@@ -490,7 +517,7 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
   for (let start = 0; start < thin.length; start++) {
     if (!thin[start] || seen[start]) continue;
     const piece = groupFrom(thin, seen, start, w);
-    let left = w, right = 0, top = h, bottom = 0, onNose = 0, onNoseOnly = 0, hatched = 0, beside = 0, guarded = 0, fringed = 0;
+    let left = w, right = 0, top = h, bottom = 0, onNose = 0, onNoseOnly = 0, onNoseBase = 0, hatched = 0, beside = 0, guarded = 0, fringed = 0;
     let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
     for (const p of piece) {
       const x = p % w;
@@ -506,6 +533,7 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
       if (y > bottom) bottom = y;
       if (nose[p]) onNose++;
       if (noseOnly[p]) onNoseOnly++;
+      if (noseBase[p]) onNoseBase++;
       if (kept0[p]) guarded++;
       if (fringe[p]) fringed++;
       if (hatching[p]) hatched++;
@@ -517,7 +545,7 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
     // their box, and goes whole rather than leave a stub there.
     if (guarded * 2 >= piece.length || fringed * 2 >= piece.length) continue;
     const length = Math.hypot(right - left + 1, bottom - top + 1);
-    const big = faceWidth >= SMALL_FACE;
+    const big = faceWidth >= TINY_FACE;
     if (length < Math.max(SHORT_PX, faceWidth * (big ? SHORT_BIG : SHORT))) continue;
     // How far the stroke strays from a straight line: the spread of its
     // pixels across its own long axis against the spread along it.
@@ -542,7 +570,7 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
       // as close as any hatching: the darkest part of the client's files.
       // Short, so that a jaw or a hairline, which also has hatching all
       // along it, is not taken for one.
-      const curvedShading = length <= faceWidth * CURVED_MAX && onNoseOnly * 2 < piece.length;
+      const curvedShading = length <= faceWidth * CURVED_MAX && (onNoseOnly * 2 < piece.length || (hatched >= piece.length * NOSE_HATCHED && onNoseBase * 2 < piece.length));
       if (!(big && deep && (mesh || curvedShading))) continue;
     }
     if (onNose * 2 >= piece.length) {
