@@ -110,6 +110,8 @@ export interface FaceMap {
    * found, and then it is not grown anywhere.
    */
   cheekLine: number | null;
+  /** Set when the face was only half read: nothing is done to it, and `solid` is one box round all of it. */
+  partial?: boolean;
 }
 
 function toBox(value: unknown): Box | null {
@@ -124,12 +126,21 @@ function toOutline(value: unknown): Point[] {
     .map(([y, x]) => ({ x: x / 1000, y: y / 1000 }));
 }
 
-/** The faces in `drawing` (an opaque PNG), or none if they could not be read. */
-export async function findFaceMaps(drawing: Buffer): Promise<FaceMap[]> {
+/**
+ * The faces in `drawing` (an opaque PNG), or none if they could not be read.
+ *
+ * An answer now and then comes back with a face's outline and nothing else,
+ * and a face cleaned on that — no mouth to keep off, no nose to place a
+ * beard by — lost its upper lip. Such a face is marked `partial`: it is
+ * never cleaned, and all of it is kept off by the steps that follow.
+ * `partial` counts them.
+ */
+async function readFaces(drawing: Buffer): Promise<{ faces: FaceMap[]; partial: number }> {
   const answer = (await generateJsonFromImage({ prompt: FACES_PROMPT, image: { bytes: drawing, mimeType: 'image/png' }, schema: FACES_SCHEMA })) as {
     faces?: Record<string, unknown>[];
   } | null;
   const maps: FaceMap[] = [];
+  let partial = 0;
   for (const face of Array.isArray(answer?.faces) ? answer.faces : []) {
     const skin = toOutline(face.skin);
     if (skin.length < 6) continue;
@@ -140,23 +151,55 @@ export async function findFaceMaps(drawing: Buffer): Promise<FaceMap[]> {
         .filter((b): b is Box => b !== null);
     const eyes = boxes(face.eyes);
     const nose = toBox(face.nose);
-    const mouth = toBox(face.mouth);
+    // The mouth is the box the model most often fails to give (it answers
+    // -1 for its top and bottom, on one ask in three). It is then taken to
+    // be the space under the nose, generously: this box only ever keeps
+    // things from being removed.
+    const mouth =
+      toBox(face.mouth) ??
+      (nose
+        ? { left: nose.left - (nose.right - nose.left) * 0.6, right: nose.right + (nose.right - nose.left) * 0.6, top: nose.bottom, bottom: nose.bottom + (nose.bottom - nose.top) * 0.9 }
+        : null);
     const outlines = (Array.isArray(face.hair_on_face) ? face.hair_on_face : []).map(toOutline).filter((o) => o.length >= 3);
     // A beard is everything from the bottom of the nose down. (From the
     // middle of the nose, it kept the shading on a bearded man's cheeks.)
-    const beardFrom = face.facial_hair !== 'beard' ? null : nose ? nose.bottom - (nose.bottom - nose.top) * 0.12 : mouth ? mouth.top - (mouth.bottom - mouth.top) : null;
+    if (!eyes.length || !nose || !mouth || !['none', 'moustache', 'beard'].includes(face.facial_hair as string)) {
+      // Kept as a place to keep off: one box round the whole face, and a bit over.
+      const xs = skin.map((p) => p.x);
+      const ys = skin.map((p) => p.y);
+      const pad = (Math.max(...xs) - Math.min(...xs)) * 0.15;
+      const whole = { left: Math.min(...xs) - pad, top: Math.min(...ys) - pad, right: Math.max(...xs) + pad, bottom: Math.max(...ys) + pad };
+      maps.push({ skin, solid: [whole], eyes: [], brows: [], nose: [], hair: [], beardFrom: null, cheekLine: null, partial: true });
+      console.info(`[export] half-read face: eyes ${JSON.stringify(face.eyes)} nose ${JSON.stringify(face.nose)} mouth ${JSON.stringify(face.mouth)} facial_hair ${JSON.stringify(face.facial_hair)}`);
+      partial++;
+      continue;
+    }
+    const beardFrom = face.facial_hair !== 'beard' ? null : nose.bottom - (nose.bottom - nose.top) * 0.12;
     maps.push({
       skin,
-      solid: [...boxes(face.glasses, face.marks), ...(mouth ? [mouth] : [])],
+      solid: [...boxes(face.glasses, face.marks), mouth],
       eyes,
       brows: boxes(face.brows),
-      nose: nose ? [nose] : [],
+      nose: [nose],
       hair: outlines,
       beardFrom,
-      cheekLine: eyes.length && nose ? (Math.max(...eyes.map((e) => e.bottom)) + nose.bottom) / 2 : null,
+      cheekLine: (Math.max(...eyes.map((e) => e.bottom)) + nose.bottom) / 2,
     });
   }
-  return maps;
+  return { faces: maps, partial };
+}
+
+const ASKS = 3;
+
+/** The faces in `drawing`; asked again, up to ASKS times in all, while any comes back half read. */
+export async function findFaceMaps(drawing: Buffer): Promise<FaceMap[]> {
+  let best = await readFaces(drawing);
+  for (let ask = 1; ask < ASKS && best.partial; ask++) {
+    console.info(`[export] ${best.partial} faces came back half read; asking again`);
+    const next = await readFaces(drawing);
+    if (next.partial < best.partial) best = next;
+  }
+  return best.faces;
 }
 
 /** Alpha at or above this is ink. */
@@ -284,7 +327,8 @@ export async function cleanFaceShading(sketch: Buffer): Promise<{ sketch: Buffer
     console.info('[export] the faces could not be read twice; shading left as drawn');
     return { sketch, faces: null };
   }
-  return { sketch: await removeFaceShading(sketch, agreeFaces(first, second)), faces: [...first, ...second] };
+  const whole = (faces: FaceMap[]) => faces.filter((face) => !face.partial);
+  return { sketch: await removeFaceShading(sketch, agreeFaces(whole(first), whole(second))), faces: [...first, ...second] };
 }
 
 /** Pairs up the faces of two answers about the same drawing. A face only one of them saw is left out: it is not cleaned. */

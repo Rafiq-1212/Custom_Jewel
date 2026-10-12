@@ -6,10 +6,12 @@
  * lib/laser-export.ts for the full pipeline. Vectorizing (potrace) and
  * rasterizing (sharp) both need Node.
  *
- * Two things are done to the artwork here, and only here. The fine shading
+ * Three things are done to the artwork here, and only here. The fine shading
  * on the skin of faces is taken out (lib/face-clean.ts), because it engraves
  * as dark patches wherever a face is in shadow; eyes, eyebrows, nose, mouth,
- * beards and outlines are kept. And the hatching everywhere else is thinned
+ * beards and outlines are kept. The shading packed round the eyes, which
+ * that step cannot tell from the eye, is taken out by a rule of its own
+ * (lib/eye-clean.ts). And the hatching everywhere else is thinned
  * (lib/hatch-thin.ts), because at the size of a pendant close strokes run
  * together into solid black. The sketch on screen and the product photo are
  * untouched. The first step looks at the drawing with a text model to find
@@ -26,6 +28,7 @@ import { after } from 'next/server';
 import { archive, orderFolder, zip } from '@/lib/archive';
 import { costSoFar, withCostLog } from '@/lib/cost';
 import { parseDesignRequest } from '@/lib/design-request';
+import { clearRoundEyes } from '@/lib/eye-clean';
 import { cleanFaceShading } from '@/lib/face-clean';
 import { thinHatching } from '@/lib/hatch-thin';
 import { trackEvent } from '@/lib/tracking';
@@ -43,8 +46,8 @@ function fail(message: string, status: number): Response {
 async function withoutFaceShading(sketch: string): Promise<string> {
   try {
     const { sketch: cleaned, faces } = await cleanFaceShading(Buffer.from(sketch.slice(sketch.indexOf(',') + 1), 'base64'));
-    // Thinned only when the faces are known: their features are kept off.
-    const thinned = faces ? await thinHatching(cleaned, faces) : cleaned;
+    // The rest only when the faces are known: their features are kept off.
+    const thinned = faces ? await thinHatching(await clearRoundEyes(cleaned, faces), faces) : cleaned;
     return `data:image/png;base64,${thinned.toString('base64')}`;
   } catch (error) {
     console.error('[export-laser] shading left as drawn:', error instanceof Error ? error.message : error);
