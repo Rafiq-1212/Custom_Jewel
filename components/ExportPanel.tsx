@@ -3,7 +3,8 @@
 /**
  * Manufacturing files: a DXF for the laser software, and an SVG. Built
  * from the bare artwork (traced via potrace) and the cut outline — the cut
- * layout as vectors, less the fine shading on faces — which needs the
+ * layout as vectors, less the fine shading on faces and with the hatching
+ * elsewhere thinned — which needs the
  * server. See lib/laser-export.ts. Product
  * images live in components/MockupPanel.tsx and components/DownloadPanel.tsx.
  *
@@ -104,8 +105,8 @@ export function ExportPanel({
     <div className="flex flex-col gap-3">
       <p className="text-xs text-slate-500">
         Files for making the pendant, measured in millimetres. The red line is where the metal gets cut and the black
-        is what gets engraved. The fine shading on faces is left out of these files so it doesn&apos;t engrave as dark
-        patches. Use the DXF for the laser software and the SVG for anything else.
+        is what gets engraved. The fine shading on faces is left out of these files, and the shading on clothes is
+        opened up, so neither engraves as a dark patch. Use the DXF for the laser software and the SVG for anything else.
       </p>
       {error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">

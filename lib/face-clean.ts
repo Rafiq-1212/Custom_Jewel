@@ -270,20 +270,21 @@ const SPECK_AREA = 60;
 
 /**
  * `sketch` (the transparent master artwork) with the hatching taken off the
- * skin of every face. Returns the sketch untouched if no face is found or
- * the lookup fails: a production file with shading in it is better than no
- * production file.
+ * skin of every face, and every face either answer found (for
+ * lib/hatch-thin.ts, which keeps off their features). Returns the sketch
+ * untouched and no faces if the lookup fails: a production file with shading
+ * in it is better than no production file.
  */
-export async function cleanFaceShading(sketch: Buffer): Promise<Buffer> {
+export async function cleanFaceShading(sketch: Buffer): Promise<{ sketch: Buffer; faces: FaceMap[] | null }> {
   const flat = await sharp(sketch).flatten({ background: '#ffffff' }).png().toBuffer();
   const asks = await Promise.allSettled([findFaceMaps(flat), findFaceMaps(flat)]);
   const [first, second] = asks.map((ask) => (ask.status === 'fulfilled' ? ask.value : null));
   // Both answers or nothing: one answer alone has no check on it.
   if (!first || !second) {
     console.info('[export] the faces could not be read twice; shading left as drawn');
-    return sketch;
+    return { sketch, faces: null };
   }
-  return removeFaceShading(sketch, agreeFaces(first, second));
+  return { sketch: await removeFaceShading(sketch, agreeFaces(first, second)), faces: [...first, ...second] };
 }
 
 /** Pairs up the faces of two answers about the same drawing. A face only one of them saw is left out: it is not cleaned. */

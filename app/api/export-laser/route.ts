@@ -6,12 +6,14 @@
  * lib/laser-export.ts for the full pipeline. Vectorizing (potrace) and
  * rasterizing (sharp) both need Node.
  *
- * One thing is done to the artwork here, and only here: the fine shading on
- * the skin of faces is taken out (lib/face-clean.ts), because it engraves
- * as dark patches wherever a face is in shadow. Eyes, eyebrows, nose,
- * mouth, beards and outlines are kept, and the sketch on screen and the
- * product photo are untouched. That step looks at the drawing with a text
- * model to find the faces; nothing is redrawn.
+ * Two things are done to the artwork here, and only here. The fine shading
+ * on the skin of faces is taken out (lib/face-clean.ts), because it engraves
+ * as dark patches wherever a face is in shadow; eyes, eyebrows, nose, mouth,
+ * beards and outlines are kept. And the hatching everywhere else is thinned
+ * (lib/hatch-thin.ts), because at the size of a pendant close strokes run
+ * together into solid black. The sketch on screen and the product photo are
+ * untouched. The first step looks at the drawing with a text model to find
+ * the faces; nothing is redrawn.
  *
  * For Silhouette Cut designs, the traced outline (`contour`) is computed
  * once, client-side, by lib/edge-cut-contour.ts and sent here as plain data
@@ -25,6 +27,7 @@ import { archive, orderFolder, zip } from '@/lib/archive';
 import { costSoFar, withCostLog } from '@/lib/cost';
 import { parseDesignRequest } from '@/lib/design-request';
 import { cleanFaceShading } from '@/lib/face-clean';
+import { thinHatching } from '@/lib/hatch-thin';
 import { trackEvent } from '@/lib/tracking';
 import { buildLaserExportAssets } from '@/lib/laser-export';
 
@@ -36,13 +39,15 @@ function fail(message: string, status: number): Response {
   return Response.json({ success: false, error: message }, { status });
 }
 
-/** The sketch (a data URL) with the face shading removed; the sketch itself if that fails. */
+/** The sketch (a data URL) with the face shading removed and the rest of its hatching thinned; the sketch itself if that fails. */
 async function withoutFaceShading(sketch: string): Promise<string> {
   try {
-    const cleaned = await cleanFaceShading(Buffer.from(sketch.slice(sketch.indexOf(',') + 1), 'base64'));
-    return `data:image/png;base64,${cleaned.toString('base64')}`;
+    const { sketch: cleaned, faces } = await cleanFaceShading(Buffer.from(sketch.slice(sketch.indexOf(',') + 1), 'base64'));
+    // Thinned only when the faces are known: their features are kept off.
+    const thinned = faces ? await thinHatching(cleaned, faces) : cleaned;
+    return `data:image/png;base64,${thinned.toString('base64')}`;
   } catch (error) {
-    console.error('[export-laser] face shading left as drawn:', error instanceof Error ? error.message : error);
+    console.error('[export-laser] shading left as drawn:', error instanceof Error ? error.message : error);
     return sketch;
   }
 }
