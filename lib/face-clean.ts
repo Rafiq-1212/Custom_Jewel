@@ -305,6 +305,10 @@ const CURVED_MAX = 0.28;
  */
 const NOSE_HATCHED = 0.85;
 const NOSE_BASE = 0.4;
+/** The middle column reaches this fraction of the distance between the eyes beyond the centre of each. */
+const MIDDLE_WIDEN = 0.1;
+/** It starts this fraction of that distance below the eyes: the creases under an eye are above it, the nose below. */
+const MIDDLE_BELOW = 0.25;
 const SHORT_PX = 14;
 /** Inside the box of the nose or an eye a stroke this short (fraction of the face's width) always stays: the edge of a nostril, a lash. */
 const NOSE_SHORT = 0.05;
@@ -516,8 +520,21 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
   // hatching from end to end, up beside the bridge.
   const noseOnly = boxMask(face.nose);
   const noseBase = boxMask(face.nose.map((box) => ({ ...box, top: box.bottom - (box.bottom - box.top) * NOSE_BASE })));
+  // The middle of the face from a little under the eyes down, placed from the eyes alone.
+  // The model's box for the nose moves from one answer to the next, and when
+  // it came back short a nostril, drawn as a curve with hatching hung along
+  // it, was taken for curved shading and went: one download in six. The
+  // eyes it places within a few pixels every time. In this column nothing
+  // that bends is ever removed.
+  const centres = face.eyes.map((eye) => (eye.left + eye.right) / 2);
+  const span = centres.length ? Math.max(...centres) - Math.min(...centres) : 0;
+  const middle: Box[] =
+    span > 0
+      ? [{ left: Math.min(...centres) - span * MIDDLE_WIDEN, right: Math.max(...centres) + span * MIDDLE_WIDEN, top: Math.min(...face.eyes.map((eye) => eye.bottom)) + ((span * width) / height) * MIDDLE_BELOW, bottom: 1 }]
+      : [];
+  const inMiddle = boxMask(middle);
   const nose = new Uint8Array(w * h);
-  for (const box of [...face.nose, ...face.eyes, ...face.brows]) {
+  for (const box of [...face.nose, ...face.eyes, ...face.brows, ...middle]) {
     const left = Math.max(0, Math.floor(box.left * width - x0));
     const right = Math.min(w - 1, Math.ceil(box.right * width - x0));
     for (let y = Math.max(0, Math.floor(box.top * height - y0)); y <= Math.min(h - 1, Math.ceil(box.bottom * height - y0)); y++) {
@@ -562,7 +579,7 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
   for (let start = 0; start < thin.length; start++) {
     if (!thin[start] || seen[start]) continue;
     const piece = groupFrom(thin, seen, start, w);
-    let left = w, right = 0, top = h, bottom = 0, onNose = 0, onNoseOnly = 0, onNoseBase = 0, hatched = 0, beside = 0, guarded = 0, fringed = 0;
+    let left = w, right = 0, top = h, bottom = 0, onNose = 0, onNoseOnly = 0, onNoseBase = 0, onMiddle = 0, hatched = 0, beside = 0, guarded = 0, fringed = 0;
     let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
     for (const p of piece) {
       const x = p % w;
@@ -578,6 +595,7 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
       if (y > bottom) bottom = y;
       if (nose[p]) onNose++;
       if (noseOnly[p]) onNoseOnly++;
+      if (inMiddle[p]) onMiddle++;
       if (noseBase[p]) onNoseBase++;
       if (kept0[p]) guarded++;
       if (fringe[p]) fringed++;
@@ -615,6 +633,7 @@ function cleanOneFace(data: Buffer, width: number, height: number, channels: num
       // as close as any hatching: the darkest part of the client's files.
       // Short, so that a jaw or a hairline, which also has hatching all
       // along it, is not taken for one.
+      if (onMiddle * 3 >= piece.length) continue;
       const curvedShading = length <= faceWidth * CURVED_MAX && (onNoseOnly * 2 < piece.length || (hatched >= piece.length * NOSE_HATCHED && onNoseBase * 2 < piece.length));
       if (!(big && deep && (mesh || curvedShading))) continue;
     }
