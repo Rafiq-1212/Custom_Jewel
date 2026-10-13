@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Manufacturing files: a DXF for the laser software, and an SVG. Built
+ * Manufacturing files: a DXF for the laser software, an SVG, and the
+ * engraving artwork alone as a PNG. Built
  * from the bare artwork (traced via potrace) and the cut outline — the cut
  * layout as vectors, less the fine shading on faces and with the hatching
  * elsewhere thinned — which needs the
@@ -16,7 +17,7 @@
  */
 
 import * as React from 'react';
-import { downloadFile } from '@/lib/download';
+import { dataUrlToBlob, downloadFile } from '@/lib/download';
 import type { MaterialId, RimColorId } from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import type { DesignType, SilhouetteContour } from '@/lib/pendant-geometry';
@@ -25,6 +26,8 @@ import { PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/penda
 interface VectorAssets {
   svg: string;
   dxf: string;
+  /** The engraving artwork alone, transparent, as a `data:` URL. */
+  pngDataUrl: string;
   widthMm: number;
   heightMm: number;
 }
@@ -106,7 +109,7 @@ export function ExportPanel({
       <p className="text-xs text-slate-500">
         Files for making the pendant, measured in millimetres. The red line is where the metal gets cut and the black
         is what gets engraved. The fine shading on faces is left out of these files, and the shading on clothes is
-        opened up, so neither engraves as a dark patch. Use the DXF for the laser software and the SVG for anything else.
+        opened up, so neither engraves as a dark patch. Use the DXF for the laser software and the SVG for anything else; the PNG is the engraving on its own, as a picture.
       </p>
       {error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
@@ -129,6 +132,9 @@ export function ExportPanel({
           </button>
           <button type="button" onClick={() => downloadFile(`${baseName}.svg`, assets.svg, 'image/svg+xml')} className={fileButton}>
             Download SVG
+          </button>
+          <button type="button" onClick={async () => downloadFile(`${baseName}.png`, await dataUrlToBlob(assets.pngDataUrl))} className={fileButton}>
+            Download PNG
           </button>
           <span className="text-xs text-slate-400">
             {assets.widthMm}mm × {assets.heightMm.toFixed(0)}mm. You can resize it in your software.
