@@ -24,6 +24,7 @@ export interface Totals {
   done: number;
   failed: number;
   running: number;
+  abandoned: number;
   failedBeforeStart: number;
   redone: number;
   photos: number;
@@ -38,7 +39,8 @@ export async function totals(range: Range): Promise<Totals> {
       (select count(*) from generations where created_at >= ${from})::int as tried,
       (select count(*) from generations where created_at >= ${from} and status = 'done')::int as done,
       (select count(*) from generations where created_at >= ${from} and status = 'failed')::int as failed,
-      (select count(*) from generations where created_at >= ${from} and status = 'running')::int as running,
+      (select count(*) from generations where created_at >= ${from} and status = 'running' and created_at >= now() - interval '1 hour')::int as running,
+      (select count(*) from generations where created_at >= ${from} and status = 'running' and created_at < now() - interval '1 hour')::int as abandoned,
       (select count(*) from events where created_at >= ${from} and kind = 'sketch_failed' and generation_id is null)::int as failed_before_start,
       (select count(*) from events where created_at >= ${from} and kind = 'sketch_redo')::int as redone,
       (select count(*) from events where created_at >= ${from} and kind = 'product_photo')::int as photos,
@@ -49,6 +51,7 @@ export async function totals(range: Range): Promise<Totals> {
     done: row.done,
     failed: row.failed,
     running: row.running,
+    abandoned: row.abandoned,
     failedBeforeStart: row.failed_before_start,
     redone: row.redone,
     photos: row.photos,
@@ -127,14 +130,22 @@ export interface Generation {
   sketchFile: string | null;
 }
 
+/**
+ * A drawing is collected two to four minutes after it starts, by the browser
+ * that started it. One still running after this long was left: the tab was
+ * closed, and nobody will come back for it.
+ */
+const ABANDONED_AFTER_MS = 60 * 60 * 1000;
+
 function toGeneration(r: Record<string, unknown>): Generation {
+  const left = r.status === 'running' && Date.now() - new Date(r.created_at as string).getTime() > ABANDONED_AFTER_MS;
   return {
     id: r.id as string,
     createdAt: r.created_at as string,
     finishedAt: r.finished_at as string | null,
     phone: r.phone as string | null,
     category: r.category as string,
-    status: r.status as string,
+    status: left ? 'abandoned' : (r.status as string),
     folder: r.folder as string | null,
     error: r.error as string | null,
     costUsd: Number(r.cost_usd),

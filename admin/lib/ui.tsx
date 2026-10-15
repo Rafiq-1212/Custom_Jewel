@@ -42,10 +42,13 @@ const STATUS_STYLES: Record<string, string> = {
   done: 'bg-emerald-50 text-emerald-700',
   failed: 'bg-rose-50 text-rose-700',
   running: 'bg-amber-50 text-amber-700',
+  abandoned: 'bg-slate-100 text-slate-600',
 };
 
+const STATUS_LABELS: Record<string, string> = { done: 'Finished', failed: 'Failed', running: 'In progress', abandoned: 'Abandoned' };
+
 export function Status({ status }: { status: string }) {
-  const label = status === 'done' ? 'Finished' : status === 'failed' ? 'Failed' : status === 'running' ? 'In progress' : status;
+  const label = STATUS_LABELS[status] ?? status;
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-700'}`}>{label}</span>;
 }
 

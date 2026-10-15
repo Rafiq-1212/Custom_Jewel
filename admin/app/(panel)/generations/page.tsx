@@ -35,7 +35,7 @@ export default async function GenerationsPage() {
                         <Link href={href} className="block h-14 w-14 overflow-hidden rounded-lg border border-slate-200 bg-white">
                           {g.sketchFile ? (
                             // eslint-disable-next-line @next/next/no-img-element -- served by our own signed-in route, not a public URL
-                            <img src={`/api/file?path=${encodeURIComponent(g.sketchFile)}`} alt="Sketch" loading="lazy" className="h-full w-full object-contain" />
+                            <img src={`/api/file?path=${encodeURIComponent(g.sketchFile)}&w=160`} alt="Sketch" loading="lazy" className="h-full w-full object-contain" />
                           ) : null}
                         </Link>
                       </td>

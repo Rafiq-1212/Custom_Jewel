@@ -17,7 +17,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       </PageTitle>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Sketches tried" value={String(attempts)} note={`${t.done} finished · ${allFailed} failed · ${t.running} in progress`} />
+        <Stat label="Sketches tried" value={String(attempts)} note={`${t.done} finished · ${allFailed} failed · ${t.running} in progress${t.abandoned ? ` · ${t.abandoned} abandoned` : ''}`} />
         <Stat label="Came out" value={percent(t.done, attempts)} note={t.redone ? `${t.redone} had to be drawn twice` : 'of sketches tried'} />
         <Stat label="Product photos" value={String(t.photos)} note={`${t.files} sets of production files`} />
         <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={t.done ? `${rupees(t.spendUsd / t.done)} per finished sketch, all steps` : 'no finished sketches yet'} />

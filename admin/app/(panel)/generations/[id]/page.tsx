@@ -78,7 +78,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                 <figure key={f.path}>
                   <a href={`/api/file?path=${encodeURIComponent(f.path)}`} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-slate-200 bg-white">
                     {/* eslint-disable-next-line @next/next/no-img-element -- served by our own signed-in route, not a public URL */}
-                    <img src={`/api/file?path=${encodeURIComponent(f.path)}`} alt={caption(f.name)} loading="lazy" className="aspect-square w-full object-contain" />
+                    <img src={`/api/file?path=${encodeURIComponent(f.path)}&w=480`} alt={caption(f.name)} loading="lazy" className="aspect-square w-full object-contain" />
                   </a>
                   <figcaption className="mt-1.5 text-xs text-slate-600">
                     {caption(f.name)} <span className="text-slate-400">· {size(f.size)}</span>

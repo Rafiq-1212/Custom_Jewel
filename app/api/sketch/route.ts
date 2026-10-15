@@ -50,6 +50,18 @@ function fail(message: string, status: number): Response {
   return Response.json({ success: false, error: message } satisfies ErrorResponse, { status });
 }
 
+/**
+ * Why a sketch failed, for the ledger the admin panel reads. The customer
+ * sees one plain sentence; the admin needs the cause behind it (on 13 Oct
+ * four failures read "Something went wrong" when the Gemini credits had run
+ * out).
+ */
+function failureReason(error: unknown): string {
+  const reason =
+    error instanceof GeminiGenerationError ? `${error.code}: ${error.detail ?? error.message}` : error instanceof Error ? error.message : String(error);
+  return reason.slice(0, 500);
+}
+
 function failFromGemini(error: unknown, where: string): Response {
   const geminiError =
     error instanceof GeminiGenerationError
@@ -137,7 +149,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         try {
           inkJob = await startSketch(input);
         } catch (error) {
-          await trackSketchFailed(undefined, error instanceof Error ? error.message : String(error), costSoFar());
+          await trackSketchFailed(undefined, failureReason(error), costSoFar());
           throw error;
         }
         await trackSketchStarted(inkJob, category, costSoFar());
@@ -161,7 +173,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
           inked = await collectInked(inkJob, category, { redo: formData.get('attempt') !== '2' });
         } catch (error) {
           if (error instanceof ReframeNeeded) await trackEvent({ kind: 'sketch_redo', generationId: inkJob, detail: category, costUsd: costSoFar() });
-          else await trackSketchFailed(inkJob, error instanceof Error ? error.message : String(error), costSoFar());
+          else await trackSketchFailed(inkJob, failureReason(error), costSoFar());
           throw error;
         }
         const master = await makeTransparentMasterSketch(inked);
