@@ -5,9 +5,9 @@ import { requireAdmin } from '@/lib/auth';
 export const dynamic = 'force-dynamic';
 
 const NAV = [
-  { href: '/', label: 'Overview' },
-  { href: '/generations', label: 'Generations' },
   { href: '/generate', label: 'Create a pendant' },
+  { href: '/generations', label: 'Designs' },
+  { href: '/', label: 'Overview' },
   { href: '/customers', label: 'Customers and tries' },
   { href: '/revenue', label: 'Revenue' },
   { href: '/account', label: 'Account' },

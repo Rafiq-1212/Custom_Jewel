@@ -52,7 +52,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
     <>
       <PageTitle title={`${g.category[0].toUpperCase()}${g.category.slice(1)} pendant`} hint={`Started ${when(g.createdAt)}`}>
         <Link href="/generations" className="text-sm text-slate-700 underline">
-          All generations
+          All designs
         </Link>
       </PageTitle>
 

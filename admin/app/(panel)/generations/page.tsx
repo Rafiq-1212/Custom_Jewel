@@ -8,7 +8,7 @@ export default async function GenerationsPage() {
   const rows = await generations();
   return (
     <>
-      <PageTitle title="Generations" hint="Every photo that went in, newest first. Open one to see it end to end." />
+      <PageTitle title="Designs" hint="Every design made with the tool, newest first. Open one to see it from photo to production files." />
       <Card>
         {rows.length === 0 ? (
           <Empty>Nothing has been generated since tracking was switched on.</Empty>

@@ -18,7 +18,7 @@ export default async function CustomersPage() {
                 <tr>
                   <th className={th}>Phone</th>
                   <th className={th}>Tries used</th>
-                  <th className={th}>Generations</th>
+                  <th className={th}>Designs</th>
                   <th className={th}>Orders</th>
                   <th className={th}>Last seen</th>
                   <th className={th} />

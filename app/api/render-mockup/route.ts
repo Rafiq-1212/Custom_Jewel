@@ -19,6 +19,7 @@ import { GeminiGenerationError } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { collectPendantMockup, startPendantMockup } from '@/lib/mockup';
 import { isMaterialId } from '@/lib/materials';
+import { refuseUnlessSignedIn } from '@/lib/signed-in';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,8 @@ function fail(message: string, status: number): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const refused = await refuseUnlessSignedIn(request);
+  if (refused) return refused;
   let body: unknown;
   try {
     body = await request.json();
@@ -59,6 +62,8 @@ export async function POST(request: Request): Promise<Response> {
 
 /** GET /api/render-mockup?job=batches/...&material=gold — the state, or the picture. */
 export async function GET(request: Request): Promise<Response> {
+  const refused = await refuseUnlessSignedIn(request);
+  if (refused) return refused;
   const params = new URL(request.url).searchParams;
   const name = params.get('job');
   const material = params.get('material');

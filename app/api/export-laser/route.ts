@@ -33,6 +33,7 @@ import { cleanFaceShading } from '@/lib/face-clean';
 import { thinHatching } from '@/lib/hatch-thin';
 import { trackEvent } from '@/lib/tracking';
 import { buildLaserExportAssets } from '@/lib/laser-export';
+import { refuseUnlessSignedIn } from '@/lib/signed-in';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,6 +57,8 @@ async function withoutFaceShading(sketch: string): Promise<string> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const refused = await refuseUnlessSignedIn(request);
+  if (refused) return refused;
   let body: unknown;
   try {
     body = await request.json();

@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { ADMIN_ORIGIN } from "./lib/admin-origin";
 
 const nextConfig: NextConfig = {
   // `potrace` (and its Jimp dependency) does internal `instanceof` checks
@@ -10,7 +11,7 @@ const nextConfig: NextConfig = {
   // The admin panel (admin/) is its own app, deployed as its own Vercel
   // project, and served here at /admin: every request under it is handed on.
   async rewrites() {
-    const admin = process.env.ADMIN_ORIGIN || "https://true-b-admin.vercel.app";
+    const admin = ADMIN_ORIGIN;
     return [
       { source: "/admin", destination: `${admin}/admin` },
       { source: "/admin/:path+", destination: `${admin}/admin/:path+` },

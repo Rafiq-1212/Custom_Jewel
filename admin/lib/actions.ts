@@ -24,7 +24,8 @@ export async function signIn(_previous: FormState, form: FormData): Promise<Form
   } catch {
     return { error: 'That email and password don\'t match.' };
   }
-  redirect('/');
+  // Straight to the pendant tool: making pendants is what the panel is opened for.
+  redirect('/generate');
 }
 
 export async function signOut(): Promise<void> {

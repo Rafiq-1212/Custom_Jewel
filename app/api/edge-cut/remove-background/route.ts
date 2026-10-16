@@ -22,6 +22,7 @@
 
 import sharp from 'sharp';
 import { removeBackground, RemoveBgError } from '@/lib/remove-bg';
+import { refuseUnlessSignedIn } from '@/lib/signed-in';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,8 @@ function decodeDataUrl(dataUrl: string): Buffer {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const refused = await refuseUnlessSignedIn(request);
+  if (refused) return refused;
   let body: RemoveBackgroundRequestBody;
   try {
     body = (await request.json()) as RemoveBackgroundRequestBody;

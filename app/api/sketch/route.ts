@@ -29,6 +29,7 @@ import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
 import { collectInked, ReframeNeeded, startSketch } from '@/lib/sketch-pipeline';
 import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchStarted } from '@/lib/tracking';
 import { validateImageBytes } from '@/lib/validation';
+import { refuseUnlessSignedIn } from '@/lib/signed-in';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
 export const runtime = 'nodejs';
@@ -103,6 +104,8 @@ function readJobName(formData: FormData, field: string): string | null {
 
 /** GET /api/sketch?job=batches/... — has this job finished? */
 export async function GET(request: globalThis.Request): Promise<Response> {
+  const refused = await refuseUnlessSignedIn(request);
+  if (refused) return refused;
   const name = new URL(request.url).searchParams.get('job');
   if (!name || !JOB_NAME.test(name)) return fail('That job does not exist.', 400);
   try {
@@ -113,6 +116,8 @@ export async function GET(request: globalThis.Request): Promise<Response> {
 }
 
 export async function POST(request: globalThis.Request): Promise<Response> {
+  const refused = await refuseUnlessSignedIn(request);
+  if (refused) return refused;
   let formData: FormData;
   try {
     formData = await request.formData();
