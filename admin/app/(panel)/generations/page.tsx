@@ -6,7 +6,8 @@ import { generations, makers } from '@/lib/queries';
 import { Card, Empty, PageTitle, Status, td, th } from '@/lib/ui';
 
 export default async function DesignsPage({ searchParams }: { searchParams: Promise<{ by?: string }> }) {
-  await requireScreen('designs');
+  // What the designs cost is for owners only.
+  const showCost = (await requireScreen('designs')).role === 'owner';
   const by = (await searchParams).by || null;
   const [rows, people] = await Promise.all([generations(200, by), makers()]);
   const chip = (active: boolean) =>
@@ -44,7 +45,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                   <th className={th}>Feedback</th>
                   <th className={th}>Photos</th>
                   <th className={th}>Files</th>
-                  <th className={th}>Cost so far</th>
+                  {showCost && <th className={th}>Cost so far</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -83,7 +84,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                       </td>
                       <td className={`${td} tabular-nums`}>{g.photos}</td>
                       <td className={`${td} tabular-nums`}>{g.files}</td>
-                      <td className={`${td} tabular-nums font-medium text-slate-900`}>{rupees(g.costUsd)}</td>
+                      {showCost && <td className={`${td} tabular-nums font-medium text-slate-900`}>{rupees(g.costUsd)}</td>}
                     </tr>
                   );
                 })}

@@ -40,7 +40,8 @@ function caption(name: string): string {
 }
 
 export default async function GenerationPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireScreen('designs');
+  // What the design cost is for owners only.
+  const showCost = (await requireScreen('designs')).role === 'owner';
   const { id } = await params;
   const found = await generation(`batches/${id}`);
   if (!found) notFound();
@@ -70,7 +71,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
           {g.error && <div className="mt-2 break-words text-xs text-rose-600">{g.error}</div>}
         </div>
         <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone ? `for ${g.phone}` : undefined} />
-        <Stat label="Total cost" value={rupees(total)} note={`${steps.length} steps`} />
+        {showCost ? <Stat label="Total cost" value={rupees(total)} note={`${steps.length} steps`} /> : <Stat label="Steps" value={String(steps.length)} />}
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
 
@@ -174,7 +175,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
       </div>
 
       <div className="mt-6">
-        <Card title="Every step, and what it cost">
+        <Card title={showCost ? 'Every step, and what it cost' : 'Every step'}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -183,7 +184,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                   <th className={th}>Step</th>
                   <th className={th}>By</th>
                   <th className={th}>Detail</th>
-                  <th className={th}>Cost</th>
+                  {showCost && <th className={th}>Cost</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -193,7 +194,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                     <td className={`${td} font-medium text-slate-900`}>{stepName(s.kind)}</td>
                     <td className={`${td} whitespace-nowrap`}>{s.by ?? '—'}</td>
                     <td className={`${td} break-words`}>{s.detail ?? '—'}</td>
-                    <td className={`${td} tabular-nums`}>{rupees(s.costUsd)}</td>
+                    {showCost && <td className={`${td} tabular-nums`}>{rupees(s.costUsd)}</td>}
                   </tr>
                 ))}
               </tbody>
