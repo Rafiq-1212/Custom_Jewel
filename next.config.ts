@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
   // it as a plain Node `require()` — exactly what this option is for —
   // avoids the rewrite. Only used server-side, in lib/laser-export.ts.
   serverExternalPackages: ["potrace"],
+  // The admin panel (admin/) is its own app, deployed as its own Vercel
+  // project, and served here at /admin: every request under it is handed on.
+  async rewrites() {
+    const admin = process.env.ADMIN_ORIGIN || "https://true-b-admin.vercel.app";
+    return [
+      { source: "/admin", destination: `${admin}/admin` },
+      { source: "/admin/:path+", destination: `${admin}/admin/:path+` },
+    ];
+  },
 };
 
 export default nextConfig;

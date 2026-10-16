@@ -1,7 +1,7 @@
 import { PageTitle } from '@/lib/ui';
 
-/** The pendant tool itself, shown inside the panel. It is its own app; this is a window onto it. */
-const TOOL_URL = process.env.TOOL_URL || 'https://true-b.vercel.app';
+/** The pendant tool itself, shown inside the panel: the same site, one level up. It is its own app; this is a window onto it. */
+const TOOL_URL = '/';
 
 export default function GeneratePage() {
   return (

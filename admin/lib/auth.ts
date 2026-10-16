@@ -13,10 +13,14 @@ import { nextCookies } from 'better-auth/next-js';
 import { Pool } from '@neondatabase/serverless';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { BASE_PATH } from './base-path';
 
 function create() {
   return betterAuth({
     database: new Pool({ connectionString: process.env.DATABASE_URL }),
+    // Served under the panel's path, and reached through the tool's address as well as its own.
+    basePath: `${BASE_PATH}/api/auth`,
+    trustedOrigins: ['https://true-b.vercel.app', 'https://true-b-admin.vercel.app', 'http://localhost:3011', 'http://localhost:3012'],
     emailAndPassword: { enabled: true, minPasswordLength: 10 },
     session: { expiresIn: 60 * 60 * 24 * 7 },
     // Lets a sign-in made from a server action set its cookie. Must stay last.

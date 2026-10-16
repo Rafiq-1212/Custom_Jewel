@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BASE_PATH } from '@/lib/base-path';
 import { notFound } from 'next/navigation';
 import { list } from '@vercel/blob';
 import { rupees, stepName, when } from '@/lib/format';
@@ -76,9 +77,9 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
             <div className="grid grid-cols-2 gap-4 p-4 md:grid-cols-4">
               {pictures.map((f) => (
                 <figure key={f.path}>
-                  <a href={`/api/file?path=${encodeURIComponent(f.path)}`} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <a href={`${BASE_PATH}/api/file?path=${encodeURIComponent(f.path)}`} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-slate-200 bg-white">
                     {/* eslint-disable-next-line @next/next/no-img-element -- served by our own signed-in route, not a public URL */}
-                    <img src={`/api/file?path=${encodeURIComponent(f.path)}&w=480`} alt={caption(f.name)} loading="lazy" className="aspect-square w-full object-contain" />
+                    <img src={`${BASE_PATH}/api/file?path=${encodeURIComponent(f.path)}&w=480`} alt={caption(f.name)} loading="lazy" className="aspect-square w-full object-contain" />
                   </a>
                   <figcaption className="mt-1.5 text-xs text-slate-600">
                     {caption(f.name)} <span className="text-slate-400">· {size(f.size)}</span>
@@ -94,7 +95,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                   <span className="text-slate-700">
                     {caption(f.name)} <span className="text-slate-400">· {size(f.size)}</span>
                   </span>
-                  <a href={`/api/file?path=${encodeURIComponent(f.path)}`} className="font-medium text-slate-900 underline">
+                  <a href={`${BASE_PATH}/api/file?path=${encodeURIComponent(f.path)}`} className="font-medium text-slate-900 underline">
                     Download
                   </a>
                 </li>
