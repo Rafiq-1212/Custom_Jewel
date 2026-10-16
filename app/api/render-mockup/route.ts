@@ -19,7 +19,7 @@ import { GeminiGenerationError } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { collectPendantMockup, startPendantMockup } from '@/lib/mockup';
 import { isMaterialId } from '@/lib/materials';
-import { refuseUnlessSignedIn } from '@/lib/signed-in';
+import { makerOf } from '@/lib/signed-in';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,8 +33,8 @@ function fail(message: string, status: number): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const refused = await refuseUnlessSignedIn(request);
-  if (refused) return refused;
+  const maker = await makerOf(request);
+  if (maker instanceof Response) return maker;
   let body: unknown;
   try {
     body = await request.json();
@@ -62,8 +62,8 @@ export async function POST(request: Request): Promise<Response> {
 
 /** GET /api/render-mockup?job=batches/...&material=gold — the state, or the picture. */
 export async function GET(request: Request): Promise<Response> {
-  const refused = await refuseUnlessSignedIn(request);
-  if (refused) return refused;
+  const maker = await makerOf(request);
+  if (maker instanceof Response) return maker;
   const params = new URL(request.url).searchParams;
   const name = params.get('job');
   const material = params.get('material');
@@ -73,7 +73,7 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const state = await readJobState(name);
     if (state !== 'done') return Response.json({ success: true, state });
-    const result = await withCostLog(`mockup ${material}`, () => collectPendantMockup(name, material));
+    const result = await withCostLog(`mockup ${material}`, () => collectPendantMockup(name, material, maker.id));
     return Response.json({ success: true, state, ...result });
   } catch (error) {
     if (error instanceof GeminiGenerationError) {

@@ -128,6 +128,9 @@ export interface Generation {
   photos: number;
   files: number;
   sketchFile: string | null;
+  /** The team member who made it, by name; null for what was made before the tool needed a login. */
+  madeBy: string | null;
+  madeById: string | null;
 }
 
 /**
@@ -152,14 +155,17 @@ function toGeneration(r: Record<string, unknown>): Generation {
     photos: Number(r.photos),
     files: Number(r.files),
     sketchFile: r.sketch_file as string | null,
+    madeBy: (r.made_by as string | null) ?? null,
+    madeById: (r.created_by as string | null) ?? null,
   };
 }
 
-/** The newest generations, each with what it has cost so far and what was made from it. */
-export async function generations(limit = 200): Promise<Generation[]> {
+/** The newest generations, each with what it has cost so far, what was made from it, and who made it; only `by`'s when given. */
+export async function generations(limit = 200, by: string | null = null): Promise<Generation[]> {
   const rows = await db()`
-    select g.*, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file
+    select g.*, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' end) as made_by
     from generations g
+    left join "user" u on u.id = g.created_by
     left join lateral (
       select sum(cost_usd) as cost_usd,
              count(*) filter (where kind = 'product_photo') as photos,
@@ -170,6 +176,7 @@ export async function generations(limit = 200): Promise<Generation[]> {
     left join lateral (
       select file from events e where e.generation_id = g.id and e.kind = 'sketch_done' and e.file is not null order by e.id desc limit 1
     ) s on true
+    where ${by}::text is null or g.created_by = ${by}
     order by g.created_at desc
     limit ${limit}`;
   return rows.map(toGeneration);
@@ -182,6 +189,8 @@ export interface Step {
   detail: string | null;
   costUsd: number;
   file: string | null;
+  /** Who did this step, by name. */
+  by: string | null;
 }
 
 /** One generation and every step that belongs to it, oldest first. */
@@ -190,12 +199,13 @@ export async function generation(id: string): Promise<{ generation: Generation; 
   if (!found) return null;
   const order = found.folder ? found.folder.slice(-10) : '';
   const rows = await db()`
-    select id, created_at, kind, detail, cost_usd::float as cost_usd, file from events
-    where generation_id = ${id} or (${order} <> '' and right(folder, 10) = ${order})
-    order by id`;
+    select e.id, e.created_at, e.kind, e.detail, e.cost_usd::float as cost_usd, e.file, coalesce(u.name, case when e.user_id is not null then 'Removed login' end) as by
+    from events e left join "user" u on u.id = e.user_id
+    where e.generation_id = ${id} or (${order} <> '' and right(e.folder, 10) = ${order})
+    order by e.id`;
   return {
     generation: found,
-    steps: rows.map((r) => ({ id: Number(r.id), createdAt: r.created_at, kind: r.kind, detail: r.detail, costUsd: r.cost_usd, file: r.file })),
+    steps: rows.map((r) => ({ id: Number(r.id), createdAt: r.created_at, kind: r.kind, detail: r.detail, costUsd: r.cost_usd, file: r.file, by: r.by })),
   };
 }
 
@@ -247,4 +257,85 @@ export async function revenue(range: Range): Promise<{ orders: Order[]; total: n
     count: sum.count,
     fromGenerations: sum.from_generations,
   };
+}
+
+export interface MemberActivity {
+  id: string | null;
+  name: string;
+  role: string | null;
+  designs: number;
+  finished: number;
+  photos: number;
+  files: number;
+  spendUsd: number;
+  lastAt: string | null;
+}
+
+/**
+ * What each team member made in the period: designs started and finished,
+ * product photos, production files, and what it all cost. Steps from before
+ * the tool needed a login are one line of their own.
+ */
+export async function activityByMember(range: Range): Promise<MemberActivity[]> {
+  const rows = await db()`
+    select e.user_id as id, coalesce(u.name, case when e.user_id is null then 'Before team logins' else 'Removed login' end) as name, u.role,
+           count(*) filter (where e.kind = 'sketch_start')::int as designs,
+           count(*) filter (where e.kind = 'sketch_done')::int as finished,
+           count(*) filter (where e.kind = 'product_photo')::int as photos,
+           count(*) filter (where e.kind = 'production_files')::int as files,
+           coalesce(sum(e.cost_usd), 0)::float as spend_usd,
+           max(e.created_at) as last_at
+    from events e left join "user" u on u.id = e.user_id
+    where e.created_at >= ${since(range)}
+    group by e.user_id, u.name, u.role
+    order by spend_usd desc`;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    role: r.role,
+    designs: r.designs,
+    finished: r.finished,
+    photos: r.photos,
+    files: r.files,
+    spendUsd: r.spend_usd,
+    lastAt: r.last_at,
+  }));
+}
+
+/** Everyone who has made something, for the Designs filter. */
+export async function makers(): Promise<{ id: string; name: string }[]> {
+  const rows = await db()`
+    select distinct u.id, u.name from generations g join "user" u on u.id = g.created_by order by u.name`;
+  return rows.map((r) => ({ id: r.id, name: r.name }));
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  screens: string;
+  mustChangePassword: boolean;
+  createdAt: string;
+  lastSeenAt: string | null;
+}
+
+/** Everyone with a login, owners first (shown on Team, which only owners open). */
+export async function teamMembers(): Promise<TeamMember[]> {
+  const rows = await db()`
+    select u.id, u.name, u.email, u.role, u.screens, u."mustChangePassword", u."createdAt",
+           (select max(s."updatedAt") from session s where s."userId" = u.id) as last_seen
+    from "user" u
+    where u.role <> 'removed'
+    order by case u.role when 'owner' then 0 when 'editor' then 1 else 2 end, u."createdAt"`;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    role: r.role,
+    screens: r.screens ?? '',
+    mustChangePassword: r.mustChangePassword === true,
+    createdAt: r.createdAt,
+    lastSeenAt: r.last_seen,
+  }));
 }

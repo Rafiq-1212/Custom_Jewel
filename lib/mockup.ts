@@ -336,7 +336,7 @@ export async function startPendantMockup(request: DesignRequest): Promise<string
 }
 
 /** The finished photograph from a job that has succeeded. */
-export async function collectPendantMockup(name: string, material: string): Promise<MockupResult> {
+export async function collectPendantMockup(name: string, material: string, userId: string): Promise<MockupResult> {
   // Counted here: this is the only read of the job, so it is the one that
   // carries the cost of the picture.
   const result = await readImageJob(name, `mockup ${material}`, { count: true });
@@ -347,7 +347,7 @@ export async function collectPendantMockup(name: string, material: string): Prom
     const file = folder
       ? await archive(folder, `product-${material}.${result.mimeType === 'image/jpeg' ? 'jpg' : 'png'}`, result.bytes, result.mimeType)
       : null;
-    await trackEvent({ kind: 'product_photo', folder, detail: material, costUsd: spent, file });
+    await trackEvent({ kind: 'product_photo', folder, detail: material, costUsd: spent, file, userId });
   });
   return { dataUrl: `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString('base64')}` };
 }

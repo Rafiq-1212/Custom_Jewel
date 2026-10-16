@@ -1,9 +1,12 @@
+import { canEdit } from '@/lib/access';
 import { resetTries } from '@/lib/actions';
+import { requireScreen } from '@/lib/auth';
 import { when } from '@/lib/format';
 import { customers } from '@/lib/queries';
 import { Card, Empty, PageTitle, td, th } from '@/lib/ui';
 
 export default async function CustomersPage() {
+  const me = await requireScreen('customers');
   const rows = await customers();
   return (
     <>
@@ -35,16 +38,18 @@ export default async function CustomersPage() {
                     <td className={`${td} tabular-nums`}>{c.orders}</td>
                     <td className={`${td} whitespace-nowrap`}>{when(c.lastSeenAt)}</td>
                     <td className={`${td} text-right`}>
-                      <form action={resetTries}>
-                        <input type="hidden" name="phone" value={c.phone} />
-                        <button
-                          type="submit"
-                          disabled={c.triesUsed === 0}
-                          className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-900 hover:bg-slate-50 disabled:opacity-40"
-                        >
-                          Reset tries
-                        </button>
-                      </form>
+                      {canEdit(me) && (
+                        <form action={resetTries}>
+                          <input type="hidden" name="phone" value={c.phone} />
+                          <button
+                            type="submit"
+                            disabled={c.triesUsed === 0}
+                            className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-900 hover:bg-slate-50 disabled:opacity-40"
+                          >
+                            Reset tries
+                          </button>
+                        </form>
+                      )}
                     </td>
                   </tr>
                 ))}

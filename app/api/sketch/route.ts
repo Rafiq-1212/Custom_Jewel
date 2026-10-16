@@ -29,7 +29,7 @@ import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
 import { collectInked, ReframeNeeded, startSketch } from '@/lib/sketch-pipeline';
 import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchStarted } from '@/lib/tracking';
 import { validateImageBytes } from '@/lib/validation';
-import { refuseUnlessSignedIn } from '@/lib/signed-in';
+import { makerOf } from '@/lib/signed-in';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
 export const runtime = 'nodejs';
@@ -104,8 +104,8 @@ function readJobName(formData: FormData, field: string): string | null {
 
 /** GET /api/sketch?job=batches/... — has this job finished? */
 export async function GET(request: globalThis.Request): Promise<Response> {
-  const refused = await refuseUnlessSignedIn(request);
-  if (refused) return refused;
+  const maker = await makerOf(request);
+  if (maker instanceof Response) return maker;
   const name = new URL(request.url).searchParams.get('job');
   if (!name || !JOB_NAME.test(name)) return fail('That job does not exist.', 400);
   try {
@@ -116,8 +116,8 @@ export async function GET(request: globalThis.Request): Promise<Response> {
 }
 
 export async function POST(request: globalThis.Request): Promise<Response> {
-  const refused = await refuseUnlessSignedIn(request);
-  if (refused) return refused;
+  const maker = await makerOf(request);
+  if (maker instanceof Response) return maker;
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -154,10 +154,10 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         try {
           inkJob = await startSketch(input);
         } catch (error) {
-          await trackSketchFailed(undefined, failureReason(error), costSoFar());
+          await trackSketchFailed(undefined, failureReason(error), costSoFar(), maker.id);
           throw error;
         }
-        await trackSketchStarted(inkJob, category, costSoFar());
+        await trackSketchStarted(inkJob, category, costSoFar(), maker.id);
         return Response.json({ success: true, stage: 'inking', inkJob });
       });
     } catch (error) {
@@ -177,8 +177,8 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         try {
           inked = await collectInked(inkJob, category, { redo: formData.get('attempt') !== '2' });
         } catch (error) {
-          if (error instanceof ReframeNeeded) await trackEvent({ kind: 'sketch_redo', generationId: inkJob, detail: category, costUsd: costSoFar() });
-          else await trackSketchFailed(inkJob, failureReason(error), costSoFar());
+          if (error instanceof ReframeNeeded) await trackEvent({ kind: 'sketch_redo', generationId: inkJob, detail: category, costUsd: costSoFar(), userId: maker.id });
+          else await trackSketchFailed(inkJob, failureReason(error), costSoFar(), maker.id);
           throw error;
         }
         const master = await makeTransparentMasterSketch(inked);
@@ -192,7 +192,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
             archive(folder, `photo.${extension}`, bytes, file.type || 'image/jpeg'),
             archive(folder, 'sketch.png', master.buffer, 'image/png'),
           ]);
-          await trackSketchDone(inkJob, folder, spent, saved);
+          await trackSketchDone(inkJob, folder, spent, saved, maker.id);
         });
         return Response.json({
           success: true,

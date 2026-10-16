@@ -1,3 +1,4 @@
+import { requireScreen } from '@/lib/auth';
 import { amount, percent, rupees, when } from '@/lib/format';
 import { revenue, toRange, totals } from '@/lib/queries';
 import { Card, Empty, PageTitle, RangePicker, Stat, td, th } from '@/lib/ui';
@@ -5,6 +6,7 @@ import { Card, Empty, PageTitle, RangePicker, Stat, td, th } from '@/lib/ui';
 const INR_PER_USD = Number(process.env.INR_PER_USD) || 95.6;
 
 export default async function RevenuePage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+  await requireScreen('revenue');
   const range = toRange((await searchParams).range);
   const [sales, t] = await Promise.all([revenue(range), totals(range)]);
   const spend = t.spendUsd * INR_PER_USD;

@@ -10,7 +10,7 @@ interface Field {
   autoComplete: string;
 }
 
-/** A small form posted to a server action, with its error shown underneath. Used by sign-in and setup. */
+/** A small form posted to a server action, with its error shown underneath. Used by sign-in and by setting a first password. */
 export function AuthForm({
   action,
   fields,

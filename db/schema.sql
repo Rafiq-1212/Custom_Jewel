@@ -42,6 +42,12 @@ create table if not exists events (
 create index if not exists events_created_at on events (created_at desc);
 create index if not exists events_folder on events (folder);
 
+-- Who made it: the team member's admin login ("user".id). Empty for what
+-- was made before the tool needed a login.
+alter table generations add column if not exists created_by text;
+alter table events add column if not exists user_id text;
+create index if not exists generations_created_by on generations (created_by);
+
 -- Paid orders, from the Shopify store (not connected yet).
 create table if not exists orders (
   id text primary key,         -- the shop's order id

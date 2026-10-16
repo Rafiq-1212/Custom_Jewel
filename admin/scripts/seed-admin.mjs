@@ -1,4 +1,5 @@
-// Makes the admin account, or resets its password if it already exists.
+// Makes an owner login, or resets its password if it already exists.
+// Other logins are made on the panel's Team screen.
 //
 //   ADMIN_EMAIL=you@example.com ADMIN_PASSWORD='...' node scripts/seed-admin.mjs
 //
@@ -43,4 +44,6 @@ if (existing.rows.length) {
   await auth.api.signUpEmail({ body: { name, email, password } });
   console.log(`admin account created for ${email}`);
 }
+// Whoever is made or reset here is an owner, on a password they chose.
+await pool.query(`update "user" set role = 'owner', "mustChangePassword" = false where email = $1`, [email]);
 await pool.end();

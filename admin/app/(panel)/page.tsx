@@ -1,18 +1,31 @@
 import Link from 'next/link';
+import { ROLES, canSee } from '@/lib/access';
+import { requireScreen } from '@/lib/auth';
+import { BASE_PATH } from '@/lib/base-path';
 import { percent, rupees, stepName, when } from '@/lib/format';
-import { byDay, recentFailures, spendByStep, toRange, totals } from '@/lib/queries';
-import { Card, Empty, PageTitle, RangePicker, Stat, td, th } from '@/lib/ui';
+import { activityByMember, byDay, generations, recentFailures, spendByStep, toRange, totals } from '@/lib/queries';
+import { Card, Empty, PageTitle, RangePicker, Stat, Status, td, th } from '@/lib/ui';
 
-export default async function OverviewPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+/** The dashboard: what has been made, by whom, and what it cost. */
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+  const me = await requireScreen('overview');
   const range = toRange((await searchParams).range);
-  const [t, days, steps, failures] = await Promise.all([totals(range), byDay(), spendByStep(range), recentFailures()]);
+  const [t, days, steps, failures, members, latest] = await Promise.all([
+    totals(range),
+    byDay(),
+    spendByStep(range),
+    recentFailures(),
+    activityByMember(range),
+    generations(8),
+  ]);
+  const seeDesigns = canSee(me, 'designs');
   const attempts = t.tried + t.failedBeforeStart;
   const allFailed = t.failed + t.failedBeforeStart;
   const busiest = Math.max(1, ...days.map((d) => d.spendUsd));
 
   return (
     <>
-      <PageTitle title="Overview" hint="How many pictures were tried, how many came out, and what Gemini charged for them.">
+      <PageTitle title="Dashboard" hint="What has been made, by whom, how much of it came out, and what Gemini charged for it.">
         <RangePicker path="/" range={range} />
       </PageTitle>
 
@@ -21,6 +34,85 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
         <Stat label="Came out" value={percent(t.done, attempts)} note={t.redone ? `${t.redone} had to be drawn twice` : 'of sketches tried'} />
         <Stat label="Product photos" value={String(t.photos)} note={`${t.files} sets of production files`} />
         <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={t.done ? `${rupees(t.spendUsd / t.done)} per finished sketch, all steps` : 'no finished sketches yet'} />
+      </div>
+
+      <div className="mt-6">
+        <Card title="Latest designs">
+          {latest.length === 0 ? (
+            <Empty>Nothing has been made yet.</Empty>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4 xl:grid-cols-8">
+              {latest.map((g) => {
+                const picture = g.sketchFile ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- served by our own signed-in route, not a public URL
+                  <img src={`${BASE_PATH}/api/file?path=${encodeURIComponent(g.sketchFile)}&w=160`} alt="Sketch" loading="lazy" className="aspect-square w-full object-contain" />
+                ) : (
+                  <div className="flex aspect-square w-full items-center justify-center text-xs text-slate-400">No sketch</div>
+                );
+                return (
+                  <figure key={g.id} className="min-w-0">
+                    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                      {seeDesigns ? <Link href={`/generations/${g.id.replace('batches/', '')}`}>{picture}</Link> : picture}
+                    </div>
+                    <figcaption className="mt-1.5 space-y-0.5 text-xs">
+                      <div className="truncate font-medium text-slate-900">{g.madeBy ?? 'Before team logins'}</div>
+                      <div className="truncate capitalize text-slate-500">
+                        {g.category} · {when(g.createdAt)}
+                      </div>
+                      <Status status={g.status} />
+                    </figcaption>
+                  </figure>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="mt-6">
+        <Card title="By team member">
+          {members.length === 0 ? (
+            <Empty>Nobody has made anything in this period.</Empty>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className={th}>Who</th>
+                    <th className={th}>Designs</th>
+                    <th className={th}>Finished</th>
+                    <th className={th}>Product photos</th>
+                    <th className={th}>Production files</th>
+                    <th className={th}>Spent</th>
+                    <th className={th}>Last active</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {members.map((m) => (
+                    <tr key={m.id ?? 'before'}>
+                      <td className={td}>
+                        {m.id && seeDesigns ? (
+                          <Link href={`/generations?by=${m.id}`} className="font-medium text-slate-900 underline-offset-2 hover:underline">
+                            {m.name}
+                          </Link>
+                        ) : (
+                          <span className={m.id ? 'font-medium text-slate-900' : 'text-slate-500'}>{m.name}</span>
+                        )}
+                        {m.role && <span className="ml-2 text-xs text-slate-400">{ROLES.find((r) => r.value === m.role)?.label ?? 'Removed'}</span>}
+                      </td>
+                      <td className={`${td} tabular-nums`}>{m.designs}</td>
+                      <td className={`${td} tabular-nums`}>{m.finished}</td>
+                      <td className={`${td} tabular-nums`}>{m.photos}</td>
+                      <td className={`${td} tabular-nums`}>{m.files}</td>
+                      <td className={`${td} tabular-nums font-medium text-slate-900`}>{rupees(m.spendUsd)}</td>
+                      <td className={`${td} whitespace-nowrap`}>{when(m.lastAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
@@ -93,9 +185,9 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
                   <li key={i} className="px-4 py-2.5 text-sm">
                     <div className="text-xs text-slate-500">{when(f.createdAt)}</div>
                     <div className="break-words text-slate-700">{f.detail ?? 'No reason recorded'}</div>
-                    {f.generationId && (
+                    {f.generationId && seeDesigns && (
                       <Link href={`/generations/${f.generationId.replace('batches/', '')}`} className="text-xs text-slate-900 underline">
-                        Open this generation
+                        Open this design
                       </Link>
                     )}
                   </li>

@@ -48,36 +48,40 @@ export interface TrackedEvent {
   detail?: string;
   /** Where the result was saved, if it was. */
   file?: string | null;
+  /** The team member who did it (their admin login's id). */
+  userId?: string;
 }
 
 /** One line in the ledger. */
 export function trackEvent(event: TrackedEvent): Promise<void> {
   return write(event.kind, (sql) =>
-    sql`insert into events (kind, generation_id, folder, detail, cost_usd, file)
-        values (${event.kind}, ${event.generationId ?? null}, ${event.folder ?? null}, ${event.detail ?? null}, ${event.costUsd}, ${event.file ?? null})`,
+    sql`insert into events (kind, generation_id, folder, detail, cost_usd, file, user_id)
+        values (${event.kind}, ${event.generationId ?? null}, ${event.folder ?? null}, ${event.detail ?? null}, ${event.costUsd}, ${event.file ?? null}, ${event.userId ?? null})`,
   );
 }
 
 /** A photo went in and its drawing was queued. */
-export async function trackSketchStarted(generationId: string, category: string, costUsd: number): Promise<void> {
-  await write('a sketch start', (sql) => sql`insert into generations (id, category) values (${generationId}, ${category}) on conflict (id) do nothing`);
-  await trackEvent({ kind: 'sketch_start', generationId, detail: category, costUsd });
+export async function trackSketchStarted(generationId: string, category: string, costUsd: number, userId: string): Promise<void> {
+  await write('a sketch start', (sql) =>
+    sql`insert into generations (id, category, created_by) values (${generationId}, ${category}, ${userId}) on conflict (id) do nothing`,
+  );
+  await trackEvent({ kind: 'sketch_start', generationId, detail: category, costUsd, userId });
 }
 
 /** The drawing came back and was saved. */
-export async function trackSketchDone(generationId: string, folder: string, costUsd: number, file: string | null): Promise<void> {
+export async function trackSketchDone(generationId: string, folder: string, costUsd: number, file: string | null, userId: string): Promise<void> {
   await write('a finished sketch', (sql) =>
     sql`update generations set status = 'done', finished_at = now(), folder = ${folder}, error = null where id = ${generationId}`,
   );
-  await trackEvent({ kind: 'sketch_done', generationId, folder, costUsd, file });
+  await trackEvent({ kind: 'sketch_done', generationId, folder, costUsd, file, userId });
 }
 
 /** The drawing could not be made. */
-export async function trackSketchFailed(generationId: string | undefined, reason: string, costUsd: number): Promise<void> {
+export async function trackSketchFailed(generationId: string | undefined, reason: string, costUsd: number, userId: string): Promise<void> {
   if (generationId) {
     await write('a failed sketch', (sql) =>
       sql`update generations set status = 'failed', finished_at = now(), error = ${reason} where id = ${generationId} and status <> 'done'`,
     );
   }
-  await trackEvent({ kind: 'sketch_failed', generationId, detail: reason, costUsd });
+  await trackEvent({ kind: 'sketch_failed', generationId, detail: reason, costUsd, userId });
 }

@@ -11,6 +11,7 @@
 import { get } from '@vercel/blob';
 import sharp from 'sharp';
 import { headers } from 'next/headers';
+import { canSee, toRole, toScreens } from '@/lib/access';
 import { auth } from '@/lib/auth';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,10 @@ const PICTURE = /\.(png|jpe?g|webp)$/;
 export async function GET(request: Request): Promise<Response> {
   const session = await auth().api.getSession({ headers: await headers() });
   if (!session) return new Response('Sign in first.', { status: 401 });
+  // Pictures and files are shown on Designs and the Dashboard; a login with neither does not get them.
+  const user = session.user as typeof session.user & { role?: unknown; screens?: unknown; mustChangePassword?: unknown };
+  const member = { role: toRole(user.role), screens: toScreens(user.screens) };
+  if (user.mustChangePassword === true || !(canSee(member, 'designs') || canSee(member, 'overview'))) return new Response('Not allowed.', { status: 403 });
 
   const params = new URL(request.url).searchParams;
   const path = params.get('path') ?? '';

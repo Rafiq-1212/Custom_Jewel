@@ -33,7 +33,7 @@ import { cleanFaceShading } from '@/lib/face-clean';
 import { thinHatching } from '@/lib/hatch-thin';
 import { trackEvent } from '@/lib/tracking';
 import { buildLaserExportAssets } from '@/lib/laser-export';
-import { refuseUnlessSignedIn } from '@/lib/signed-in';
+import { makerOf } from '@/lib/signed-in';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,8 +57,8 @@ async function withoutFaceShading(sketch: string): Promise<string> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const refused = await refuseUnlessSignedIn(request);
-  if (refused) return refused;
+  const maker = await makerOf(request);
+  if (maker instanceof Response) return maker;
   let body: unknown;
   try {
     body = await request.json();
@@ -96,7 +96,7 @@ export async function POST(request: Request): Promise<Response> {
         'application/zip',
         { latestOnly: true },
       );
-      await trackEvent({ kind: 'production_files', folder, detail: parsed.value.designType, costUsd: spent, file });
+      await trackEvent({ kind: 'production_files', folder, detail: parsed.value.designType, costUsd: spent, file, userId: maker.id });
     });
     return Response.json({ success: true, ...result });
   } catch (error) {

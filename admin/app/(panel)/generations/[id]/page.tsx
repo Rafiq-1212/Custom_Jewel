@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { BASE_PATH } from '@/lib/base-path';
 import { notFound } from 'next/navigation';
 import { list } from '@vercel/blob';
+import { requireScreen } from '@/lib/auth';
 import { rupees, stepName, when } from '@/lib/format';
 import { generation } from '@/lib/queries';
 import { Card, Empty, PageTitle, Stat, Status, td, th } from '@/lib/ui';
@@ -38,6 +39,7 @@ function caption(name: string): string {
 }
 
 export default async function GenerationPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireScreen('designs');
   const { id } = await params;
   const found = await generation(`batches/${id}`);
   if (!found) notFound();
@@ -50,11 +52,13 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
 
   return (
     <>
-      <PageTitle title={`${g.category[0].toUpperCase()}${g.category.slice(1)} pendant`} hint={`Started ${when(g.createdAt)}`}>
-        <Link href="/generations" className="text-sm text-slate-700 underline">
-          All designs
-        </Link>
-      </PageTitle>
+      <Link
+        href={g.madeById ? `/generations?by=${g.madeById}` : '/generations'}
+        className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+      >
+        <span aria-hidden>←</span> Back to designs
+      </Link>
+      <PageTitle title={`${g.category[0].toUpperCase()}${g.category.slice(1)} pendant`} hint={`Started ${when(g.createdAt)}`} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -64,7 +68,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
           </div>
           {g.error && <div className="mt-2 break-words text-xs text-rose-600">{g.error}</div>}
         </div>
-        <Stat label="Customer" value={g.phone ?? 'Shop staff'} />
+        <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone ? `for ${g.phone}` : undefined} />
         <Stat label="Total cost" value={rupees(total)} note={`${steps.length} steps`} />
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
@@ -113,6 +117,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                 <tr>
                   <th className={th}>When</th>
                   <th className={th}>Step</th>
+                  <th className={th}>By</th>
                   <th className={th}>Detail</th>
                   <th className={th}>Cost</th>
                 </tr>
@@ -122,6 +127,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                   <tr key={s.id}>
                     <td className={`${td} whitespace-nowrap`}>{when(s.createdAt)}</td>
                     <td className={`${td} font-medium text-slate-900`}>{stepName(s.kind)}</td>
+                    <td className={`${td} whitespace-nowrap`}>{s.by ?? '—'}</td>
                     <td className={`${td} break-words`}>{s.detail ?? '—'}</td>
                     <td className={`${td} tabular-nums`}>{rupees(s.costUsd)}</td>
                   </tr>

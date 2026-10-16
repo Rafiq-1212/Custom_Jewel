@@ -3,7 +3,8 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { auth, requireAdmin } from './auth';
+import { homeOf } from './access';
+import { auth, requireAdmin, requireEditor } from './auth';
 import { db } from './db';
 
 export interface FormState {
@@ -52,9 +53,32 @@ export async function changePassword(_previous: FormState, form: FormData): Prom
   redirect('/login?changed=1');
 }
 
+/**
+ * A new login's first sign-in: it replaces the temporary password the owner
+ * gave it with its own, and is then let in. Other devices are signed out.
+ */
+export async function setFirstPassword(_previous: FormState, form: FormData): Promise<FormState> {
+  const me = await requireAdmin({ passwordChange: true });
+  const current = field(form, 'current');
+  const next = field(form, 'next');
+  const again = field(form, 'again');
+  if (!current || !next) return { error: 'Enter the temporary password and a new one.' };
+  if (next.length < 10) return { error: 'Use a new password of at least 10 characters.' };
+  if (next !== again) return { error: 'The two new passwords are not the same.' };
+  if (next === current) return { error: 'Choose a password different from the temporary one.' };
+  try {
+    await auth().api.changePassword({ body: { currentPassword: current, newPassword: next, revokeOtherSessions: true }, headers: await headers() });
+  } catch {
+    return { error: 'The temporary password isn\'t right.' };
+  }
+  const context = await auth().$context;
+  await context.internalAdapter.updateUser(me.id, { mustChangePassword: false });
+  redirect(homeOf(me));
+}
+
 /** Gives a customer their tries back. */
 export async function resetTries(form: FormData): Promise<void> {
-  await requireAdmin();
+  await requireEditor('customers');
   const phone = field(form, 'phone');
   if (!phone) return;
   await db()`update customers set tries_used = 0 where phone = ${phone}`;

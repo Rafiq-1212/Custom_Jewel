@@ -1,17 +1,35 @@
 import Link from 'next/link';
 import { BASE_PATH } from '@/lib/base-path';
+import { requireScreen } from '@/lib/auth';
 import { rupees, when } from '@/lib/format';
-import { generations } from '@/lib/queries';
+import { generations, makers } from '@/lib/queries';
 import { Card, Empty, PageTitle, Status, td, th } from '@/lib/ui';
 
-export default async function GenerationsPage() {
-  const rows = await generations();
+export default async function DesignsPage({ searchParams }: { searchParams: Promise<{ by?: string }> }) {
+  await requireScreen('designs');
+  const by = (await searchParams).by || null;
+  const [rows, people] = await Promise.all([generations(200, by), makers()]);
+  const chip = (active: boolean) =>
+    `rounded-full border px-3 py-1 text-sm ${active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`;
   return (
     <>
-      <PageTitle title="Designs" hint="Every design made with the tool, newest first. Open one to see it from photo to production files." />
+      <PageTitle title="Designs" hint="Every design made with the tool, newest first, and who made it. Open one to see it from photo to production files." />
+      {people.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-slate-500">Made by</span>
+          <Link href="/generations" className={chip(!by)}>
+            Everyone
+          </Link>
+          {people.map((p) => (
+            <Link key={p.id} href={`/generations?by=${p.id}`} className={chip(by === p.id)}>
+              {p.name}
+            </Link>
+          ))}
+        </div>
+      )}
       <Card>
         {rows.length === 0 ? (
-          <Empty>Nothing has been generated since tracking was switched on.</Empty>
+          <Empty>{by ? 'Nothing made by this person yet.' : 'Nothing has been made since tracking was switched on.'}</Empty>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -20,6 +38,7 @@ export default async function GenerationsPage() {
                   <th className={th}>Sketch</th>
                   <th className={th}>Started</th>
                   <th className={th}>Style</th>
+                  <th className={th}>Made by</th>
                   <th className={th}>Customer</th>
                   <th className={th}>Status</th>
                   <th className={th}>Photos</th>
@@ -46,6 +65,7 @@ export default async function GenerationsPage() {
                         </Link>
                       </td>
                       <td className={`${td} capitalize`}>{g.category}</td>
+                      <td className={`${td} whitespace-nowrap`}>{g.madeBy ?? <span className="text-slate-400">Before team logins</span>}</td>
                       <td className={td}>{g.phone ?? <span className="text-slate-400">Shop staff</span>}</td>
                       <td className={td}>
                         <Status status={g.status} />

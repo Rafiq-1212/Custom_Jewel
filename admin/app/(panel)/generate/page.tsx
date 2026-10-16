@@ -1,3 +1,4 @@
+import { requireScreen } from '@/lib/auth';
 import { PageTitle } from '@/lib/ui';
 
 /**
@@ -7,7 +8,8 @@ import { PageTitle } from '@/lib/ui';
  */
 const TOOL_URL = '/';
 
-export default function GeneratePage() {
+export default async function GeneratePage() {
+  await requireScreen('generate');
   return (
     <>
       <PageTitle title="Create a pendant" hint="The pendant tool. Everything made here shows up under Designs.">
