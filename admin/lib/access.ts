@@ -24,9 +24,9 @@ export const ROLES: { value: Role; label: string; hint: string }[] = [
 
 /** In the order the menu shows them. */
 export const SCREENS: { key: Screen; href: string; label: string }[] = [
+  { key: 'overview', href: '/', label: 'Dashboard' },
   { key: 'generate', href: '/generate', label: 'Create a pendant' },
   { key: 'designs', href: '/generations', label: 'Designs' },
-  { key: 'overview', href: '/', label: 'Dashboard' },
   { key: 'customers', href: '/customers', label: 'Customers and tries' },
   { key: 'revenue', href: '/revenue', label: 'Revenue' },
 ];

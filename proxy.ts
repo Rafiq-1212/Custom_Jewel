@@ -2,7 +2,7 @@
  * The tool's page is for the team only (lib/signed-in.ts). Anyone not signed
  * in is sent to the panel's sign-in; a login that may not make pendants, to
  * the panel. A login that may, opening the bare address, is taken to the
- * tool inside the panel, with its menu; the panel shows it in a frame
+ * panel's Dashboard; the tool itself is under Create a pendant; the panel shows it in a frame
  * (Sec-Fetch-Dest: iframe), which is let through, as is ?full=1 for the
  * tool on a page of its own.
  *
@@ -20,7 +20,7 @@ export async function proxy(request: NextRequest) {
   if (!mayMake(staff)) return NextResponse.redirect(new URL('/admin', request.url));
   const framed = request.headers.get('sec-fetch-dest') === 'iframe';
   if (request.nextUrl.pathname === '/' && !framed && !request.nextUrl.searchParams.has('full')) {
-    return NextResponse.redirect(new URL('/admin/generate', request.url));
+    return NextResponse.redirect(new URL('/admin', request.url));
   }
   return NextResponse.next();
 }
