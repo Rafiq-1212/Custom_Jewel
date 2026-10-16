@@ -7,13 +7,17 @@
  * for it. lib/sketch-pipeline.ts explains the steps.
  *
  *   POST  action=start    edit, trace, submit inking  -> { inkJob }
+ *   POST  action=redraw   the same inking again, with   -> { inkJob }
+ *                         the corrections in a piece
+ *                         of feedback (lib/feedback.ts)
  *   GET   ?job=...        is the inking finished?     -> { state }
- *   POST  action=collect  read the inked artwork      -> { image }, or
- *                                                      { redo: true } once, if
- *                                                      it came back out of frame
+ *   POST  action=collect  read the inked artwork      -> { image, job, folder },
+ *                                                      or { redo: true } once,
+ *                                                      if it came back out of frame
  *
- * Nothing is kept on the server between those calls. The browser holds the
- * job name and the photograph it already has.
+ * The browser holds the job name between those calls. The drawing step's
+ * inputs are kept for each sketch (lib/ink-inputs.ts), so that a redraw
+ * needs no second photo edit.
  *
  * The Gemini API key is read from `process.env` on the server and never
  * appears in any response.
@@ -26,7 +30,10 @@ import { GeminiGenerationError, type GeminiErrorCode } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { makeTransparentMasterSketch } from '@/lib/image-processing';
 import { isCategoryId, type CategoryId } from '@/lib/pendant-categories';
-import { collectInked, ReframeNeeded, startSketch } from '@/lib/sketch-pipeline';
+import { correctionsFrom } from '@/lib/feedback';
+import { feedbackFor, linkRedraw } from '@/lib/feedback-store';
+import { loadInkInputs, saveInkInputs } from '@/lib/ink-inputs';
+import { collectInked, ReframeNeeded, startSketch, submitInking } from '@/lib/sketch-pipeline';
 import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchStarted } from '@/lib/tracking';
 import { validateImageBytes } from '@/lib/validation';
 import { makerOf } from '@/lib/signed-in';
@@ -115,6 +122,23 @@ export async function GET(request: globalThis.Request): Promise<Response> {
   }
 }
 
+/** The photo as sent, checked: bytes, not the label the browser put on them. */
+async function readPhoto(formData: FormData): Promise<{ bytes: Uint8Array; type: string } | Response> {
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) return fail('Please choose a photo.', 400);
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    return fail('We couldn\'t read that photo. Please try again.', 400);
+  }
+  // Declared size/type are just labels the client attached; the bytes are
+  // what actually get checked here before anything is sent to Gemini.
+  const validation = validateImageBytes(bytes, file.size);
+  if (!validation.ok) return fail(validation.message, validation.code === 'TOO_LARGE' ? 413 : 415);
+  return { bytes, type: file.type };
+}
+
 export async function POST(request: globalThis.Request): Promise<Response> {
   const maker = await makerOf(request);
   if (maker instanceof Response) return maker;
@@ -127,47 +151,62 @@ export async function POST(request: globalThis.Request): Promise<Response> {
 
   const category = readCategory(formData);
   if (category instanceof Response) return category;
-
-  const file = formData.get('file');
-  if (!(file instanceof File) || file.size === 0) return fail('Please choose a photo.', 400);
-
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(await file.arrayBuffer());
-  } catch {
-    return fail('We couldn\'t read that photo. Please try again.', 400);
-  }
-  // Declared size/type are just labels the client attached; the bytes are
-  // what actually get checked here before anything is sent to Gemini.
-  const validation = validateImageBytes(bytes, file.size);
-  if (!validation.ok) {
-    return fail(validation.message, validation.code === 'TOO_LARGE' ? 413 : 415);
-  }
-
-  const input = { category, imageBytes: bytes, mimeType: file.type };
   const action = formData.get('action');
 
   if (action === 'start') {
+    const photo = await readPhoto(formData);
+    if (photo instanceof Response) return photo;
     try {
       return await withCostLog(`sketch ${category}`, async () => {
-        let inkJob: string;
+        let started: Awaited<ReturnType<typeof startSketch>>;
         try {
-          inkJob = await startSketch(input);
+          started = await startSketch({ category, imageBytes: photo.bytes, mimeType: photo.type });
         } catch (error) {
           await trackSketchFailed(undefined, failureReason(error), costSoFar(), maker.id);
           throw error;
         }
-        await trackSketchStarted(inkJob, category, costSoFar(), maker.id);
-        return Response.json({ success: true, stage: 'inking', inkJob });
+        await trackSketchStarted(started.job, category, costSoFar(), maker.id);
+        // Kept so the drawing can be redone from feedback without a second photo edit.
+        after(() => saveInkInputs(started.job, started.inputs));
+        return Response.json({ success: true, stage: 'inking', inkJob: started.job });
       });
     } catch (error) {
       return failFromGemini(error, 'start');
     }
   }
 
+  // A drawing done again with the corrections in a piece of feedback
+  // (lib/feedback.ts): the same inputs, so no second photo edit.
+  if (action === 'redraw') {
+    const previous = readJobName(formData, 'previousJob');
+    const feedbackId = Number(formData.get('feedbackId'));
+    if (!previous || !Number.isInteger(feedbackId)) return fail('That sketch can\'t be redrawn. Please make a new one.', 400);
+    const said = await feedbackFor(feedbackId, previous);
+    if (!said) return fail('Save what was wrong with the sketch first, then redraw it.', 400);
+    const inputs = await loadInkInputs(previous);
+    if (!inputs) return fail('This sketch was made before redraws were possible. Please make a new one from the photo.', 409);
+    const added = correctionsFrom(said);
+    if (!added) return fail('Tick what was wrong, or write a note, so the drawing knows what to change.', 400);
+    const corrected = { ...inputs, corrections: [inputs.corrections, added].filter(Boolean).join('\n') };
+    try {
+      return await withCostLog(`redraw ${inputs.category}`, async () => {
+        const job = await submitInking(corrected);
+        await trackSketchStarted(job, inputs.category, costSoFar(), maker.id, { parent: previous, corrections: corrected.corrections });
+        await linkRedraw(feedbackId, job);
+        after(() => saveInkInputs(job, corrected));
+        return Response.json({ success: true, stage: 'inking', inkJob: job, category: inputs.category });
+      });
+    } catch (error) {
+      return failFromGemini(error, 'redraw');
+    }
+  }
+
   if (action === 'collect') {
     const inkJob = readJobName(formData, 'inkJob');
     if (!inkJob) return fail('That sketch has expired. Please start it again.', 400);
+    // The photo comes with a first drawing, to be kept with it; a redraw has it already.
+    const photo = formData.get('file') ? await readPhoto(formData) : null;
+    if (photo instanceof Response) return photo;
     try {
       return await withCostLog(`inking ${category} (batched)`, async () => {
         // Deterministic post-processing, not AI: crop the white margin and
@@ -185,11 +224,11 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         // Kept in the cloud with the photo it was made from (lib/archive.ts),
         // once the sketch has gone back: the operator never waits on a save.
         const folder = orderFolder(master.buffer);
-        const extension = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
         const spent = costSoFar();
         after(async () => {
+          const extension = photo?.type === 'image/png' ? 'png' : photo?.type === 'image/webp' ? 'webp' : 'jpg';
           const [, saved] = await Promise.all([
-            archive(folder, `photo.${extension}`, bytes, file.type || 'image/jpeg'),
+            photo ? archive(folder, `photo.${extension}`, photo.bytes, photo.type || 'image/jpeg') : null,
             archive(folder, 'sketch.png', master.buffer, 'image/png'),
           ]);
           await trackSketchDone(inkJob, folder, spent, saved, maker.id);
@@ -197,6 +236,9 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         return Response.json({
           success: true,
           stage: 'done',
+          // Which design this is: feedback on it is given against the job.
+          job: inkJob,
+          folder,
           image: `data:${master.contentType};base64,${master.buffer.toString('base64')}`,
         });
       });

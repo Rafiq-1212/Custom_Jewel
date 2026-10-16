@@ -3,21 +3,23 @@ import { ROLES, canSee } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { BASE_PATH } from '@/lib/base-path';
 import { percent, rupees, stepName, when } from '@/lib/format';
-import { activityByMember, byDay, generations, recentFailures, spendByStep, toRange, totals } from '@/lib/queries';
+import { activityByMember, byDay, feedbackTotals, generations, recentFailures, spendByStep, toRange, totals } from '@/lib/queries';
 import { Card, Empty, PageTitle, RangePicker, Stat, Status, td, th } from '@/lib/ui';
 
 /** The dashboard: what has been made, by whom, and what it cost. */
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const me = await requireScreen('overview');
   const range = toRange((await searchParams).range);
-  const [t, days, steps, failures, members, latest] = await Promise.all([
+  const [t, days, steps, failures, members, latest, fb] = await Promise.all([
     totals(range),
     byDay(),
     spendByStep(range),
     recentFailures(),
     activityByMember(range),
     generations(8),
+    feedbackTotals(range),
   ]);
+  const seeFeedback = canSee(me, 'feedback');
   const seeDesigns = canSee(me, 'designs');
   const attempts = t.tried + t.failedBeforeStart;
   const allFailed = t.failed + t.failedBeforeStart;
@@ -34,6 +36,25 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Stat label="Came out" value={percent(t.done, attempts)} note={t.redone ? `${t.redone} had to be drawn twice` : 'of sketches tried'} />
         <Stat label="Product photos" value={String(t.photos)} note={`${t.files} sets of production files`} />
         <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={t.done ? `${rupees(t.spendUsd / t.done)} per finished sketch, all steps` : 'no finished sketches yet'} />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat
+          label="Right first time"
+          value={percent(fb.good, fb.rated)}
+          note={fb.rated ? `${fb.good} of ${fb.rated} rated sketches had no 👎` : 'no sketches rated yet'}
+        />
+        <Stat label="Open problems" value={String(fb.open)} note="👎 feedback not yet marked fixed" />
+        <Stat label="Redraws" value={String(fb.redraws)} note={fb.redraws ? `${fb.redrawsLiked} rated 👍 afterwards` : 'none in this period'} />
+        <div className="flex items-end rounded-xl border border-slate-200 bg-white p-4">
+          {seeFeedback ? (
+            <Link href="/feedback" className="text-sm font-medium text-slate-900 underline">
+              See all feedback →
+            </Link>
+          ) : (
+            <span className="text-sm text-slate-500">Feedback is given under each sketch in the tool.</span>
+          )}
+        </div>
       </div>
 
       <div className="mt-6">

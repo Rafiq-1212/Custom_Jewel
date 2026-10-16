@@ -41,6 +41,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                   <th className={th}>Made by</th>
                   <th className={th}>Customer</th>
                   <th className={th}>Status</th>
+                  <th className={th}>Feedback</th>
                   <th className={th}>Photos</th>
                   <th className={th}>Files</th>
                   <th className={th}>Cost so far</th>
@@ -69,6 +70,16 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                       <td className={td}>{g.phone ?? <span className="text-slate-400">Shop staff</span>}</td>
                       <td className={td}>
                         <Status status={g.status} />
+                        {g.parentId && <div className="mt-1 text-xs text-slate-500">Redraw</div>}
+                      </td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        {g.liked + g.disliked === 0 ? (
+                          <span className="text-slate-300">—</span>
+                        ) : (
+                          <span>
+                            {g.liked > 0 && <span title="Looks right">👍 {g.liked}</span>} {g.disliked > 0 && <span title="Needs changes">👎 {g.disliked}</span>}
+                          </span>
+                        )}
                       </td>
                       <td className={`${td} tabular-nums`}>{g.photos}</td>
                       <td className={`${td} tabular-nums`}>{g.files}</td>

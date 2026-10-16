@@ -84,3 +84,22 @@ export async function resetTries(form: FormData): Promise<void> {
   await db()`update customers set tries_used = 0 where phone = ${phone}`;
   revalidatePath('/customers');
 }
+
+/**
+ * Marks a piece of feedback fixed, with what was changed, or opens it again.
+ * Fixed is for when the tool itself was changed so the problem should not
+ * come back; whether it does shows in the counts on the Feedback screen.
+ */
+export async function setFeedbackStatus(form: FormData): Promise<void> {
+  const me = await requireEditor('feedback');
+  const id = Number(field(form, 'id'));
+  const status = field(form, 'status') === 'fixed' ? 'fixed' : 'open';
+  const resolution = field(form, 'resolution').slice(0, 400) || null;
+  if (!Number.isInteger(id)) return;
+  if (status === 'fixed') {
+    await db()`update feedback set status = 'fixed', resolved_at = now(), resolved_by = ${me.id}, resolution = ${resolution} where id = ${id}`;
+  } else {
+    await db()`update feedback set status = 'open', resolved_at = null, resolved_by = null, resolution = null where id = ${id}`;
+  }
+  revalidatePath('/feedback');
+}

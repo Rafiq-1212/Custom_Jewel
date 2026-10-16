@@ -18,6 +18,7 @@
 
 import * as React from 'react';
 import { dataUrlToBlob, downloadFile } from '@/lib/download';
+import { FeedbackPanel } from './FeedbackPanel';
 import type { MaterialId, RimColorId } from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import type { DesignType, SilhouetteContour } from '@/lib/pendant-geometry';
@@ -41,8 +42,11 @@ export function ExportPanel({
   contour,
   rimColor,
   transform,
+  job,
 }: {
   sketch: string;
+  /** The design, for feedback on the files once they are made. */
+  job: string | null;
   shape: ShapeId;
   material: MaterialId;
   category: CategoryId;
@@ -141,6 +145,7 @@ export function ExportPanel({
           </span>
         </div>
       )}
+      {assets && <FeedbackPanel key={job} job={job} stage="production_files" />}
     </div>
   );
 }

@@ -20,6 +20,8 @@ import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, isShapeId, type PendantTransform, 
 
 const SKETCH_KEY = 'pendant-designer:sketch';
 const PREFS_KEY = 'pendant-designer:prefs';
+/** Which design the sketch is (its job), so feedback still reaches it after a reload. */
+const JOB_KEY = 'pendant-designer:sketch-job';
 
 export interface StoredPrefs {
   selectedCategory: CategoryId;
@@ -48,6 +50,27 @@ export function saveSketch(sketch: string | null): void {
     // Quota exceeded or storage disabled — the sketch just won't survive a
     // reload this time. The in-memory state the user is actively using is
     // unaffected either way.
+  }
+}
+
+export function saveSketchJob(job: string | null): void {
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    if (job) storage.setItem(JOB_KEY, job);
+    else storage.removeItem(JOB_KEY);
+  } catch {
+    // Feedback is then just not offered after a reload.
+  }
+}
+
+export function loadSketchJob(): string | null {
+  const storage = getStorage();
+  if (!storage) return null;
+  try {
+    return storage.getItem(JOB_KEY);
+  } catch {
+    return null;
   }
 }
 
@@ -121,6 +144,7 @@ export function clearPendantSession(): void {
   if (!storage) return;
   try {
     storage.removeItem(SKETCH_KEY);
+    storage.removeItem(JOB_KEY);
     storage.removeItem(PREFS_KEY);
   } catch {
     // Nothing to do — worst case stale data lingers until the tab closes.

@@ -61,9 +61,18 @@ export function trackEvent(event: TrackedEvent): Promise<void> {
 }
 
 /** A photo went in and its drawing was queued. */
-export async function trackSketchStarted(generationId: string, category: string, costUsd: number, userId: string): Promise<void> {
+export async function trackSketchStarted(
+  generationId: string,
+  category: string,
+  costUsd: number,
+  userId: string,
+  /** For a redraw: the drawing it corrects, and the corrections it was given. */
+  redraw?: { parent: string; corrections: string },
+): Promise<void> {
   await write('a sketch start', (sql) =>
-    sql`insert into generations (id, category, created_by) values (${generationId}, ${category}, ${userId}) on conflict (id) do nothing`,
+    sql`insert into generations (id, category, created_by, parent_id, corrections)
+        values (${generationId}, ${category}, ${userId}, ${redraw?.parent ?? null}, ${redraw?.corrections ?? null})
+        on conflict (id) do nothing`,
   );
   await trackEvent({ kind: 'sketch_start', generationId, detail: category, costUsd, userId });
 }

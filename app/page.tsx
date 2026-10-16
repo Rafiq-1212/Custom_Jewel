@@ -30,6 +30,7 @@
 import * as React from 'react';
 import { DownloadPanel } from '@/components/DownloadPanel';
 import { ExportPanel } from '@/components/ExportPanel';
+import { FeedbackPanel } from '@/components/FeedbackPanel';
 import { GeneratedImage } from '@/components/GeneratedImage';
 import { GenerationProgress } from '@/components/GenerationProgress';
 import { CutLayoutPreview } from '@/components/CutLayoutPreview';
@@ -48,7 +49,7 @@ import { DEFAULT_MATERIAL_ID, DEFAULT_RIM_COLOR_ID, PENDANT_MATERIAL_LIST, type 
 import { DEFAULT_DESIGN_TYPE, type DesignType, type SilhouetteContour } from '@/lib/pendant-geometry';
 import { DEFAULT_CATEGORY_ID, GENERATION_CATEGORY_LIST, PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import { DEFAULT_SHAPE_ID, DEFAULT_TRANSFORM, PENDANT_SHAPES, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
-import { clearPendantSession, loadPrefs, loadSketch, savePrefs, saveSketch } from '@/lib/pendant-storage';
+import { clearPendantSession, loadPrefs, loadSketch, loadSketchJob, savePrefs, saveSketch, saveSketchJob } from '@/lib/pendant-storage';
 import { runSketch, SketchError, type SketchStage } from '@/lib/sketch-client';
 
 type Status = 'idle' | 'generating' | 'done' | 'error';
@@ -65,6 +66,11 @@ export default function Home() {
   // these SSR-safe defaults first; the effect below is what's allowed to
   // differ, strictly after hydration.
   const [masterSketch, setMasterSketch] = React.useState<string | null>(null);
+  // Which design the sketch is (its drawing job): feedback is given against it.
+  const [sketchJob, setSketchJob] = React.useState<string | null>(null);
+  // Counts sketches started from a photo, so the feedback box starts afresh
+  // for each one but carries on across a redraw of the same one.
+  const [sketchRun, setSketchRun] = React.useState(0);
   const [status, setStatus] = React.useState<Status>('idle');
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
@@ -119,6 +125,7 @@ export default function Home() {
     const storedSketch = loadSketch();
     if (storedSketch) {
       setMasterSketch(storedSketch);
+      setSketchJob(loadSketchJob());
       setStatus('done');
     }
     const prefs = loadPrefs();
@@ -139,7 +146,8 @@ export default function Home() {
   React.useEffect(() => {
     if (!isHydrated) return;
     saveSketch(masterSketch);
-  }, [isHydrated, masterSketch]);
+    saveSketchJob(masterSketch ? sketchJob : null);
+  }, [isHydrated, masterSketch, sketchJob]);
 
   React.useEffect(() => {
     if (!isHydrated || !masterSketch) return;
@@ -190,6 +198,8 @@ export default function Home() {
     // A new photo means any previous sketch, and the photo edit behind it, no
     // longer correspond to it.
     setMasterSketch(null);
+    setSketchJob(null);
+    setSketchRun((n) => n + 1);
   };
 
   /**
@@ -209,6 +219,8 @@ export default function Home() {
     setStatus('generating');
     setErrorMessage(null);
     setMasterSketch(null);
+    setSketchJob(null);
+    setSketchRun((n) => n + 1);
     // Only the boxed part of the photo is ever sent — see lib/photo-crop.ts.
     let cropped: File;
     try {
@@ -220,7 +232,7 @@ export default function Home() {
       return;
     }
     try {
-      const image = await runSketch({
+      const sketch = await runSketch({
         file: cropped,
         category: selectedCategory,
         onStage: (next) => {
@@ -228,8 +240,9 @@ export default function Home() {
         },
         cancelled: superseded,
       });
-      if (superseded() || !image) return; // superseded by a newer request
-      setMasterSketch(image);
+      if (superseded() || !sketch) return; // superseded by a newer request
+      setMasterSketch(sketch.image);
+      setSketchJob(sketch.job);
       setStatus('done');
     } catch (error) {
       if (superseded()) return;
@@ -245,6 +258,8 @@ export default function Home() {
     setFile(null);
     setOriginalImage(null);
     setMasterSketch(null);
+    setSketchJob(null);
+    setSketchRun((n) => n + 1);
     setErrorMessage(null);
     setStatus('idle');
     setSelectedCategory(null);
@@ -368,6 +383,17 @@ export default function Home() {
                 <span aria-hidden>✓</span> Your {PENDANT_CATEGORIES[activeCategoryId].label} sketch is ready. Everything below uses
                 this same drawing.
               </p>
+              <FeedbackPanel
+                key={sketchRun}
+                job={sketchJob}
+                stage="sketch"
+                category={activeCategoryId}
+                image={masterSketch}
+                onRedrawn={(sketch) => {
+                  setMasterSketch(sketch.image);
+                  setSketchJob(sketch.job);
+                }}
+              />
               {file && (
                 // The ink filter gives the same artwork from the same photo edit
                 // every time, so "again" only means anything as a fresh edit.
@@ -453,11 +479,11 @@ export default function Home() {
           </Section>
 
           <Section step={7} title="Product photo">
-            <MockupPanel {...previewProps} sketch={masterSketch} />
+            <MockupPanel {...previewProps} sketch={masterSketch} job={sketchJob} />
           </Section>
 
           <Section step={8} title="Files for production">
-            <ExportPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} />
+            <ExportPanel {...previewProps} sketch={masterSketch} material={selectedMaterial} job={sketchJob} />
           </Section>
 
           <Section step={9} title="Download a preview">

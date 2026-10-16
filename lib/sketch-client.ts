@@ -72,12 +72,18 @@ export interface SketchRequest {
   cancelled: () => boolean;
 }
 
+/** A finished drawing: the artwork as a data URL, and the design it is (its job), which feedback is given against. */
+export interface Sketch {
+  image: string;
+  job: string;
+}
+
 /**
- * The finished artwork as a data URL, or null if the run was cancelled. A
- * Face Pendant drawing that came back out of frame is started over once;
- * the second attempt is told so, and is kept whatever its framing.
+ * The finished drawing, or null if the run was cancelled. A Face Pendant
+ * drawing that came back out of frame is started over once; the second
+ * attempt is told so, and is kept whatever its framing.
  */
-export async function runSketch(request: SketchRequest, attempt = 1): Promise<string | null> {
+export async function runSketch(request: SketchRequest, attempt = 1): Promise<Sketch | null> {
   try {
     return await sketchOnce(request, attempt);
   } catch (error) {
@@ -86,7 +92,7 @@ export async function runSketch(request: SketchRequest, attempt = 1): Promise<st
   }
 }
 
-async function sketchOnce(request: SketchRequest, attempt: number): Promise<string | null> {
+async function sketchOnce(request: SketchRequest, attempt: number): Promise<Sketch | null> {
   const form = (action: string, extra: Record<string, string> = {}): FormData => {
     const data = new FormData();
     data.set('action', action);
@@ -108,5 +114,40 @@ async function sketchOnce(request: SketchRequest, attempt: number): Promise<stri
   request.onStage('finishing');
   const done = await post(form('collect', { inkJob }));
   if (request.cancelled()) return null;
-  return String(done.image);
+  return { image: String(done.image), job: String(done.job ?? inkJob) };
+}
+
+export interface RedrawRequest {
+  /** The drawing being corrected. */
+  previousJob: string;
+  /** The 👎 saved against it, whose ticks and note are the corrections. */
+  feedbackId: number;
+  category: string;
+  onStage: (stage: SketchStage) => void;
+  cancelled: () => boolean;
+}
+
+/**
+ * The same drawing done again with the shop's corrections (lib/feedback.ts):
+ * no photo, no photo edit, the drawing step alone. Not redone if it comes
+ * back out of frame: it is kept as it is, like a second attempt.
+ */
+export async function runRedraw(request: RedrawRequest): Promise<Sketch | null> {
+  const form = (action: string, extra: Record<string, string>): FormData => {
+    const data = new FormData();
+    data.set('action', action);
+    data.set('attempt', '2');
+    data.set('category', request.category);
+    for (const [key, value] of Object.entries(extra)) data.set(key, value);
+    return data;
+  };
+  request.onStage('inking');
+  const started = await post(form('redraw', { previousJob: request.previousJob, feedbackId: String(request.feedbackId) }));
+  const inkJob = String(started.inkJob ?? '');
+  if (!inkJob) throw new SketchError('Something went wrong redrawing the sketch. Please try again.');
+  if (!(await waitFor(inkJob, request.cancelled))) return null;
+  request.onStage('finishing');
+  const done = await post(form('collect', { inkJob }));
+  if (request.cancelled()) return null;
+  return { image: String(done.image), job: String(done.job ?? inkJob) };
 }

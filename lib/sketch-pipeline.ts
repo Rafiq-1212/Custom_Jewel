@@ -35,6 +35,7 @@ import { roughInkTrace, type Region } from './ink-filter';
 import { unmirror } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, ENHANCE_RETRY_NOTE, INK_PROMPT } from './sketch-prompts';
+import { correctionsBlock } from './feedback';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/sketch-pipeline.ts was imported into a browser bundle. This module is server-only.');
@@ -357,7 +358,27 @@ const INK_TEMPERATURE = 0.1;
  * returning that job's name. A head-only edit that came back with something
  * still touching the bottom is redone once, here, before anything is traced.
  */
-export async function startSketch(input: SketchInput): Promise<string> {
+/**
+ * Everything the drawing step is given, kept so the same drawing can be asked
+ * for again with corrections (lib/feedback.ts, lib/ink-inputs.ts) without
+ * paying for the photo edit a second time.
+ */
+export interface InkInputs {
+  category: CategoryId;
+  /** The rough ink trace of the edited photo (image 1). */
+  trace: Buffer;
+  /** The edited photo (image 2). */
+  photo: Buffer;
+  /** What the photo showed about each person (personFacts). */
+  facts: string;
+  /** Corrections from the shop's feedback, built up over redraws. */
+  corrections: string;
+  /** Returned with the job, for collectInked: the head mask and jaw of a Face Pendant. */
+  metadata?: Record<string, string>;
+}
+
+/** Edits the photo and reads it: the paid, slow half of a sketch. */
+export async function prepareInking(input: SketchInput): Promise<InkInputs> {
   let edited = await touchUp(input);
   if (HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(edited))) {
     console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
@@ -369,13 +390,27 @@ export async function startSketch(input: SketchInput): Promise<string> {
   // still apply.
   const headOnly = HEAD_ONLY_CATEGORIES.has(input.category) || CROP_TO_HEAD_CATEGORIES.has(input.category);
   const trace = await sharp(await roughInkTrace(photo, headOnly ? undefined : faces?.regions)).median(SMOOTHING_WINDOW).threshold(128).png().toBuffer();
-  const facts = faces ? personFacts(faces.people) : '';
+  return {
+    category: input.category,
+    trace,
+    photo,
+    facts: faces ? personFacts(faces.people) : '',
+    corrections: '',
+    metadata: CROP_TO_HEAD_CATEGORIES.has(input.category)
+      ? { head: await headMask(photo, jaw?.keep), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep, beard: jaw.beard }) } : {}) }
+      : undefined,
+  };
+}
+
+/** Submits the drawing, with any corrections; returns its batch job. */
+export async function submitInking(inputs: InkInputs): Promise<string> {
+  const prompt = [INK_PROMPT, inputs.facts, correctionsBlock(inputs.corrections)].filter(Boolean).join('\n\n');
   return submitImageJob(
     {
-      prompt: facts ? `${INK_PROMPT}\n\n${facts}` : INK_PROMPT,
+      prompt,
       images: [
-        { bytes: trace, mimeType: 'image/png' },
-        { bytes: photo, mimeType: 'image/png' },
+        { bytes: inputs.trace, mimeType: 'image/png' },
+        { bytes: inputs.photo, mimeType: 'image/png' },
       ],
       // 2K, batched. Tested at 1K live to save the wait: it came back heavier
       // in the laser file and dropped both kumkum marks on the temple photo.
@@ -383,13 +418,18 @@ export async function startSketch(input: SketchInput): Promise<string> {
       // Low, so the same photo draws the same people every time. At the
       // default, one run of the temple couple was faithful and the next gave
       // him a styled quiff and her a longer, older face from the same inputs.
+      // It also keeps a redraw close to the drawing it corrects.
       temperature: INK_TEMPERATURE,
     },
-    `inking ${input.category}`,
-    CROP_TO_HEAD_CATEGORIES.has(input.category)
-      ? { head: await headMask(photo, jaw?.keep), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep, beard: jaw.beard }) } : {}) }
-      : undefined,
+    `inking ${inputs.category}${inputs.corrections ? ' (corrected)' : ''}`,
+    inputs.metadata,
   );
+}
+
+/** A new sketch: the photo edited and read, and its drawing submitted. */
+export async function startSketch(input: SketchInput): Promise<{ job: string; inputs: InkInputs }> {
+  const inputs = await prepareInking(input);
+  return { job: await submitInking(inputs), inputs };
 }
 
 /**

@@ -58,3 +58,31 @@ create table if not exists orders (
   currency text not null default 'INR'
 );
 create index if not exists orders_created_at on orders (created_at desc);
+
+-- Feedback on what the tool made: a sketch, a product photo, or a set of
+-- production files. Given by the team in the tool, read and worked through
+-- in the admin panel's Feedback screen.
+create table if not exists feedback (
+  id bigserial primary key,
+  created_at timestamptz not null default now(),
+  generation_id text,          -- the design it is about
+  stage text not null,         -- sketch | product_photo | production_files
+  rating text not null,        -- good | bad
+  issues text[] not null default '{}',        -- what was wrong, by key (lib/feedback.ts)
+  issue_labels text[] not null default '{}',  -- the same, as the person read them
+  person text,                 -- which person in the photo: left | middle | right | all
+  note text,                   -- in their own words
+  user_id text,                -- who gave it ("user".id)
+  redraw_job text,             -- the drawing made from it, if one was
+  status text not null default 'open',        -- open | fixed
+  resolved_at timestamptz,
+  resolved_by text,
+  resolution text              -- what was changed to fix it
+);
+create index if not exists feedback_created_at on feedback (created_at desc);
+create index if not exists feedback_generation on feedback (generation_id);
+
+-- A drawing redone from feedback points at the drawing it corrects, and keeps
+-- the corrections it was given (they carry on into a redraw of a redraw).
+alter table generations add column if not exists parent_id text;
+alter table generations add column if not exists corrections text;

@@ -22,6 +22,7 @@
 
 import * as React from 'react';
 import { dataUrlToBlob, downloadFile, extensionForDataUrl } from '@/lib/download';
+import { FeedbackPanel } from './FeedbackPanel';
 import { MockupError, runMockup } from '@/lib/mockup-client';
 import { PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
@@ -54,8 +55,11 @@ export function MockupPanel({
   contour,
   rimColor,
   transform,
+  job,
 }: {
   sketch: string;
+  /** The design, for feedback on the photo once there is one. */
+  job: string | null;
   shape: ShapeId;
   category: CategoryId;
   designType: DesignType;
@@ -161,6 +165,8 @@ export function MockupPanel({
       {silhouettePending && (
         <p className="text-xs text-slate-400">Just a moment while we work out the cut line.</p>
       )}
+
+      {Object.values(mockups).some((m) => m.status === 'done') && <FeedbackPanel key={job} job={job} stage="product_photo" />}
     </div>
   );
 }

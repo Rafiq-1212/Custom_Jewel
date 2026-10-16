@@ -131,6 +131,12 @@ export interface Generation {
   /** The team member who made it, by name; null for what was made before the tool needed a login. */
   madeBy: string | null;
   madeById: string | null;
+  /** The drawing this one redraws, from feedback; null for a first drawing. */
+  parentId: string | null;
+  corrections: string | null;
+  /** 👍 and 👎 given on its sketch. */
+  liked: number;
+  disliked: number;
 }
 
 /**
@@ -157,13 +163,17 @@ function toGeneration(r: Record<string, unknown>): Generation {
     sketchFile: r.sketch_file as string | null,
     madeBy: (r.made_by as string | null) ?? null,
     madeById: (r.created_by as string | null) ?? null,
+    parentId: (r.parent_id as string | null) ?? null,
+    corrections: (r.corrections as string | null) ?? null,
+    liked: Number(r.liked ?? 0),
+    disliked: Number(r.disliked ?? 0),
   };
 }
 
 /** The newest generations, each with what it has cost so far, what was made from it, and who made it; only `by`'s when given. */
 export async function generations(limit = 200, by: string | null = null): Promise<Generation[]> {
   const rows = await db()`
-    select g.*, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' end) as made_by
+    select g.*, fb.liked, fb.disliked, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' end) as made_by
     from generations g
     left join "user" u on u.id = g.created_by
     left join lateral (
@@ -176,6 +186,10 @@ export async function generations(limit = 200, by: string | null = null): Promis
     left join lateral (
       select file from events e where e.generation_id = g.id and e.kind = 'sketch_done' and e.file is not null order by e.id desc limit 1
     ) s on true
+    left join lateral (
+      select count(*) filter (where f.rating = 'good')::int as liked, count(*) filter (where f.rating = 'bad')::int as disliked
+      from feedback f where f.generation_id = g.id and f.stage = 'sketch'
+    ) fb on true
     where ${by}::text is null or g.created_by = ${by}
     order by g.created_at desc
     limit ${limit}`;
@@ -338,4 +352,146 @@ export async function teamMembers(): Promise<TeamMember[]> {
     createdAt: r.createdAt,
     lastSeenAt: r.last_seen,
   }));
+}
+
+export interface Feedback {
+  id: number;
+  createdAt: string;
+  generationId: string | null;
+  stage: string;
+  rating: string;
+  issues: string[];
+  issueLabels: string[];
+  person: string | null;
+  note: string | null;
+  by: string | null;
+  redrawJob: string | null;
+  status: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolution: string | null;
+  sketchFile: string | null;
+  category: string | null;
+}
+
+function toFeedback(r: Record<string, unknown>): Feedback {
+  return {
+    id: Number(r.id),
+    createdAt: r.created_at as string,
+    generationId: r.generation_id as string | null,
+    stage: r.stage as string,
+    rating: r.rating as string,
+    issues: (r.issues as string[]) ?? [],
+    issueLabels: (r.issue_labels as string[]) ?? [],
+    person: r.person as string | null,
+    note: r.note as string | null,
+    by: r.by as string | null,
+    redrawJob: r.redraw_job as string | null,
+    status: r.status as string,
+    resolvedAt: r.resolved_at as string | null,
+    resolvedBy: r.resolved_by_name as string | null,
+    resolution: r.resolution as string | null,
+    sketchFile: r.sketch_file as string | null,
+    category: r.category as string | null,
+  };
+}
+
+export interface FeedbackFilter {
+  stage?: string | null;
+  issue?: string | null;
+  status?: string | null;
+  rating?: string | null;
+  by?: string | null;
+}
+
+/** Feedback, newest first, with the sketch it is about and who gave it. */
+export async function feedbackList(filter: FeedbackFilter = {}, limit = 300): Promise<Feedback[]> {
+  const rows = await db()`
+    select f.*, u.name as by, r.name as resolved_by_name, g.category, s.file as sketch_file
+    from feedback f
+    left join "user" u on u.id = f.user_id
+    left join "user" r on r.id = f.resolved_by
+    left join generations g on g.id = f.generation_id
+    left join lateral (
+      select file from events e where e.generation_id = f.generation_id and e.kind = 'sketch_done' and e.file is not null order by e.id desc limit 1
+    ) s on true
+    where (${filter.stage ?? null}::text is null or f.stage = ${filter.stage ?? null})
+      and (${filter.issue ?? null}::text is null or ${filter.issue ?? null} = any(f.issues))
+      and (${filter.status ?? null}::text is null or f.status = ${filter.status ?? null})
+      and (${filter.rating ?? null}::text is null or f.rating = ${filter.rating ?? null})
+      and (${filter.by ?? null}::text is null or f.user_id = ${filter.by ?? null})
+    order by f.created_at desc
+    limit ${limit}`;
+  return rows.map(toFeedback);
+}
+
+export async function feedbackOnDesign(id: string): Promise<Feedback[]> {
+  const rows = await db()`
+    select f.*, u.name as by, r.name as resolved_by_name, null as category, null as sketch_file
+    from feedback f left join "user" u on u.id = f.user_id left join "user" r on r.id = f.resolved_by
+    where f.generation_id = ${id}
+    order by f.created_at`;
+  return rows.map(toFeedback);
+}
+
+export interface IssueCount {
+  stage: string;
+  issue: string;
+  label: string;
+  open: number;
+  total: number;
+  last: string;
+}
+
+/** How often each problem has been reported, the most common first. */
+export async function issueCounts(): Promise<IssueCount[]> {
+  const rows = await db()`
+    select f.stage, i.key as issue, max(i.label) as label,
+           count(*) filter (where f.status = 'open')::int as open, count(*)::int as total, max(f.created_at) as last
+    from feedback f
+    cross join lateral unnest(f.issues, f.issue_labels) as i(key, label)
+    where f.rating = 'bad'
+    group by f.stage, i.key
+    order by open desc, total desc`;
+  return rows.map((r) => ({ stage: r.stage, issue: r.issue, label: r.label, open: r.open, total: r.total, last: r.last }));
+}
+
+export interface FeedbackTotals {
+  rated: number;
+  good: number;
+  open: number;
+  redraws: number;
+  redrawsLiked: number;
+}
+
+/**
+ * For the dashboard: of first drawings whose sketch was rated, how many were
+ * right first time; what is still open; and how the redraws did.
+ */
+export async function feedbackTotals(range: Range): Promise<FeedbackTotals> {
+  const from = since(range);
+  const [row] = await db()`
+    select
+      (select count(distinct f.generation_id) from feedback f join generations g on g.id = f.generation_id
+        where f.stage = 'sketch' and g.parent_id is null and f.created_at >= ${from})::int as rated,
+      (select count(distinct f.generation_id) from feedback f join generations g on g.id = f.generation_id
+        where f.stage = 'sketch' and g.parent_id is null and f.created_at >= ${from}
+          and not exists (select 1 from feedback b where b.generation_id = f.generation_id and b.stage = 'sketch' and b.rating = 'bad'))::int as good,
+      (select count(*) from feedback where status = 'open' and rating = 'bad')::int as open,
+      (select count(*) from generations where parent_id is not null and created_at >= ${from})::int as redraws,
+      (select count(distinct g.id) from generations g join feedback f on f.generation_id = g.id and f.stage = 'sketch' and f.rating = 'good'
+        where g.parent_id is not null and g.created_at >= ${from})::int as redraws_liked`;
+  return { rated: row.rated, good: row.good, open: row.open, redraws: row.redraws, redrawsLiked: row.redraws_liked };
+}
+
+/** The drawings made by redrawing this one. */
+export async function redrawsOf(id: string): Promise<{ id: string; createdAt: string; status: string }[]> {
+  const rows = await db()`select id, created_at, status from generations where parent_id = ${id} order by created_at`;
+  return rows.map((r) => ({ id: r.id, createdAt: r.created_at, status: r.status }));
+}
+
+/** Everyone who has given feedback, for the filter. */
+export async function feedbackGivers(): Promise<{ id: string; name: string }[]> {
+  const rows = await db()`select distinct u.id, u.name from feedback f join "user" u on u.id = f.user_id order by u.name`;
+  return rows.map((r) => ({ id: r.id, name: r.name }));
 }

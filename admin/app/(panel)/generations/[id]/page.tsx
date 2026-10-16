@@ -4,7 +4,8 @@ import { notFound } from 'next/navigation';
 import { list } from '@vercel/blob';
 import { requireScreen } from '@/lib/auth';
 import { rupees, stepName, when } from '@/lib/format';
-import { generation } from '@/lib/queries';
+import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
+import { feedbackOnDesign, generation, redrawsOf } from '@/lib/queries';
 import { Card, Empty, PageTitle, Stat, Status, td, th } from '@/lib/ui';
 
 interface Saved {
@@ -45,7 +46,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
   if (!found) notFound();
   const { generation: g, steps } = found;
   const folders = [...new Set([g.folder, ...steps.map((s) => (s.file ? s.file.slice(0, s.file.lastIndexOf('/')) : null))].filter((f): f is string => Boolean(f)))];
-  const files = await savedFiles(folders);
+  const [files, feedback, redraws] = await Promise.all([savedFiles(folders), feedbackOnDesign(g.id), redrawsOf(g.id)]);
   const pictures = files.filter((f) => isPicture(f.name));
   const downloads = files.filter((f) => !isPicture(f.name));
   const total = steps.reduce((sum, s) => sum + s.costUsd, 0);
@@ -71,6 +72,69 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
         <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone ? `for ${g.phone}` : undefined} />
         <Stat label="Total cost" value={rupees(total)} note={`${steps.length} steps`} />
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
+      </div>
+
+      {(g.parentId || redraws.length > 0) && (
+        <div className="mt-6">
+          <Card title="Redraws">
+            <div className="space-y-2 p-4 text-sm">
+              {g.parentId && (
+                <div>
+                  This is a redraw of{' '}
+                  <Link href={`/generations/${g.parentId.replace('batches/', '')}`} className="font-medium text-slate-900 underline">
+                    an earlier drawing
+                  </Link>
+                  , with these corrections from the shop:
+                  {g.corrections && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-sans text-xs text-slate-700">{g.corrections}</pre>}
+                </div>
+              )}
+              {redraws.map((r) => (
+                <div key={r.id}>
+                  Redrawn from feedback on {when(r.createdAt)}:{' '}
+                  <Link href={`/generations/${r.id.replace('batches/', '')}`} className="font-medium text-slate-900 underline">
+                    open the redraw
+                  </Link>{' '}
+                  <Status status={r.status} />
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <div className="mt-6">
+        <Card title="Feedback">
+          {feedback.length === 0 ? (
+            <Empty>No feedback on this design yet.</Empty>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {feedback.map((f) => (
+                <li key={f.id} className="space-y-1 px-4 py-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>{f.rating === 'good' ? '👍' : '👎'}</span>
+                    <span className="font-medium text-slate-900">{STAGE_LABELS[f.stage] ?? f.stage}</span>
+                    <span className="text-slate-500">
+                      · {f.by ?? 'Unknown'} · {when(f.createdAt)}
+                    </span>
+                    {f.rating === 'bad' && (
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${f.status === 'fixed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {f.status === 'fixed' ? 'Fixed' : 'Open'}
+                      </span>
+                    )}
+                  </div>
+                  {f.issueLabels.length > 0 && <div className="text-slate-700">{f.issueLabels.join(' · ')}</div>}
+                  {f.person && f.person !== 'all' && <div className="text-slate-500">About: {PERSON_LABELS[f.person] ?? f.person}</div>}
+                  {f.note && <blockquote className="border-l-2 border-slate-200 pl-3 text-slate-700">{f.note}</blockquote>}
+                  {f.redrawJob && (
+                    <Link href={`/generations/${f.redrawJob.replace('batches/', '')}`} className="text-xs text-slate-900 underline">
+                      Redrawn from this feedback
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </div>
 
       <div className="mt-6">
