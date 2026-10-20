@@ -4,13 +4,14 @@ import { requireScreen } from '@/lib/auth';
 import { BASE_PATH } from '@/lib/base-path';
 import { percent, rupees, stepName, when } from '@/lib/format';
 import { activityByMember, byDay, feedbackTotals, generations, recentFailures, spendByStep, toRange, totals } from '@/lib/queries';
+import { shopTotals } from '@/lib/shop-queries';
 import { Card, Empty, PageTitle, RangePicker, Stat, Status, td, th } from '@/lib/ui';
 
 /** The dashboard: what has been made, by whom, and what it cost. */
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const me = await requireScreen('overview');
   const range = toRange((await searchParams).range);
-  const [t, days, steps, failures, members, latest, fb] = await Promise.all([
+  const [t, days, steps, failures, members, latest, fb, shop] = await Promise.all([
     totals(range),
     byDay(),
     spendByStep(range),
@@ -18,6 +19,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     activityByMember(range),
     generations(8),
     feedbackTotals(range),
+    shopTotals(range),
   ]);
   const seeFeedback = canSee(me, 'feedback');
   const seeDesigns = canSee(me, 'designs');
@@ -36,6 +38,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Stat label="Came out" value={percent(t.done, attempts)} note={t.redone ? `${t.redone} had to be drawn twice` : 'of sketches tried'} />
         <Stat label="Product photos" value={String(t.photos)} note={`${t.files} sets of production files`} />
         <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={t.done ? `${rupees(t.spendUsd / t.done)} per finished sketch, all steps` : 'no finished sketches yet'} />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Shop customers" value={String(shop.customers)} note="signed in with their number" />
+        <Stat label="Designs by customers" value={String(shop.customerDesigns)} note={`${shop.orders} became orders`} />
+        <Stat label="Sign-in texts" value={String(shop.codes)} note={`${rupees(shop.codeSpendUsd)} on 2Factor`} />
+        <Stat label="Customer conversion" value={percent(shop.orders, shop.customerDesigns)} note="designs that were bought" />
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -110,7 +119,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {members.map((m) => (
-                    <tr key={m.id ?? 'before'}>
+                    <tr key={m.id ?? m.name}>
                       <td className={td}>
                         {m.id && seeDesigns ? (
                           <Link href={`/generations?by=${m.id}`} className="font-medium text-slate-900 underline-offset-2 hover:underline">

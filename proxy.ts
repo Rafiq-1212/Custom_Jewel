@@ -26,6 +26,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything but the panel, the API, and Next's and the public folder's files.
-  matcher: ['/((?!admin|api|_next/static|_next/image|favicon\\.ico|.*\\.[a-z0-9]+$).*)'],
+  // Everything but the panel, the API, the shop customer's page (/try, which
+  // has its own sign-in), and Next's and the public folder's files.
+  matcher: ['/((?!admin|api|try|_next/static|_next/image|favicon\\.ico|.*\\.[a-z0-9]+$).*)'],
 };

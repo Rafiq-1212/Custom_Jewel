@@ -6,6 +6,7 @@ import { requireScreen } from '@/lib/auth';
 import { rupees, stepName, when } from '@/lib/format';
 import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
 import { feedbackOnDesign, generation, redrawsOf } from '@/lib/queries';
+import { ordersOf } from '@/lib/shop-queries';
 import { Card, Empty, PageTitle, Stat, Status, td, th } from '@/lib/ui';
 
 interface Saved {
@@ -47,7 +48,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
   if (!found) notFound();
   const { generation: g, steps } = found;
   const folders = [...new Set([g.folder, ...steps.map((s) => (s.file ? s.file.slice(0, s.file.lastIndexOf('/')) : null))].filter((f): f is string => Boolean(f)))];
-  const [files, feedback, redraws] = await Promise.all([savedFiles(folders), feedbackOnDesign(g.id), redrawsOf(g.id)]);
+  const [files, feedback, redraws, orders] = await Promise.all([savedFiles(folders), feedbackOnDesign(g.id), redrawsOf(g.id), ordersOf(g.id)]);
   const pictures = files.filter((f) => isPicture(f.name));
   const downloads = files.filter((f) => !isPicture(f.name));
   const total = steps.reduce((sum, s) => sum + s.costUsd, 0);
@@ -74,6 +75,26 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
         {showCost ? <Stat label="Total cost" value={rupees(total)} note={`${steps.length} steps`} /> : <Stat label="Steps" value={String(steps.length)} />}
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
+
+      {orders.length > 0 && (
+        <div className="mt-6">
+          <Card title="Bought on the shop">
+            <ul className="divide-y divide-slate-100">
+              {orders.map((o) => (
+                <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                  <span className="font-medium text-slate-900">
+                    {o.orderName ?? o.id} · {o.product ?? 'Pendant'}
+                    {o.variant ? ` · ${o.variant}` : ''}
+                  </span>
+                  <span className="text-slate-500">
+                    {o.phone ?? ''} · {when(o.createdAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      )}
 
       {(g.parentId || redraws.length > 0) && (
         <div className="mt-6">

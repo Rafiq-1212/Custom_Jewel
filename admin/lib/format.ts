@@ -29,6 +29,7 @@ const STEP_NAMES: Record<string, string> = {
   sketch_failed: 'Sketch failed',
   product_photo: 'Product photo',
   production_files: 'Production files',
+  otp_sent: 'Sign-in code texted',
 };
 
 export function stepName(kind: string): string {

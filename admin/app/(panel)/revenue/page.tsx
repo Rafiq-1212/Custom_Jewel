@@ -1,6 +1,8 @@
 import { requireScreen } from '@/lib/auth';
 import { amount, percent, rupees, when } from '@/lib/format';
-import { revenue, toRange, totals } from '@/lib/queries';
+import Link from 'next/link';
+import { toRange, totals } from '@/lib/queries';
+import { revenue } from '@/lib/shop-queries';
 import { Card, Empty, PageTitle, RangePicker, Stat, td, th } from '@/lib/ui';
 
 const INR_PER_USD = Number(process.env.INR_PER_USD) || 95.6;
@@ -27,7 +29,7 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
       <div className="mt-6">
         <Card title="Orders">
           {sales.orders.length === 0 ? (
-            <Empty>No orders yet. They will appear here once the shop is connected and sends its paid orders.</Empty>
+            <Empty>No orders yet. Orders placed on the shop with a design from &quot;Upload your photo&quot; appear here.</Empty>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -35,18 +37,31 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
                   <tr>
                     <th className={th}>Order</th>
                     <th className={th}>When</th>
+                    <th className={th}>Product</th>
                     <th className={th}>Customer</th>
-                    <th className={th}>From a generation</th>
+                    <th className={th}>Design</th>
                     <th className={th}>Amount</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {sales.orders.map((o) => (
                     <tr key={o.id}>
-                      <td className={`${td} font-medium text-slate-900`}>{o.id}</td>
+                      <td className={`${td} font-medium text-slate-900`}>{o.orderName ?? o.id}</td>
                       <td className={`${td} whitespace-nowrap`}>{when(o.createdAt)}</td>
-                      <td className={td}>{o.phone ?? '—'}</td>
-                      <td className={td}>{o.folder ? 'Yes' : 'No'}</td>
+                      <td className={td}>
+                        {o.product ?? '—'}
+                        {o.variant && <div className="text-xs text-slate-500">{o.variant}</div>}
+                      </td>
+                      <td className={`${td} whitespace-nowrap`}>{o.phone ?? '—'}</td>
+                      <td className={td}>
+                        {o.generationId ? (
+                          <Link href={`/generations/${o.generationId.replace('batches/', '')}`} className="underline">
+                            Open
+                          </Link>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className={`${td} tabular-nums`}>{amount(o.amount, o.currency)}</td>
                     </tr>
                   ))}

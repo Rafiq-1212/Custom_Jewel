@@ -1,5 +1,7 @@
 'use client';
 
+import { authHeaders } from './api-auth';
+
 /**
  * Driving the sketch from the browser, because the server cannot wait for it.
  *
@@ -12,7 +14,10 @@
 /** What the operator is told is happening. */
 export type SketchStage = 'touching-up' | 'inking' | 'finishing';
 
-export class SketchError extends Error {}
+export class SketchError extends Error {
+  /** A shop customer with no designs left (the server said so). */
+  outOfTries = false;
+}
 
 /** How often the browser asks whether a job has finished. */
 const POLL_MS = 5000;
@@ -25,14 +30,20 @@ const POLL_MS = 5000;
 const GIVE_UP_MS = 20 * 60_000;
 
 /** The server asked for the drawing to be done again (it came back out of frame). */
-class RedoSketch extends Error {}
+class RedoSketch extends Error {
+  constructor(readonly job: string) {
+    super('redo');
+  }
+}
 
 async function post(body: FormData): Promise<Record<string, unknown>> {
-  const response = await fetch('/api/sketch', { method: 'POST', body });
+  const response = await fetch('/api/sketch', { method: 'POST', body, headers: authHeaders() });
   const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-  if (json?.redo === true) throw new RedoSketch();
+  if (json?.redo === true) throw new RedoSketch(String(body.get('inkJob') ?? ''));
   if (!json || !response.ok || json.success !== true) {
-    throw new SketchError(typeof json?.error === 'string' ? json.error : 'Something went wrong making the sketch. Please try again.');
+    const error = new SketchError(typeof json?.error === 'string' ? json.error : 'Something went wrong making the sketch. Please try again.');
+    error.outOfTries = json?.outOfTries === true;
+    throw error;
   }
   return json;
 }
@@ -51,7 +62,7 @@ async function waitFor(job: string, cancelled: () => boolean): Promise<boolean> 
   while (Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     if (cancelled()) return false;
-    const response = await fetch(`/api/sketch?job=${encodeURIComponent(job)}`).catch(() => null);
+    const response = await fetch(`/api/sketch?job=${encodeURIComponent(job)}`, { headers: authHeaders() }).catch(() => null);
     const json = (await response?.json().catch(() => null)) as { success?: boolean; state?: string; error?: string } | null;
     if (!response || !json || !response.ok || json.success !== true) {
       if (++failures < MAX_FAILED_CHECKS) continue;
@@ -76,6 +87,8 @@ export interface SketchRequest {
 export interface Sketch {
   image: string;
   job: string;
+  /** Where it is kept: the design's folder, which names it on the shop (lib/design-ref.ts). */
+  folder: string;
 }
 
 /**
@@ -83,20 +96,22 @@ export interface Sketch {
  * drawing that came back out of frame is started over once; the second
  * attempt is told so, and is kept whatever its framing.
  */
-export async function runSketch(request: SketchRequest, attempt = 1): Promise<Sketch | null> {
+export async function runSketch(request: SketchRequest, attempt = 1, previousJob = ''): Promise<Sketch | null> {
   try {
-    return await sketchOnce(request, attempt);
+    return await sketchOnce(request, attempt, previousJob);
   } catch (error) {
-    if (error instanceof RedoSketch && attempt === 1 && !request.cancelled()) return runSketch(request, 2);
+    // The second go names the first, so a shop customer is not charged for it.
+    if (error instanceof RedoSketch && attempt === 1 && !request.cancelled()) return runSketch(request, 2, error.job);
     throw error;
   }
 }
 
-async function sketchOnce(request: SketchRequest, attempt: number): Promise<Sketch | null> {
+async function sketchOnce(request: SketchRequest, attempt: number, previousJob: string): Promise<Sketch | null> {
   const form = (action: string, extra: Record<string, string> = {}): FormData => {
     const data = new FormData();
     data.set('action', action);
     data.set('attempt', String(attempt));
+    if (previousJob) data.set('previousJob', previousJob);
     data.set('file', request.file);
     data.set('category', request.category);
     for (const [key, value] of Object.entries(extra)) data.set(key, value);
@@ -114,7 +129,7 @@ async function sketchOnce(request: SketchRequest, attempt: number): Promise<Sket
   request.onStage('finishing');
   const done = await post(form('collect', { inkJob }));
   if (request.cancelled()) return null;
-  return { image: String(done.image), job: String(done.job ?? inkJob) };
+  return { image: String(done.image), job: String(done.job ?? inkJob), folder: String(done.folder ?? '') };
 }
 
 export interface RedrawRequest {
@@ -149,5 +164,5 @@ export async function runRedraw(request: RedrawRequest): Promise<Sketch | null> 
   request.onStage('finishing');
   const done = await post(form('collect', { inkJob }));
   if (request.cancelled()) return null;
-  return { image: String(done.image), job: String(done.job ?? inkJob) };
+  return { image: String(done.image), job: String(done.job ?? inkJob), folder: String(done.folder ?? '') };
 }

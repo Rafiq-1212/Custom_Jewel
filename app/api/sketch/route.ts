@@ -34,9 +34,10 @@ import { correctionsFrom } from '@/lib/feedback';
 import { feedbackFor, linkRedraw } from '@/lib/feedback-store';
 import { loadInkInputs, saveInkInputs } from '@/lib/ink-inputs';
 import { collectInked, ReframeNeeded, startSketch, submitInking } from '@/lib/sketch-pipeline';
-import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchStarted } from '@/lib/tracking';
+import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchFolder, trackSketchStarted, type Who } from '@/lib/tracking';
 import { validateImageBytes } from '@/lib/validation';
-import { makerOf } from '@/lib/signed-in';
+import { markRedoPending, ownsJob, refundTry, takeTry, takeRedo } from '@/lib/customers';
+import { callerOf } from '@/lib/signed-in';
 
 // The Gemini SDK and Buffer/base64 handling need the Node runtime, not Edge.
 export const runtime = 'nodejs';
@@ -111,10 +112,11 @@ function readJobName(formData: FormData, field: string): string | null {
 
 /** GET /api/sketch?job=batches/... — has this job finished? */
 export async function GET(request: globalThis.Request): Promise<Response> {
-  const maker = await makerOf(request);
-  if (maker instanceof Response) return maker;
+  const caller = await callerOf(request);
+  if (caller instanceof Response) return caller;
   const name = new URL(request.url).searchParams.get('job');
   if (!name || !JOB_NAME.test(name)) return fail('That job does not exist.', 400);
+  if (caller.kind === 'customer' && !(await ownsJob(caller.phone, name))) return fail('That sketch does not exist.', 404);
   try {
     return Response.json({ success: true, state: await readJobState(name) });
   } catch (error) {
@@ -140,8 +142,9 @@ async function readPhoto(formData: FormData): Promise<{ bytes: Uint8Array; type:
 }
 
 export async function POST(request: globalThis.Request): Promise<Response> {
-  const maker = await makerOf(request);
-  if (maker instanceof Response) return maker;
+  const caller = await callerOf(request);
+  if (caller instanceof Response) return caller;
+  const who: Who = caller.kind === 'staff' ? { userId: caller.staff.id, phone: null } : { userId: null, phone: caller.phone };
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -156,16 +159,29 @@ export async function POST(request: globalThis.Request): Promise<Response> {
   if (action === 'start') {
     const photo = await readPhoto(formData);
     if (photo instanceof Response) return photo;
+    // A shop customer spends one of their designs, unless this is the free
+    // second go at a drawing that came back out of frame.
+    let charged = false;
+    if (caller.kind === 'customer') {
+      const previous = formData.get('attempt') === '2' ? readJobName(formData, 'previousJob') : null;
+      if (!(previous && (await takeRedo(caller.phone, previous)))) {
+        if (!(await takeTry(caller.phone))) {
+          return Response.json({ success: false, outOfTries: true, error: 'You have used all your designs.' }, { status: 429 });
+        }
+        charged = true;
+      }
+    }
     try {
       return await withCostLog(`sketch ${category}`, async () => {
         let started: Awaited<ReturnType<typeof startSketch>>;
         try {
           started = await startSketch({ category, imageBytes: photo.bytes, mimeType: photo.type });
         } catch (error) {
-          await trackSketchFailed(undefined, failureReason(error), costSoFar(), maker.id);
+          if (charged && caller.kind === 'customer') await refundTry(caller.phone);
+          await trackSketchFailed(undefined, failureReason(error), costSoFar(), who);
           throw error;
         }
-        await trackSketchStarted(started.job, category, costSoFar(), maker.id);
+        await trackSketchStarted(started.job, category, costSoFar(), who);
         // Kept so the drawing can be redone from feedback without a second photo edit.
         after(() => saveInkInputs(started.job, started.inputs));
         return Response.json({ success: true, stage: 'inking', inkJob: started.job });
@@ -178,6 +194,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
   // A drawing done again with the corrections in a piece of feedback
   // (lib/feedback.ts): the same inputs, so no second photo edit.
   if (action === 'redraw') {
+    if (caller.kind !== 'staff') return fail('That sketch can\'t be redrawn.', 403);
     const previous = readJobName(formData, 'previousJob');
     const feedbackId = Number(formData.get('feedbackId'));
     if (!previous || !Number.isInteger(feedbackId)) return fail('That sketch can\'t be redrawn. Please make a new one.', 400);
@@ -191,7 +208,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
     try {
       return await withCostLog(`redraw ${inputs.category}`, async () => {
         const job = await submitInking(corrected);
-        await trackSketchStarted(job, inputs.category, costSoFar(), maker.id, { parent: previous, corrections: corrected.corrections });
+        await trackSketchStarted(job, inputs.category, costSoFar(), who, { parent: previous, corrections: corrected.corrections });
         await linkRedraw(feedbackId, job);
         after(() => saveInkInputs(job, corrected));
         return Response.json({ success: true, stage: 'inking', inkJob: job, category: inputs.category });
@@ -204,6 +221,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
   if (action === 'collect') {
     const inkJob = readJobName(formData, 'inkJob');
     if (!inkJob) return fail('That sketch has expired. Please start it again.', 400);
+    if (caller.kind === 'customer' && !(await ownsJob(caller.phone, inkJob))) return fail('That sketch does not exist.', 404);
     // The photo comes with a first drawing, to be kept with it; a redraw has it already.
     const photo = formData.get('file') ? await readPhoto(formData) : null;
     if (photo instanceof Response) return photo;
@@ -216,14 +234,21 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         try {
           inked = await collectInked(inkJob, category, { redo: formData.get('attempt') !== '2' });
         } catch (error) {
-          if (error instanceof ReframeNeeded) await trackEvent({ kind: 'sketch_redo', generationId: inkJob, detail: category, costUsd: costSoFar(), userId: maker.id });
-          else await trackSketchFailed(inkJob, failureReason(error), costSoFar(), maker.id);
+          if (error instanceof ReframeNeeded) {
+            // Drawn once more, free: the next start with previousJob uses this up (lib/customers.ts).
+            await markRedoPending(inkJob).catch(() => undefined);
+            await trackEvent({ kind: 'sketch_redo', generationId: inkJob, detail: category, costUsd: costSoFar(), ...who });
+          } else {
+            if (caller.kind === 'customer') await refundTry(caller.phone);
+            await trackSketchFailed(inkJob, failureReason(error), costSoFar(), who);
+          }
           throw error;
         }
         const master = await makeTransparentMasterSketch(inked);
         // Kept in the cloud with the photo it was made from (lib/archive.ts),
         // once the sketch has gone back: the operator never waits on a save.
         const folder = orderFolder(master.buffer);
+        await trackSketchFolder(inkJob, folder);
         const spent = costSoFar();
         after(async () => {
           const extension = photo?.type === 'image/png' ? 'png' : photo?.type === 'image/webp' ? 'webp' : 'jpg';
@@ -231,7 +256,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
             photo ? archive(folder, `photo.${extension}`, photo.bytes, photo.type || 'image/jpeg') : null,
             archive(folder, 'sketch.png', master.buffer, 'image/png'),
           ]);
-          await trackSketchDone(inkJob, folder, spent, saved, maker.id);
+          await trackSketchDone(inkJob, folder, spent, saved, who);
         });
         return Response.json({
           success: true,

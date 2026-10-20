@@ -96,7 +96,7 @@ export async function POST(request: Request): Promise<Response> {
         'application/zip',
         { latestOnly: true },
       );
-      await trackEvent({ kind: 'production_files', folder, detail: parsed.value.designType, costUsd: spent, file, userId: maker.id });
+      await trackEvent({ kind: 'production_files', folder, detail: parsed.value.designType, costUsd: spent, file, userId: maker.id, phone: null });
     });
     return Response.json({ success: true, ...result });
   } catch (error) {

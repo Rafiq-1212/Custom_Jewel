@@ -10,6 +10,15 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["potrace"],
   // The admin panel (admin/) is its own app, deployed as its own Vercel
   // project, and served here at /admin: every request under it is handed on.
+  // Who may show these pages in a frame: the shop customer's page only on
+  // the Shopify store (and here), everything else only here.
+  async headers() {
+    const shop = process.env.SHOP_ORIGINS || "https://shoptruetribute.com https://knbbbh-1p.myshopify.com";
+    return [
+      { source: "/try", headers: [{ key: "Content-Security-Policy", value: `frame-ancestors 'self' ${shop.replace(/,/g, " ")}` }] },
+      { source: "/((?!try).*)", headers: [{ key: "Content-Security-Policy", value: "frame-ancestors 'self'" }] },
+    ];
+  },
   async rewrites() {
     const admin = ADMIN_ORIGIN;
     return [

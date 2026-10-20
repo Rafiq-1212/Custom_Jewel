@@ -9,6 +9,7 @@ import { db } from './db';
 
 export interface FormState {
   error: string | null;
+  saved?: boolean;
 }
 
 function field(form: FormData, name: string): string {
@@ -76,13 +77,32 @@ export async function setFirstPassword(_previous: FormState, form: FormData): Pr
   redirect(homeOf(me));
 }
 
-/** Gives a customer their tries back. */
-export async function resetTries(form: FormData): Promise<void> {
+/**
+ * Refills a shop customer's designs: what they have used goes back to 0, and
+ * their limit to the shop's (Customers → Shop settings). For someone who rang
+ * the support number when they ran out.
+ */
+export async function refillTries(form: FormData): Promise<void> {
   await requireEditor('customers');
   const phone = field(form, 'phone');
   if (!phone) return;
-  await db()`update customers set tries_used = 0 where phone = ${phone}`;
+  const [limit] = await db()`select value from settings where key = 'tries_limit'`;
+  const tries = Math.max(1, Number(limit?.value) || 3);
+  await db()`update customers set tries_used = 0, tries_limit = greatest(tries_limit, ${tries}) where phone = ${phone}`;
   revalidatePath('/customers');
+}
+
+/** The support number shown to a customer who has used their designs, and how many designs a new customer gets. */
+export async function saveShopSettings(_previous: FormState, form: FormData): Promise<FormState> {
+  await requireEditor('customers');
+  const phone = field(form, 'supportPhone').slice(0, 40);
+  const tries = Number(field(form, 'triesLimit'));
+  if (phone && !/^[+\d][\d\s-]{6,}$/.test(phone)) return { error: 'Enter the support number as digits, e.g. +91 98765 43210.' };
+  if (!Number.isInteger(tries) || tries < 1 || tries > 50) return { error: 'Designs per customer must be between 1 and 50.' };
+  await db()`insert into settings (key, value, updated_at) values ('support_phone', ${phone}, now()) on conflict (key) do update set value = excluded.value, updated_at = now()`;
+  await db()`insert into settings (key, value, updated_at) values ('tries_limit', ${String(tries)}, now()) on conflict (key) do update set value = excluded.value, updated_at = now()`;
+  revalidatePath('/customers');
+  return { error: null, saved: true };
 }
 
 /**

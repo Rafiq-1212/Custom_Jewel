@@ -43,9 +43,18 @@ const STATUS_STYLES: Record<string, string> = {
   failed: 'bg-rose-50 text-rose-700',
   running: 'bg-amber-50 text-amber-700',
   abandoned: 'bg-slate-100 text-slate-600',
+  redo_pending: 'bg-amber-50 text-amber-700',
+  redone: 'bg-slate-100 text-slate-600',
 };
 
-const STATUS_LABELS: Record<string, string> = { done: 'Finished', failed: 'Failed', running: 'In progress', abandoned: 'Abandoned' };
+const STATUS_LABELS: Record<string, string> = {
+  done: 'Finished',
+  failed: 'Failed',
+  running: 'In progress',
+  abandoned: 'Abandoned',
+  redo_pending: 'Drawing again',
+  redone: 'Drawn again (out of frame)',
+};
 
 export function Status({ status }: { status: string }) {
   const label = STATUS_LABELS[status] ?? status;

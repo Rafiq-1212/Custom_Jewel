@@ -24,7 +24,7 @@ import { readImageJob, submitImageJob } from './gemini-batch';
 import { after } from 'next/server';
 import { archive, isOrderFolder, orderFolder } from './archive';
 import { costSoFar } from './cost';
-import { trackEvent } from './tracking';
+import { trackEvent, type Who } from './tracking';
 import { PENDANT_MATERIALS, RIM_BAND_WIDTH, RIM_COLORS } from './materials';
 import { PENDANT_CATEGORIES } from './pendant-categories';
 import { resolvePendantGeometry, type PendantGeometry } from './pendant-geometry';
@@ -336,7 +336,7 @@ export async function startPendantMockup(request: DesignRequest): Promise<string
 }
 
 /** The finished photograph from a job that has succeeded. */
-export async function collectPendantMockup(name: string, material: string, userId: string): Promise<MockupResult> {
+export async function collectPendantMockup(name: string, material: string, who: Who): Promise<MockupResult> {
   // Counted here: this is the only read of the job, so it is the one that
   // carries the cost of the picture.
   const result = await readImageJob(name, `mockup ${material}`, { count: true });
@@ -347,7 +347,7 @@ export async function collectPendantMockup(name: string, material: string, userI
     const file = folder
       ? await archive(folder, `product-${material}.${result.mimeType === 'image/jpeg' ? 'jpg' : 'png'}`, result.bytes, result.mimeType)
       : null;
-    await trackEvent({ kind: 'product_photo', folder, detail: material, costUsd: spent, file, userId });
+    await trackEvent({ kind: 'product_photo', folder, detail: material, costUsd: spent, file, ...who });
   });
   return { dataUrl: `data:${result.mimeType};base64,${Buffer.from(result.bytes).toString('base64')}` };
 }

@@ -15,6 +15,7 @@
  */
 
 import { ADMIN_ORIGIN } from './admin-origin';
+import { customerOf } from './customer-session';
 
 export interface Staff {
   id: string;
@@ -67,4 +68,22 @@ export async function makerOf(request: Request): Promise<Staff | Response> {
   if (!staff) return Response.json({ success: false, error: 'Please sign in first.' }, { status: 401 });
   if (!mayMake(staff)) return Response.json({ success: false, error: 'Your login cannot make pendants. Ask an owner for access.' }, { status: 403 });
   return staff;
+}
+
+/** Who is calling one of the routes customers may use too: a team member who may make pendants, or a signed-in shop customer. */
+export type Caller = { kind: 'staff'; staff: Staff } | { kind: 'customer'; phone: string };
+
+/**
+ * For the routes the shop's customer page shares with the tool (sketch,
+ * product photo): a customer's bearer token (lib/customer-session.ts), else
+ * a team member's sign-in. Anyone else gets the response to send back.
+ */
+export async function callerOf(request: Request): Promise<Caller | Response> {
+  if (request.headers.get('authorization')?.startsWith('Bearer ')) {
+    const phone = customerOf(request);
+    if (phone) return { kind: 'customer', phone };
+    return Response.json({ success: false, error: 'Please sign in with your mobile number again.', signIn: true }, { status: 401 });
+  }
+  const staff = await makerOf(request);
+  return staff instanceof Response ? staff : { kind: 'staff', staff };
 }

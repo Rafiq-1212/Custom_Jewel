@@ -15,7 +15,7 @@ export function toRange(value: string | string[] | undefined): Range {
 }
 
 /** The start of a range, as something Postgres can compare a timestamp with. */
-function since(range: Range): string {
+export function since(range: Range): string {
   return range === 'all' ? '1970-01-01' : new Date(Date.now() - Number(range) * 86_400_000).toISOString();
 }
 
@@ -137,6 +137,8 @@ export interface Generation {
   /** 👍 and 👎 given on its sketch. */
   liked: number;
   disliked: number;
+  /** Paid orders on the shop made from it. */
+  ordered: number;
 }
 
 /**
@@ -167,13 +169,14 @@ function toGeneration(r: Record<string, unknown>): Generation {
     corrections: (r.corrections as string | null) ?? null,
     liked: Number(r.liked ?? 0),
     disliked: Number(r.disliked ?? 0),
+    ordered: Number(r.ordered ?? 0),
   };
 }
 
 /** The newest generations, each with what it has cost so far, what was made from it, and who made it; only `by`'s when given. */
-export async function generations(limit = 200, by: string | null = null): Promise<Generation[]> {
+export async function generations(limit = 200, by: string | null = null, phone: string | null = null): Promise<Generation[]> {
   const rows = await db()`
-    select g.*, fb.liked, fb.disliked, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' end) as made_by
+    select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Shop customer' end) as made_by
     from generations g
     left join "user" u on u.id = g.created_by
     left join lateral (
@@ -190,7 +193,7 @@ export async function generations(limit = 200, by: string | null = null): Promis
       select count(*) filter (where f.rating = 'good')::int as liked, count(*) filter (where f.rating = 'bad')::int as disliked
       from feedback f where f.generation_id = g.id and f.stage = 'sketch'
     ) fb on true
-    where ${by}::text is null or g.created_by = ${by}
+    where (${by}::text is null or g.created_by = ${by}) and (${phone}::text is null or g.phone = ${phone})
     order by g.created_at desc
     limit ${limit}`;
   return rows.map(toGeneration);
@@ -213,7 +216,7 @@ export async function generation(id: string): Promise<{ generation: Generation; 
   if (!found) return null;
   const order = found.folder ? found.folder.slice(-10) : '';
   const rows = await db()`
-    select e.id, e.created_at, e.kind, e.detail, e.cost_usd::float as cost_usd, e.file, coalesce(u.name, case when e.user_id is not null then 'Removed login' end) as by
+    select e.id, e.created_at, e.kind, e.detail, e.cost_usd::float as cost_usd, e.file, coalesce(u.name, case when e.user_id is not null then 'Removed login' when e.phone is not null then 'Customer' end) as by
     from events e left join "user" u on u.id = e.user_id
     where e.generation_id = ${id} or (${order} <> '' and right(e.folder, 10) = ${order})
     order by e.id`;
@@ -223,55 +226,7 @@ export async function generation(id: string): Promise<{ generation: Generation; 
   };
 }
 
-export interface Customer {
-  phone: string;
-  triesUsed: number;
-  triesLimit: number;
-  createdAt: string;
-  lastSeenAt: string;
-  generations: number;
-  orders: number;
-}
 
-export async function customers(): Promise<Customer[]> {
-  const rows = await db()`
-    select c.*,
-      (select count(*) from generations g where g.phone = c.phone)::int as generations,
-      (select count(*) from orders o where o.phone = c.phone)::int as orders
-    from customers c order by c.last_seen_at desc limit 500`;
-  return rows.map((r) => ({
-    phone: r.phone,
-    triesUsed: r.tries_used,
-    triesLimit: r.tries_limit,
-    createdAt: r.created_at,
-    lastSeenAt: r.last_seen_at,
-    generations: r.generations,
-    orders: r.orders,
-  }));
-}
-
-export interface Order {
-  id: string;
-  createdAt: string;
-  phone: string | null;
-  folder: string | null;
-  amount: number;
-  currency: string;
-}
-
-export async function revenue(range: Range): Promise<{ orders: Order[]; total: number; count: number; fromGenerations: number }> {
-  const from = since(range);
-  const rows = await db()`select * from orders where created_at >= ${from} order by created_at desc limit 200`;
-  const [sum] = await db()`
-    select coalesce(sum(amount), 0)::float as total, count(*)::int as count, count(folder)::int as from_generations
-    from orders where created_at >= ${from}`;
-  return {
-    orders: rows.map((r) => ({ id: r.id, createdAt: r.created_at, phone: r.phone, folder: r.folder, amount: Number(r.amount), currency: r.currency })),
-    total: sum.total,
-    count: sum.count,
-    fromGenerations: sum.from_generations,
-  };
-}
 
 export interface MemberActivity {
   id: string | null;
@@ -292,7 +247,9 @@ export interface MemberActivity {
  */
 export async function activityByMember(range: Range): Promise<MemberActivity[]> {
   const rows = await db()`
-    select e.user_id as id, coalesce(u.name, case when e.user_id is null then 'Before team logins' else 'Removed login' end) as name, u.role,
+    select e.user_id as id,
+           coalesce(u.name, case when e.phone is not null then 'Shop customers' when e.user_id is null then 'Before team logins' else 'Removed login' end) as name,
+           u.role,
            count(*) filter (where e.kind = 'sketch_start')::int as designs,
            count(*) filter (where e.kind = 'sketch_done')::int as finished,
            count(*) filter (where e.kind = 'product_photo')::int as photos,
@@ -301,7 +258,7 @@ export async function activityByMember(range: Range): Promise<MemberActivity[]> 
            max(e.created_at) as last_at
     from events e left join "user" u on u.id = e.user_id
     where e.created_at >= ${since(range)}
-    group by e.user_id, u.name, u.role
+    group by e.user_id, u.name, u.role, e.phone is not null
     order by spend_usd desc`;
   return rows.map((r) => ({
     id: r.id,

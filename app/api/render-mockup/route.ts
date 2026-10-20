@@ -19,7 +19,13 @@ import { GeminiGenerationError } from '@/lib/gemini';
 import { readJobState } from '@/lib/gemini-batch';
 import { collectPendantMockup, startPendantMockup } from '@/lib/mockup';
 import { isMaterialId } from '@/lib/materials';
-import { makerOf } from '@/lib/signed-in';
+import { orderFolder } from '@/lib/archive';
+import { customerFolderJob, photosOf } from '@/lib/customers';
+import { callerOf } from '@/lib/signed-in';
+import type { Who } from '@/lib/tracking';
+
+/** Product photos a shop customer may have made from one design (a metal each, and a spare). */
+const CUSTOMER_PHOTOS = 3;
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,8 +39,8 @@ function fail(message: string, status: number): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const maker = await makerOf(request);
-  if (maker instanceof Response) return maker;
+  const caller = await callerOf(request);
+  if (caller instanceof Response) return caller;
   let body: unknown;
   try {
     body = await request.json();
@@ -44,6 +50,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const parsed = parseDesignRequest(body);
   if (!parsed.ok) return fail(parsed.error, 400);
+  // A shop customer only gets photos of a design they made, and only a few.
+  if (caller.kind === 'customer') {
+    const folder = orderFolder(parsed.value.sketch);
+    if (!(await customerFolderJob(caller.phone, folder))) return fail('Make your design first, then the photo.', 403);
+    if ((await photosOf(folder)) >= CUSTOMER_PHOTOS) return fail('You have all the photos of this design already.', 429);
+  }
 
   try {
     return Response.json({ success: true, job: await startPendantMockup(parsed.value) });
@@ -62,8 +74,9 @@ export async function POST(request: Request): Promise<Response> {
 
 /** GET /api/render-mockup?job=batches/...&material=gold — the state, or the picture. */
 export async function GET(request: Request): Promise<Response> {
-  const maker = await makerOf(request);
-  if (maker instanceof Response) return maker;
+  const caller = await callerOf(request);
+  if (caller instanceof Response) return caller;
+  const who: Who = caller.kind === 'staff' ? { userId: caller.staff.id, phone: null } : { userId: null, phone: caller.phone };
   const params = new URL(request.url).searchParams;
   const name = params.get('job');
   const material = params.get('material');
@@ -73,7 +86,7 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const state = await readJobState(name);
     if (state !== 'done') return Response.json({ success: true, state });
-    const result = await withCostLog(`mockup ${material}`, () => collectPendantMockup(name, material, maker.id));
+    const result = await withCostLog(`mockup ${material}`, () => collectPendantMockup(name, material, who));
     return Response.json({ success: true, state, ...result });
   } catch (error) {
     if (error instanceof GeminiGenerationError) {

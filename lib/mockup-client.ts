@@ -1,5 +1,7 @@
 'use client';
 
+import { authHeaders } from './api-auth';
+
 /**
  * Waiting for a product photo, for the same reason the sketch waits here:
  * the picture is a batch job at half price (lib/gemini-batch.ts), answered
@@ -37,7 +39,7 @@ export async function runMockup(design: unknown): Promise<string> {
   const submitted = await read(
     await fetch('/api/render-mockup', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(design),
     }),
   );
@@ -51,7 +53,11 @@ export async function runMockup(design: unknown): Promise<string> {
     // A failed status check is asked again, as for the sketch (lib/sketch-client.ts).
     let body: JobResponse;
     try {
-      body = await read(await fetch(`/api/render-mockup?job=${encodeURIComponent(job)}&material=${encodeURIComponent(String((design as { material?: string }).material ?? ''))}`));
+      body = await read(
+        await fetch(`/api/render-mockup?job=${encodeURIComponent(job)}&material=${encodeURIComponent(String((design as { material?: string }).material ?? ''))}`, {
+          headers: authHeaders(),
+        }),
+      );
       failures = 0;
     } catch (error) {
       if (++failures < 6) continue;

@@ -5,11 +5,13 @@ import { rupees, when } from '@/lib/format';
 import { generations, makers } from '@/lib/queries';
 import { Card, Empty, PageTitle, Status, td, th } from '@/lib/ui';
 
-export default async function DesignsPage({ searchParams }: { searchParams: Promise<{ by?: string }> }) {
+export default async function DesignsPage({ searchParams }: { searchParams: Promise<{ by?: string; phone?: string }> }) {
   // What the designs cost is for owners only.
   const showCost = (await requireScreen('designs')).role === 'owner';
-  const by = (await searchParams).by || null;
-  const [rows, people] = await Promise.all([generations(200, by), makers()]);
+  const params = await searchParams;
+  const by = params.by || null;
+  const phone = params.phone || null;
+  const [rows, people] = await Promise.all([generations(200, by, phone), makers()]);
   const chip = (active: boolean) =>
     `rounded-full border px-3 py-1 text-sm ${active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`;
   return (
@@ -18,9 +20,10 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
       {people.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="text-sm text-slate-500">Made by</span>
-          <Link href="/generations" className={chip(!by)}>
+          <Link href="/generations" className={chip(!by && !phone)}>
             Everyone
           </Link>
+          {phone && <span className={chip(true)}>Customer {phone}</span>}
           {people.map((p) => (
             <Link key={p.id} href={`/generations?by=${p.id}`} className={chip(by === p.id)}>
               {p.name}
@@ -72,6 +75,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                       <td className={td}>
                         <Status status={g.status} />
                         {g.parentId && <div className="mt-1 text-xs text-slate-500">Redraw</div>}
+                        {g.ordered > 0 && <div className="mt-1 text-xs font-medium text-emerald-700">Ordered{g.ordered > 1 ? ` × ${g.ordered}` : ''}</div>}
                       </td>
                       <td className={`${td} whitespace-nowrap`}>
                         {g.liked + g.disliked === 0 ? (
