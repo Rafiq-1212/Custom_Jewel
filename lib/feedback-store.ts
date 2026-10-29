@@ -26,7 +26,9 @@ export interface NewFeedback {
   issues: unknown;
   person: string | null;
   note: string;
-  userId: string;
+  /** Who gave it: a team member, or a shop customer by their number. */
+  userId: string | null;
+  phone?: string | null;
 }
 
 /** Saves one piece of feedback; returns its id. Only known issue keys are kept. */
@@ -34,9 +36,9 @@ export async function recordFeedback(feedback: NewFeedback): Promise<number> {
   const issues = feedback.rating === 'bad' ? issuesFor(feedback.stage, feedback.issues) : [];
   const note = feedback.note.trim().slice(0, NOTE_MAX) || null;
   const [row] = await db()`
-    insert into feedback (generation_id, stage, rating, issues, issue_labels, person, note, user_id)
+    insert into feedback (generation_id, stage, rating, issues, issue_labels, person, note, user_id, phone)
     values (${feedback.generationId}, ${feedback.stage}, ${feedback.rating}, ${issues.map((i) => i.key)}, ${issues.map((i) => i.label)},
-            ${feedback.person}, ${note}, ${feedback.userId})
+            ${feedback.person}, ${note}, ${feedback.userId}, ${feedback.phone ?? null})
     returning id`;
   return Number(row.id);
 }

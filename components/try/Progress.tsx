@@ -45,7 +45,6 @@ export function Progress({ stage }: { stage: Stage }) {
         <span className="text-slate-700">{step.text}</span>
         <span className="tabular-nums text-slate-500">{percent}%</span>
       </div>
-      {stage !== 'done' && <p className="text-xs text-slate-400">You can close this window and keep browsing: we keep working while this page is open.</p>}
     </div>
   );
 }

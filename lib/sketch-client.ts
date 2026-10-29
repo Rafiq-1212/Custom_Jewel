@@ -75,12 +75,24 @@ async function waitFor(job: string, cancelled: () => boolean): Promise<boolean> 
   throw new SketchError('This is taking much longer than it should. Please try again.');
 }
 
+/** A drawing that has been asked for: enough to wait for it and collect it on another page. */
+export interface SubmittedInk {
+  inkJob: string;
+  attempt: number;
+  previousJob: string;
+}
+
 export interface SketchRequest {
-  file: File;
+  /** The photo. Null only when resuming, where it is kept for the archive and a redo if still at hand. */
+  file: File | null;
   category: string;
   onStage: (stage: SketchStage) => void;
   /** Checked between every step, so a superseded run stops instead of finishing invisibly. */
   cancelled: () => boolean;
+  /** Told the drawing once it is asked for, so the run can be picked up again (components/try). */
+  onSubmitted?: (ink: SubmittedInk) => void;
+  /** A drawing already asked for: waited for and collected, not started again. */
+  resume?: SubmittedInk;
 }
 
 /** A finished drawing: the artwork as a data URL, and the design it is (its job), which feedback is given against. */
@@ -97,11 +109,15 @@ export interface Sketch {
  * attempt is told so, and is kept whatever its framing.
  */
 export async function runSketch(request: SketchRequest, attempt = 1, previousJob = ''): Promise<Sketch | null> {
+  if (request.resume) ({ attempt, previousJob } = request.resume);
   try {
     return await sketchOnce(request, attempt, previousJob);
   } catch (error) {
     // The second go names the first, so a shop customer is not charged for it.
-    if (error instanceof RedoSketch && attempt === 1 && !request.cancelled()) return runSketch(request, 2, error.job);
+    if (error instanceof RedoSketch && attempt === 1 && !request.cancelled()) {
+      if (!request.file) throw new SketchError('Please upload your photo again to finish this design. It won\'t use up another design.');
+      return runSketch({ ...request, resume: undefined }, 2, error.job);
+    }
     throw error;
   }
 }
@@ -112,7 +128,7 @@ async function sketchOnce(request: SketchRequest, attempt: number, previousJob: 
     data.set('action', action);
     data.set('attempt', String(attempt));
     if (previousJob) data.set('previousJob', previousJob);
-    data.set('file', request.file);
+    if (request.file) data.set('file', request.file);
     data.set('category', request.category);
     for (const [key, value] of Object.entries(extra)) data.set(key, value);
     return data;
@@ -120,9 +136,14 @@ async function sketchOnce(request: SketchRequest, attempt: number, previousJob: 
 
   // `start` edits the photo live and submits the inking; only the inking
   // is waited for here.
-  request.onStage('touching-up');
-  const inkJob = String((await post(form('start'))).inkJob ?? '');
-  if (!inkJob) throw new SketchError('Something went wrong making the sketch. Please try again.');
+  let inkJob = request.resume?.inkJob ?? '';
+  if (!inkJob) {
+    if (!request.file) throw new SketchError('Please upload your photo again.');
+    request.onStage('touching-up');
+    inkJob = String((await post(form('start'))).inkJob ?? '');
+    if (!inkJob) throw new SketchError('Something went wrong making the sketch. Please try again.');
+    request.onSubmitted?.({ inkJob, attempt, previousJob });
+  }
   request.onStage('inking');
   if (!(await waitFor(inkJob, request.cancelled))) return null;
 

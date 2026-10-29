@@ -80,6 +80,8 @@ create table if not exists feedback (
   resolution text              -- what was changed to fix it
 );
 create index if not exists feedback_created_at on feedback (created_at desc);
+-- A shop customer's own feedback on their design: their number instead of a login.
+alter table feedback add column if not exists phone text;
 create index if not exists feedback_generation on feedback (generation_id);
 
 -- A drawing redone from feedback points at the drawing it corrects, and keeps

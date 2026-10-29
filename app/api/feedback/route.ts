@@ -2,14 +2,16 @@
  * POST /api/feedback — the team's 👍 or 👎 on a sketch, a product photo or a
  * set of production files, with what was wrong (lib/feedback.ts). Saved
  * against the design, under whoever gave it; a sketch's 👎 can then be
- * redrawn from it (POST /api/sketch, action=redraw).
+ * redrawn from it (POST /api/sketch, action=redraw). A shop customer may
+ * also rate their own design's sketch or product photo (components/try).
  *
  *   { job, stage, rating: 'good' | 'bad', issues: string[], person, note } -> { id }
  */
 
 import { isStage, NOTE_MAX, PEOPLE } from '@/lib/feedback';
 import { recordFeedback } from '@/lib/feedback-store';
-import { makerOf } from '@/lib/signed-in';
+import { ownsJob } from '@/lib/customers';
+import { callerOf } from '@/lib/signed-in';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,8 +23,8 @@ function fail(message: string, status: number): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const maker = await makerOf(request);
-  if (maker instanceof Response) return maker;
+  const caller = await callerOf(request);
+  if (caller instanceof Response) return caller;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return fail('Something went wrong. Please try again.', 400);
 
@@ -38,7 +40,19 @@ export async function POST(request: Request): Promise<Response> {
   const who = PEOPLE.find((p) => p.value === person)?.value ?? null;
 
   try {
-    const id = await recordFeedback({ generationId: job, stage, rating, issues, person: who, note: text, userId: maker.id });
+    if (caller.kind === 'customer') {
+      if (stage === 'production_files' || !(await ownsJob(caller.phone, job))) return fail('That design does not exist.', 404);
+    }
+    const id = await recordFeedback({
+      generationId: job,
+      stage,
+      rating,
+      issues,
+      person: who,
+      note: text,
+      userId: caller.kind === 'staff' ? caller.staff.id : null,
+      phone: caller.kind === 'customer' ? caller.phone : null,
+    });
     return Response.json({ success: true, id });
   } catch (error) {
     console.error(`[feedback] could not save: ${error instanceof Error ? error.message : String(error)}`);

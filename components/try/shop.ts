@@ -10,6 +10,8 @@
  * inside a frame. Either one is enough to skip the code next time.
  */
 
+import type { Metal, Pending } from './pipeline';
+
 export interface Session {
   token: string;
   phone: string;
@@ -19,6 +21,14 @@ export interface ShopContext {
   product: { handle: string; title: string } | null;
   variant: { id: string; title: string } | null;
   session: Session | null;
+  /** The metals the product comes in, from its variants. */
+  metals: Metal[];
+  /** The product page's address, to come back to. */
+  url: string | null;
+  /** A design being made or ready, kept by the shop page (components/try/pipeline.ts). */
+  pending: Pending | null;
+  /** Whether this page is the one to carry that design on: one page at a time does. */
+  worker: boolean;
 }
 
 const KEY = 'true-tribute:customer';
@@ -62,16 +72,22 @@ export function saveSession(session: Session | null): void {
   tellShop({ type: 'session', session });
 }
 
-/** Listens for what the shop page sends: the product, its chosen variant, and a kept sign-in. */
+/** Listens for what the shop page sends: the product, its chosen variant, a kept sign-in and a design being made. */
 export function onShopMessage(handle: (context: Partial<ShopContext>) => void): () => void {
   const listener = (event: MessageEvent) => {
     if (!(SHOP_ORIGINS.includes(event.origin) || event.origin === window.location.origin)) return;
     const data = event.data as Record<string, unknown> | null;
     if (!data || data.source !== 'true-tribute-shop') return;
+    // Only what was sent: a missing field leaves what is known; a null one clears it.
+    const sent = <K extends keyof ShopContext>(key: K) => (key in data ? (data[key] as ShopContext[K]) : undefined);
     handle({
       product: (data.product as ShopContext['product']) ?? undefined,
       variant: (data.variant as ShopContext['variant']) ?? undefined,
       session: (data.session as ShopContext['session']) ?? undefined,
+      metals: Array.isArray(data.metals) ? (data.metals.filter((m) => m === 'gold' || m === 'silver') as Metal[]) : undefined,
+      url: sent('url'),
+      pending: sent('pending'),
+      worker: sent('worker'),
     });
   };
   window.addEventListener('message', listener);

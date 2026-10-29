@@ -34,17 +34,28 @@ async function read(response: Response): Promise<JobResponse> {
   return body;
 }
 
+export interface MockupOptions {
+  /** A photo already asked for: only waited for. */
+  job?: string;
+  /** Told the photo's job once it is asked for, so the wait can be picked up again (components/try). */
+  onSubmitted?: (job: string) => void;
+}
+
 /** Submits the design and returns the finished photograph as a data URL. */
-export async function runMockup(design: unknown): Promise<string> {
-  const submitted = await read(
-    await fetch('/api/render-mockup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(design),
-    }),
-  );
-  const job = submitted.job;
-  if (!job) throw new MockupError('We couldn\'t make the product photo. Please try again.');
+export async function runMockup(design: unknown, options: MockupOptions = {}): Promise<string> {
+  let job = options.job;
+  if (!job) {
+    const submitted = await read(
+      await fetch('/api/render-mockup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(design),
+      }),
+    );
+    job = submitted.job;
+    if (!job) throw new MockupError('We couldn\'t make the product photo. Please try again.');
+    options.onSubmitted?.(job);
+  }
 
   const until = Date.now() + GIVE_UP_MS;
   let failures = 0;

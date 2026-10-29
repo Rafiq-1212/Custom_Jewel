@@ -364,7 +364,7 @@ export interface FeedbackFilter {
 /** Feedback, newest first, with the sketch it is about and who gave it. */
 export async function feedbackList(filter: FeedbackFilter = {}, limit = 300): Promise<Feedback[]> {
   const rows = await db()`
-    select f.*, u.name as by, r.name as resolved_by_name, g.category, s.file as sketch_file
+    select f.*, coalesce(u.name, 'Customer ' || right(f.phone, 10)) as by, r.name as resolved_by_name, g.category, s.file as sketch_file
     from feedback f
     left join "user" u on u.id = f.user_id
     left join "user" r on r.id = f.resolved_by
@@ -384,7 +384,7 @@ export async function feedbackList(filter: FeedbackFilter = {}, limit = 300): Pr
 
 export async function feedbackOnDesign(id: string): Promise<Feedback[]> {
   const rows = await db()`
-    select f.*, u.name as by, r.name as resolved_by_name, null as category, null as sketch_file
+    select f.*, coalesce(u.name, 'Customer ' || right(f.phone, 10)) as by, r.name as resolved_by_name, null as category, null as sketch_file
     from feedback f left join "user" u on u.id = f.user_id left join "user" r on r.id = f.resolved_by
     where f.generation_id = ${id}
     order by f.created_at`;
