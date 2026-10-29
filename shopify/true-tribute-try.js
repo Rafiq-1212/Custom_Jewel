@@ -42,7 +42,7 @@
   if (root && buttons) buttons.parentNode.insertBefore(root, buttons);
   document.querySelectorAll('[data-tt-tool]').forEach(function (el) {
     var host = el.closest('.shopify-section');
-    if (host && !host.querySelector('.tt-try')) host.style.display = 'none';
+    if (host && !(root && host.contains(root))) host.style.display = 'none';
   });
 
   var overlay = null;
