@@ -30,6 +30,7 @@ const STEP_NAMES: Record<string, string> = {
   product_photo: 'Product photo',
   production_files: 'Production files',
   otp_sent: 'Sign-in code texted',
+  designs_added: 'Designs given by the team',
 };
 
 export function stepName(kind: string): string {

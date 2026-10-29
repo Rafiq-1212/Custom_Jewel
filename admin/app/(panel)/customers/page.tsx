@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { canEdit } from '@/lib/access';
-import { refillTries } from '@/lib/actions';
+import { addTries, refillTries } from '@/lib/actions';
 import { requireScreen } from '@/lib/auth';
 import { when } from '@/lib/format';
 import { customers, shopSettings } from '@/lib/shop-queries';
@@ -15,7 +15,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const editor = canEdit(me);
   return (
     <>
-      <PageTitle title="Customers and tries" hint="Everyone who signed in with their mobile number on the shop. Each gets a set number of designs; refill them here when someone calls." />
+      <PageTitle title="Customers and tries" hint="Everyone who signed in with their mobile number on the shop. Each gets a set number of designs. When someone calls after running out, refill them back to a full set, or add extra designs on top." />
 
       <Card title="Shop settings">
         <ShopSettingsForm supportPhone={settings.supportPhone} triesLimit={settings.triesLimit} editable={editor} />
@@ -60,6 +60,11 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                       <td className={`${td} whitespace-nowrap tabular-nums ${out ? 'font-medium text-rose-600' : ''}`}>
                         {c.triesUsed} of {c.triesLimit}
                         {out && <span className="ml-1 text-xs">· used up</span>}
+                        {c.given && (
+                          <span className="block text-xs font-normal text-slate-500">
+                            {c.given.detail.startsWith('+') ? `${c.given.detail} added` : c.given.detail.replace('refilled', 'Refilled')} by {c.given.by}, {when(c.given.at)}
+                          </span>
+                        )}
                       </td>
                       <td className={`${td} tabular-nums`}>
                         {c.designs > 0 ? (
@@ -76,16 +81,34 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                       <td className={`${td} whitespace-nowrap`}>{when(c.lastSeenAt)}</td>
                       <td className={`${td} text-right`}>
                         {editor && (
-                          <form action={refillTries}>
-                            <input type="hidden" name="phone" value={c.phone} />
-                            <button
-                              type="submit"
-                              disabled={c.triesUsed === 0}
-                              className="whitespace-nowrap rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-900 hover:bg-slate-50 disabled:opacity-40"
-                            >
-                              Refill designs
-                            </button>
-                          </form>
+                          <div className="flex items-center justify-end gap-2">
+                            <form action={refillTries}>
+                              <input type="hidden" name="phone" value={c.phone} />
+                              <button
+                                type="submit"
+                                disabled={c.triesUsed === 0}
+                                title="Back to a full set: what they have used goes back to 0."
+                                className="whitespace-nowrap rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-900 hover:bg-slate-50 disabled:opacity-40"
+                              >
+                                Refill designs
+                              </button>
+                            </form>
+                            <form action={addTries} className="flex items-center gap-1">
+                              <input type="hidden" name="phone" value={c.phone} />
+                              <input
+                                name="extra"
+                                type="number"
+                                min={1}
+                                max={20}
+                                defaultValue={1}
+                                aria-label={`Extra designs for ${c.phone}`}
+                                className="w-14 rounded-lg border border-slate-300 px-2 py-1 text-sm tabular-nums"
+                              />
+                              <button type="submit" title="Extra designs on top of what they have left." className="whitespace-nowrap rounded-lg bg-slate-900 px-3 py-1 text-sm font-medium text-white hover:bg-slate-800">
+                                Add
+                              </button>
+                            </form>
+                          </div>
                         )}
                       </td>
                     </tr>

@@ -80,15 +80,27 @@ export async function setFirstPassword(_previous: FormState, form: FormData): Pr
 /**
  * Refills a shop customer's designs: what they have used goes back to 0, and
  * their limit to the shop's (Customers → Shop settings). For someone who rang
- * the support number when they ran out.
+ * the support number when they ran out. Recorded with who did it.
  */
 export async function refillTries(form: FormData): Promise<void> {
-  await requireEditor('customers');
+  const me = await requireEditor('customers');
   const phone = field(form, 'phone');
   if (!phone) return;
   const [limit] = await db()`select value from settings where key = 'tries_limit'`;
   const tries = Math.max(1, Number(limit?.value) || 3);
-  await db()`update customers set tries_used = 0, tries_limit = greatest(tries_limit, ${tries}) where phone = ${phone}`;
+  const [row] = await db()`update customers set tries_used = 0, tries_limit = greatest(tries_limit, ${tries}) where phone = ${phone} returning tries_limit`;
+  if (row) await db()`insert into events (kind, detail, phone, user_id) values ('designs_added', ${`refilled to ${row.tries_limit}`}, ${phone}, ${me.id})`;
+  revalidatePath('/customers');
+}
+
+/** Gives a shop customer extra designs on top of what they have left, also recorded with who did it. */
+export async function addTries(form: FormData): Promise<void> {
+  const me = await requireEditor('customers');
+  const phone = field(form, 'phone');
+  const extra = Number(field(form, 'extra'));
+  if (!phone || !Number.isInteger(extra) || extra < 1 || extra > 20) return;
+  const [row] = await db()`update customers set tries_limit = tries_limit + ${extra} where phone = ${phone} returning tries_limit`;
+  if (row) await db()`insert into events (kind, detail, phone, user_id) values ('designs_added', ${`+${extra}`}, ${phone}, ${me.id})`;
   revalidatePath('/customers');
 }
 

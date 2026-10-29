@@ -19,6 +19,8 @@ export interface Customer {
   marketingConsent: boolean;
   source: string | null;
   codesSent: number;
+  /** The last time the team gave this customer designs. */
+  given: { detail: string; at: string; by: string } | null;
 }
 
 /** Shop customers, the most recently seen first; only those matching `search` (part of a number) when given. */
@@ -28,8 +30,13 @@ export async function customers(search: string | null = null): Promise<Customer[
     select c.*,
       (select count(*) from generations g where g.phone = c.phone)::int as designs,
       (select count(*) from orders o where o.phone = c.phone)::int as orders,
-      (select count(*) from otp_requests r where r.phone = c.phone)::int as codes_sent
+      (select count(*) from otp_requests r where r.phone = c.phone)::int as codes_sent,
+      given.detail as given_detail, given.created_at as given_at, given.by as given_by
     from customers c
+    left join lateral (
+      select e.detail, e.created_at, u.name as by from events e left join "user" u on u.id = e.user_id
+      where e.kind = 'designs_added' and e.phone = c.phone order by e.id desc limit 1
+    ) given on true
     where ${digits} = '' or c.phone like ${`%${digits}%`}
     order by c.last_seen_at desc limit 500`;
   return rows.map((r) => ({
@@ -43,6 +50,7 @@ export async function customers(search: string | null = null): Promise<Customer[
     marketingConsent: r.marketing_consent === true,
     source: r.source,
     codesSent: r.codes_sent,
+    given: r.given_at ? { detail: r.given_detail, at: r.given_at, by: r.given_by ?? 'Removed login' } : null,
   }));
 }
 

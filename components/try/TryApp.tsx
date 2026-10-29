@@ -120,6 +120,10 @@ export function TryApp() {
         setSession(update.session);
         setCustomerToken(update.session.token);
         void refresh(update.session);
+      } else if (update.metals !== undefined) {
+        // Sent each time the window is opened: the team may have refilled their designs meanwhile.
+        const current = loadSession() ?? update.session;
+        if (current) void refresh(current);
       }
     });
     tellShop({ type: 'ready' });
