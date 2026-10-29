@@ -22,6 +22,15 @@
   var variants = [];
   try { variants = JSON.parse(root.querySelector('[data-tt-variants]').textContent || '[]'); } catch (e) {}
   var form = document.querySelector('form[action*="/cart/add"]');
+  // The store's own product section ("Newproduct") has no room for extra
+  // blocks, so the button is rendered in a section of its own and moved to
+  // just above Add to Cart / Buy Now; the emptied section is hidden.
+  var buttons = form && form.querySelector('.pd-buttons');
+  if (buttons) {
+    var host = root.closest('.shopify-section');
+    buttons.parentNode.insertBefore(root, buttons);
+    if (host && !host.contains(root)) host.style.display = 'none';
+  }
   var overlay = null;
   var frame = null;
 
