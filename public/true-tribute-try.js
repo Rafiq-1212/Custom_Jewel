@@ -293,7 +293,11 @@
       var own = img.getAttribute('src');
       img.setAttribute('data-tt-src', src);
       img.removeAttribute('srcset');
-      img.onerror = function () { img.onerror = null; img.src = own; };
+      // No photo in this metal (the design was made in the other): its drawing, as in the window; then the product's own.
+      img.onerror = function () {
+        img.onerror = function () { img.onerror = null; img.src = own; };
+        img.src = src.replace('kind=photo', 'kind=sketch');
+      };
       img.src = src;
     });
   }
