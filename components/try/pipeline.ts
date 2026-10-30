@@ -6,7 +6,7 @@
  * page of the shop while it is made: after every step the design's state is
  * handed to the shop page (components/try/shop.ts), which keeps it and, on
  * whichever page is open, starts this page again in the background to carry
- * on, then shows a notification when it is ready (shopify/true-tribute-try.js).
+ * on, then shows a notification when it is ready (public/true-tribute-try.js).
  *
  * The drawing and the product photo are batch jobs the server keeps; only
  * their names are needed to wait for them again. The photo itself is kept in

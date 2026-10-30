@@ -2,7 +2,7 @@
 
 /**
  * The customer page and the shop's page around it. The page lives in a frame
- * on shoptruetribute.com (shopify/true-tribute-try.js); the two talk only by
+ * on shoptruetribute.com (public/true-tribute-try.js); the two talk only by
  * postMessage, and only with origins in NEXT_PUBLIC_SHOP_ORIGINS.
  *
  * The sign-in is kept in both places: in this page's own storage, and handed

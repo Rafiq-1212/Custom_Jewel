@@ -1,10 +1,11 @@
 {%- comment -%}
   True Tribute — "Upload your photo" on a product page, and the notice that
-  a design is ready on every page (shopify/true-tribute-try.js).
+  a design is ready on every page (public/true-tribute-try.js).
 
   INSTALL (Online Store → Themes → ⋯ → Duplicate the live theme first, and
   work on the copy until it is tested):
-  1. Edit code → Assets → Add a new asset → upload true-tribute-try.js.
+  1. The script itself is served by the tool (public/true-tribute-try.js),
+     so changes to it go live with the tool, with no theme change.
   2. Edit code → Snippets → Add a new snippet "true-tribute-try", paste this file.
   3. In the product template (Customize → Product → Add block → Custom
      Liquid, above "Buy buttons"), add:   {% render 'true-tribute-try', product: product %}
@@ -52,4 +53,4 @@
   .tt-toast__close { margin-left: auto; align-self: flex-start; border: 0; background: none; color: #94a3b8; font-size: 2rem; line-height: 1; cursor: pointer; padding: 0 2px; }
   @keyframes tt-spin { to { transform: rotate(360deg); } }
 </style>
-<script src="{{ 'true-tribute-try.js' | asset_url }}" defer></script>
+<script src="https://true-b.vercel.app/true-tribute-try.js" defer></script>

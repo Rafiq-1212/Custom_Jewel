@@ -246,6 +246,7 @@
     } else if (data.type === 'use-design') {
       field('_tt_design', data.job);
       field('_tt_phone', data.phone);
+      if (data.metal) field('_tt_metal', data.metal);
       if (data.ref) field('Design', data.ref);
       // On the cart too, for the order and for checkout.
       fetch('/cart/update.js', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attributes: { 'Mobile (design)': data.phone } }) }).catch(function () {});
@@ -276,6 +277,51 @@
       close();
     }
   });
+
+  // In the cart (drawer or page), a line with a design shows the customer's
+  // pendant instead of the product's own picture. The picture needs their
+  // sign-in, so in another browser the product picture stays.
+  var picturing = 0;
+  var cartKeys = null;
+  var designs = {};
+  function showPictures() {
+    document.querySelectorAll('[data-item-key]').forEach(function (line) {
+      var src = designs[line.getAttribute('data-item-key')];
+      var item = src && line.closest('.premium-cart-item, .cart-item, tr');
+      var img = item && item.querySelector('img');
+      if (!img || img.getAttribute('data-tt-src') === src) return;
+      var own = img.getAttribute('src');
+      img.setAttribute('data-tt-src', src);
+      img.removeAttribute('srcset');
+      img.onerror = function () { img.onerror = null; img.src = own; };
+      img.src = src;
+    });
+  }
+  function cartPictures() {
+    var session = read(KEY);
+    var lines = document.querySelectorAll('[data-item-key]');
+    if (!session || !lines.length) return;
+    var keys = Array.prototype.map.call(lines, function (l) { return l.getAttribute('data-item-key'); }).join();
+    // The same lines redrawn: no need to ask the cart again.
+    if (keys === cartKeys) return showPictures();
+    cartKeys = keys;
+    fetch('/cart.js').then(function (r) { return r.json(); }).then(function (cart) {
+      designs = {};
+      cart.items.forEach(function (item) {
+        var job = item.properties && item.properties._tt_design;
+        if (!job) return;
+        var metal = item.properties._tt_metal || (/gold/i.test(item.variant_title || '') ? 'gold' : 'silver');
+        designs[item.key] = TOOL + '/api/try/image?job=' + encodeURIComponent(job) + '&kind=photo&metal=' + metal + '&token=' + encodeURIComponent(session.token);
+      });
+      showPictures();
+    }).catch(function () { cartKeys = null; });
+  }
+  // The theme redraws the cart after each change.
+  new MutationObserver(function () {
+    clearTimeout(picturing);
+    picturing = setTimeout(cartPictures, 300);
+  }).observe(document.body, { childList: true, subtree: true });
+  cartPictures();
 
   window.addEventListener('storage', function (e) {
     if (e.key !== PENDING) return;
