@@ -269,7 +269,7 @@ export function TryApp() {
   );
 
   return (
-    <main ref={mainRef} className="mx-auto flex w-full max-w-md flex-col gap-5 bg-white px-5 py-6">
+    <main ref={mainRef} className="mx-auto flex w-full max-w-lg flex-col gap-4 bg-white px-4 py-4">
       <header className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">See your pendant</h1>

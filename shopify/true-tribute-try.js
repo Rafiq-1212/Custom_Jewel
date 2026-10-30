@@ -285,6 +285,27 @@
   window.addEventListener('pagehide', function () { if (worker) store(BEAT, null); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && overlay && !overlay.hidden) close(); });
   if (root) {
+    // The tool replaces the Upload-Lift photo box on these products (only
+    // here: other products keep it). It loads late, so it is taken out
+    // whenever it shows up, and its "photo required" check is turned off
+    // (read at each click), so the store's own buttons no longer wait for it.
+    var dropUploader = function () {
+      document.querySelectorAll('.cl-upload--wrapper').forEach(function (el) { el.remove(); });
+      var lift = window.Cloudlift && window.Cloudlift.upload && window.Cloudlift.upload.config;
+      if (lift && lift.fields) lift.fields.forEach(function (f) { f.required = false; });
+    };
+    dropUploader();
+    new MutationObserver(dropUploader).observe(document.body, { childList: true, subtree: true });
+    // Add to Cart / Buy Now without a design open the window instead: a photo pendant needs a photo.
+    document.addEventListener('click', function (e) {
+      var button = e.target.closest && e.target.closest('#pdBuyNow, button[name="add"]');
+      if (!button || !form || !form.contains(button)) return;
+      var design = form.querySelector('input[name="properties[_tt_design]"]');
+      if (design && design.value) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      open();
+    }, true);
     document.addEventListener('change', function () { send({ type: 'init', variant: variant() }); });
     root.querySelector('[data-tt-open]').addEventListener('click', open);
     if (location.hash === '#tt-open') {
