@@ -88,14 +88,16 @@ export function TryApp() {
     // Only the latest ask counts: one made before signing in must not answer after it.
     const asked = ++refreshRef.current;
     const response = await fetch('/api/try/me', { headers: current ? withToken(current) : {} }).catch(() => null);
-    const body = (await response?.json().catch(() => null)) as (Me & { signedIn?: boolean }) | null;
+    const body = (await response?.json().catch(() => null)) as (Me & { signedIn?: boolean; token?: string }) | null;
     if (asked !== refreshRef.current) return;
-    if (current && !body?.signedIn) {
-      // Expired or unknown: sign in again.
+    if (current && body?.signedIn === false) {
+      // Expired or unknown: sign in again. A failed check (no answer, a server error) is not a sign-out.
       saveSession(null);
       setSession(null);
       setCustomerToken(null);
     }
+    // Kept for next time; the token in use stays good, so nothing on the page changes.
+    if (current && body?.signedIn && body.token) saveSession({ ...current, token: body.token });
     setMe(body ? { left: body.left ?? 0, limit: body.limit ?? 0, supportPhone: body.supportPhone ?? '' } : null);
     if (current && body?.signedIn) {
       const list = await fetch('/api/try/designs', { headers: withToken(current) }).catch(() => null);

@@ -29,8 +29,7 @@ export function issueToken(phone: string): string {
   return `${body}.${sign(body)}`;
 }
 
-/** The phone a token was issued to, if it is genuine and not expired. */
-export function phoneFromToken(token: string | null | undefined): string | null {
+function payloadOf(token: string | null | undefined): { sub: string; exp: number } | null {
   if (!token) return null;
   const [body, signature] = token.split('.');
   if (!body || !signature) return null;
@@ -40,16 +39,31 @@ export function phoneFromToken(token: string | null | undefined): string | null 
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { sub?: unknown; exp?: unknown };
     if (typeof payload.sub !== 'string' || typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
-    return payload.sub;
+    return { sub: payload.sub, exp: payload.exp };
   } catch {
     return null;
   }
 }
 
+/** The phone a token was issued to, if it is genuine and not expired. */
+export function phoneFromToken(token: string | null | undefined): string | null {
+  return payloadOf(token)?.sub ?? null;
+}
+
+function bearerOf(request: Request): string | null {
+  const header = request.headers.get('authorization') ?? '';
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : null;
+}
+
 /** The signed-in customer's phone, from a request's Authorization header. */
 export function customerOf(request: Request): string | null {
-  const header = request.headers.get('authorization') ?? '';
-  return header.startsWith('Bearer ') ? phoneFromToken(header.slice(7).trim()) : null;
+  return phoneFromToken(bearerOf(request));
+}
+
+/** A new token when the request's is over a day old: a customer who keeps coming back is never asked for a code again. */
+export function renewedToken(request: Request): string | undefined {
+  const payload = payloadOf(bearerOf(request));
+  return payload && payload.exp - Date.now() < (SESSION_DAYS - 1) * 86_400_000 ? issueToken(payload.sub) : undefined;
 }
 
 /** The key in a design's picture link on the shop's cart line: shows that design's pictures, nothing else, to whoever has the cart. */
