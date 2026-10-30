@@ -47,7 +47,7 @@ export const ISSUES: Record<FeedbackStage, Issue[]> = {
       key: 'mark',
       label: 'Forehead mark (pottu) wrong',
       correction:
-        'A forehead mark was wrong. Ink only the marks image 2 shows, each where it is and at the size it has there, measured against that person\'s eye: a dot smaller than the iris stays smaller than the iris. Add none, drop none, and never turn a dot into a ring or a bold spot.',
+        'A forehead mark was wrong. Ink only the marks image 2 shows, each where it is and at the size it has there, measured against that person\'s eye: a dot smaller than the iris stays smaller than the iris. Add none, drop none, and never turn a dot into a ring or a bold spot: every dot, a pale one of sandal paste included, is a tiny solid dot.',
     },
     {
       key: 'mole',

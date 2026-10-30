@@ -32,7 +32,7 @@ import { cropPhotoToHead, cutBelowJawline } from './image-processing';
 import { findJawline, type Jawline } from './jawline';
 import { ALIGNED, alignDrawing, alignJaw, clipBelowJaw, clipToHead, headMask } from './head-clip';
 import { roughInkTrace, type Region } from './ink-filter';
-import { unmirror } from './orientation';
+import { unmirror, upright } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, ENHANCE_RETRY_NOTE, INK_PROMPT } from './sketch-prompts';
 import { correctionsBlock } from './feedback';
@@ -315,9 +315,11 @@ function personFacts(people: PersonFacts[]): string {
       // inked at that size: told only "a small pale dot and a small dark
       // dot", the inker drew a ring as wide as an eye and a spot as big as
       // an iris, on a girl whose two dots are each a fraction of that.
+      // A pale dot was once drawn as an open outline; the team asked for a
+      // tiny dot instead (feedback, 16 and 28 Oct): a ring reads as a hole.
       const marks = /^none\.?$/i.test(p.marks)
         ? 'NO mark of any kind on the forehead or in the hair parting — leave the forehead completely clean'
-        : `forehead marks: ${p.marks} — ink exactly that many and no other, each at the size stated and NO BIGGER: hold it against the iris of this person's eye as you draw it, and a mark stated as smaller than an iris must fit INSIDE that iris with room to spare. A mark lighter than the skin is a fine open outline of that size with nothing inside it; a darker one is a solid shape of that size. Never a wide ring, an oval, a bold spot or a blob`;
+        : `forehead marks: ${p.marks} — ink exactly that many and no other, each at the size stated and NO BIGGER: hold it against the iris of this person's eye as you draw it, and a mark stated as smaller than an iris must fit INSIDE that iris with room to spare. A round dot is always a tiny SOLID dot, whether it is darker or lighter than the skin: a pale dot of sandal paste or vibhuti is inked as a tiny solid dot too, never a ring, a circle or an outline, and no bigger than the size stated: a dot stated as half an iris or less is NO BIGGER THAN THE BLACK PUPIL of the eye you draw, a speck, whether it is pale or dark. Only a streak or smear lighter than the skin is a fine open outline of its shape; a darker one is solid. Never a wide ring, an oval, a bold spot or a blob`;
       // Asked for because a woman was drawn with a mole on a clear cheek,
       // on every run: a faint spot in the pencils, inked as a mole. Stated
       // flatly: worded softer ("only where image 2 plainly shows one") the
@@ -378,7 +380,8 @@ export interface InkInputs {
 }
 
 /** Edits the photo and reads it: the paid, slow half of a sketch. */
-export async function prepareInking(input: SketchInput): Promise<InkInputs> {
+export async function prepareInking(sent: SketchInput): Promise<InkInputs> {
+  const input = { ...sent, ...(await upright(sent.imageBytes, sent.mimeType)) };
   let edited = await touchUp(input);
   if (HEAD_ONLY_CATEGORIES.has(input.category) && (await leftObjectsBehind(edited))) {
     console.info(`[sketch] ${input.category}: objects left along the bottom after the photo edit, retrying once`);
