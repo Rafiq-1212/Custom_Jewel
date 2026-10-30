@@ -43,34 +43,35 @@ export async function submitImageJob(
   input: GenerateImageFromImageInput,
   label: string,
   metadata?: Record<string, string>,
+  extras: GenerateImageFromImageInput[] = [],
 ): Promise<string> {
   const ai = getClient();
+  // `extras` ride in the same job after the main request, and come back as readImageJob's `extras`.
+  const request = (input: GenerateImageFromImageInput, metadata?: Record<string, string>) => ({
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: input.prompt },
+          ...input.images.map((image) => ({
+            inlineData: { mimeType: image.mimeType, data: Buffer.from(image.bytes).toString('base64') },
+          })),
+        ],
+      },
+    ],
+    config: {
+      responseModalities: [Modality.TEXT, Modality.IMAGE],
+      ...(input.imageSize ? { imageConfig: { imageSize: input.imageSize } } : {}),
+      ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+    },
+    // Comes back with the result (InlinedResponse.metadata), so a small
+    // piece of state can travel with the job instead of being stored.
+    ...(metadata ? { metadata } : {}),
+  });
   try {
     const job = await ai.batches.create({
       model: MODEL_ID,
-      src: [
-        {
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: input.prompt },
-                ...input.images.map((image) => ({
-                  inlineData: { mimeType: image.mimeType, data: Buffer.from(image.bytes).toString('base64') },
-                })),
-              ],
-            },
-          ],
-          config: {
-            responseModalities: [Modality.TEXT, Modality.IMAGE],
-            ...(input.imageSize ? { imageConfig: { imageSize: input.imageSize } } : {}),
-            ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-          },
-          // Comes back with the result (InlinedResponse.metadata), so a small
-          // piece of state can travel with the job instead of being stored.
-          ...(metadata ? { metadata } : {}),
-        },
-      ],
+      src: [request(input, metadata), ...extras.map((extra) => request(extra))],
       config: { displayName: label },
     });
     if (!job.name) throw new GeminiGenerationError('REQUEST_FAILED', 'The batch job came back without a name.');
@@ -119,7 +120,7 @@ export async function readImageJob(
   name: string,
   label: string,
   options: { count?: boolean } = {},
-): Promise<GenerateImageResult & { metadata?: Record<string, string> }> {
+): Promise<GenerateImageResult & { metadata?: Record<string, string>; extras: (Buffer | null)[] }> {
   const ai = getClient();
   let job;
   try {
@@ -134,6 +135,12 @@ export async function readImageJob(
   }
 
   const results = ((job.dest as { inlinedResponses?: InlinedResult[] } | undefined)?.inlinedResponses ?? []) as InlinedResult[];
+  // The extra requests (submitImageJob's `extras`), in order; null where one came back without an image.
+  const extras = results.slice(1).map((extra) => {
+    const data = extra.response?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
+    if (extra.response?.usageMetadata && options.count) recordCall(`batched ${label} (close-up)`, priceImageCall(extra.response.usageMetadata, { batch: true }));
+    return data ? Buffer.from(data, 'base64') : null;
+  });
   const result = results[0];
   if (!result) throw new GeminiGenerationError('EMPTY_RESPONSE', `Batch job ${name} finished with no response.`);
   if (result.error) {
@@ -152,5 +159,5 @@ export async function readImageJob(
   if (!part?.inlineData?.data) {
     throw new GeminiGenerationError('EMPTY_RESPONSE', `Batch job ${name} finished without an image (${candidate?.finishReason ?? 'no reason given'}).`);
   }
-  return { bytes: Buffer.from(part.inlineData.data, 'base64'), mimeType: part.inlineData.mimeType || 'image/png', metadata: result.metadata };
+  return { bytes: Buffer.from(part.inlineData.data, 'base64'), mimeType: part.inlineData.mimeType || 'image/png', metadata: result.metadata, extras };
 }

@@ -53,7 +53,7 @@ export const ISSUES: Record<FeedbackStage, Issue[]> = {
       key: 'mole',
       label: 'Mole or spot wrong',
       correction:
-        'A mole or spot was wrong. Ink only the moles plainly visible in image 2, each at its real size, as a tiny dot; draw none anywhere else.',
+        'A mole or spot was wrong. Ink no moles, beauty spots or specks on any face.',
     },
     {
       key: 'hair',

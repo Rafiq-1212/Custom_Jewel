@@ -36,6 +36,9 @@ import { unmirror, upright } from './orientation';
 import type { CategoryId } from './pendant-categories';
 import { buildEnhancePrompt, ENHANCE_RETRY_NOTE, INK_PROMPT } from './sketch-prompts';
 import { correctionsBlock } from './feedback';
+import { closeUpRequests, headsFor, layFaces, type Head } from './face-redraw';
+import { loadInkInputs } from './ink-inputs';
+import { checkMarks } from './mark-check';
 
 if (typeof window !== 'undefined') {
   throw new Error('lib/sketch-pipeline.ts was imported into a browser bundle. This module is server-only.');
@@ -186,6 +189,8 @@ interface Faces {
   regions: Region[];
   /** Each person, left to right, for the inker. */
   people: PersonFacts[];
+  /** Each person's head, in the same order. */
+  heads: Region[];
 }
 
 const CLOSE_UP_PROMPT = `This is a close-up of one person's face, cut from a larger photo.
@@ -288,7 +293,7 @@ async function findFaces(photo: Buffer, original: Uint8Array): Promise<Faces | u
         .map((p) => `hair: ${p.facts.hair}; marks: ${p.facts.marks}; moles: ${p.facts.moles}; eyes: ${p.facts.eyes}; brows: ${p.facts.brows ?? '?'}; mouth: ${p.facts.mouth ?? '?'}`)
         .join(' | ')}`,
     );
-    return { regions, people: people.map((person) => person.facts) };
+    return { regions, people: people.map((person) => person.facts), heads: people.map((person) => person.region) };
   } catch (error) {
     console.info(`[sketch] could not find the faces, tracing everything as face: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
@@ -304,40 +309,43 @@ async function findFaces(photo: Buffer, original: Uint8Array): Promise<Faces | u
  * squinting smile becoming a wink. Told per person what the photo shows, the
  * model follows it — the lesson of the old bindi check, applied to all three.
  */
+const FACTS_HEADING =
+  'EACH PERSON, CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND. Draw exactly this for each person and nothing else — not what you think suits them, and not what the person next to them has:';
+
 function personFacts(people: PersonFacts[]): string {
-  if (people.length === 0 || people.some((p) => !p.hair || !p.marks || !p.moles || !p.eyes)) return '';
+  const lines = personLines(people);
+  return lines.length ? [FACTS_HEADING, ...lines].join('\n') : '';
+}
+
+/** One line per person, left to right; none if anyone could not be read. */
+function personLines(people: PersonFacts[]): string[] {
+  if (people.length === 0 || people.some((p) => !p.hair || !p.marks || !p.moles || !p.eyes)) return [];
   const place = (i: number) =>
     people.length === 1 ? 'The person' : i === 0 ? 'The person furthest to the LEFT' : i === people.length - 1 ? 'The person furthest to the RIGHT' : `Person ${i + 1} from the left`;
-  return [
-    'EACH PERSON, CHECKED AGAINST THE PHOTOGRAPH BEFOREHAND. Draw exactly this for each person and nothing else — not what you think suits them, and not what the person next to them has:',
-    ...people.map((p, i) => {
-      // Each mark comes measured against the person's own iris, and is to be
-      // inked at that size: told only "a small pale dot and a small dark
-      // dot", the inker drew a ring as wide as an eye and a spot as big as
-      // an iris, on a girl whose two dots are each a fraction of that.
-      // A pale dot was once drawn as an open outline; the team asked for a
-      // tiny dot instead (feedback, 16 and 28 Oct): a ring reads as a hole.
-      const marks = /^none\.?$/i.test(p.marks)
-        ? 'NO mark of any kind on the forehead or in the hair parting — leave the forehead completely clean'
-        : `forehead marks: ${p.marks} — ink exactly that many and no other, each at the size stated and NO BIGGER: hold it against the iris of this person's eye as you draw it, and a mark stated as smaller than an iris must fit INSIDE that iris with room to spare. A round dot is always a tiny SOLID dot, whether it is darker or lighter than the skin: a pale dot of sandal paste or vibhuti is inked as a tiny solid dot too, never a ring, a circle or an outline, and no bigger than the size stated: a dot stated as half an iris or less is NO BIGGER THAN THE BLACK PUPIL of the eye you draw, a speck, whether it is pale or dark. Only a streak or smear lighter than the skin is a fine open outline of its shape; a darker one is solid. Never a wide ring, an oval, a bold spot or a blob`;
-      // Asked for because a woman was drawn with a mole on a clear cheek,
-      // on every run: a faint spot in the pencils, inked as a mole. Stated
-      // flatly: worded softer ("only where image 2 plainly shows one") the
-      // mole came back. The cost is that a small real mole the check misses
-      // (a man's, beside his goatee, on half the checks) is left out too.
-      // A real mole is drawn at its size: told only that a man had one, the
-      // inker drew a bold round spot several times its size.
-      const moles = /^none\.?$/i.test(p.moles)
-        ? 'NO mole or spot anywhere on the face — ink none, whatever specks the pencils have'
-        : `moles: ${p.moles} — ink each as the tiny dot it is, no bigger than in image 2, never a bold round spot`;
-      // Brows and mouth stated as facts, like the hair: drawn from the rules
-      // alone they came back as a generic, prettier face — a baby given
-      // arched brows, long lashes and a shaped smile she does not have.
-      const brows = p.brows ? `; eyebrows ${p.brows}` : '';
-      const mouth = p.mouth ? `; mouth ${p.mouth}` : '';
-      return `- ${place(i)}: hair ${p.hair}; ${marks}; ${moles}; eyes ${p.eyes}${brows}${mouth}.`;
-    }),
-  ].join('\n');
+  return people.map((p, i) => {
+    // Each mark comes measured against the person's own iris, and is to be
+    // inked at that size: told only "a small pale dot and a small dark
+    // dot", the inker drew a ring as wide as an eye and a spot as big as
+    // an iris, on a girl whose two dots are each a fraction of that.
+    // A pale dot was once drawn as an open outline; the team asked for a
+    // tiny dot instead (feedback, 16 and 28 Oct): a ring reads as a hole.
+    const marks = /^none\.?$/i.test(p.marks)
+      ? 'NO mark of any kind on the forehead or in the hair parting — leave the forehead completely clean'
+      : `forehead marks: ${p.marks} — ink exactly that many and no other, each at the size stated and NO BIGGER: hold it against the iris of this person's eye as you draw it, and a mark stated as smaller than an iris must fit INSIDE that iris with room to spare. A round dot is always a tiny SOLID dot, whether it is darker or lighter than the skin: a pale dot of sandal paste or vibhuti is inked as a tiny solid dot too, never a ring, a circle or an outline, and no bigger than the size stated: a dot stated as half an iris or less is NO BIGGER THAN THE BLACK PUPIL of the eye you draw, a speck, whether it is pale or dark. A streak or smear of pale paste (sandal, vibhuti) is a few fine short strokes in its shape and size — never an ornament, a decorative outline, a pattern or a grey bar; a darker streak is solid. Never a wide ring, an oval, a bold spot or a blob`;
+    // No moles at all. A woman was drawn with a mole on a clear cheek on
+    // every run, and told that someone had one, the inker drew a bold spot
+    // several times its size — or a mole the check made up from a pore or a
+    // shadow (a man with clear skin given one under the eye, 31 Oct), or on
+    // the wrong cheek. The shop asked for no unwanted dots; a real mole is
+    // left out too.
+    const moles = 'NO mole, beauty spot or speck anywhere on the face — ink none, whatever specks the pencils or the photo seem to show';
+    // Brows and mouth stated as facts, like the hair: drawn from the rules
+    // alone they came back as a generic, prettier face — a baby given
+    // arched brows, long lashes and a shaped smile she does not have.
+    const brows = p.brows ? `; eyebrows ${p.brows}` : '';
+    const mouth = p.mouth ? `; mouth ${p.mouth}` : '';
+    return `- ${place(i)}: hair ${p.hair}; ${marks}; ${moles}; eyes ${p.eyes}${brows}${mouth}.`;
+  });
 }
 
 /**
@@ -375,6 +383,10 @@ export interface InkInputs {
   facts: string;
   /** Corrections from the shop's feedback, built up over redraws. */
   corrections: string;
+  /** The faces also drawn close up (lib/face-redraw.ts); none for a head-only style, or a sketch kept before them. */
+  heads?: Head[];
+  /** Every face, for checking the dots drawn on it against the photo (lib/mark-check.ts). */
+  faces?: Region[];
   /** Returned with the job, for collectInked: the head mask and jaw of a Face Pendant. */
   metadata?: Record<string, string>;
 }
@@ -399,6 +411,9 @@ export async function prepareInking(sent: SketchInput): Promise<InkInputs> {
     photo,
     facts: faces ? personFacts(faces.people) : '',
     corrections: '',
+    // Not yet for a head-only style: untested there (lib/face-redraw.ts).
+    heads: faces && !headOnly ? headsFor(faces.heads, personLines(faces.people)) : [],
+    faces: headOnly ? [{ left: 0, top: 0, right: 1, bottom: 1 }] : faces?.heads,
     metadata: CROP_TO_HEAD_CATEGORIES.has(input.category)
       ? { head: await headMask(photo, jaw?.keep), ...(jaw ? { jaw: JSON.stringify({ points: jaw.points, keep: jaw.keep, beard: jaw.beard }) } : {}) }
       : undefined,
@@ -408,6 +423,13 @@ export async function prepareInking(sent: SketchInput): Promise<InkInputs> {
 /** Submits the drawing, with any corrections; returns its batch job. */
 export async function submitInking(inputs: InkInputs): Promise<string> {
   const prompt = [INK_PROMPT, inputs.facts, correctionsBlock(inputs.corrections)].filter(Boolean).join('\n\n');
+  // Each face also drawn on its own, close up, in the same job (lib/face-redraw.ts).
+  const heads = inputs.heads ?? [];
+  // Forehead marks, moles and corrections still apply to each face.
+  const closeUps = await closeUpRequests(heads, inputs.photo, (facts) =>
+    [facts && `${FACTS_HEADING}\n${facts}`, correctionsBlock(inputs.corrections)].filter(Boolean).join('\n\n'),
+  );
+  const metadata = heads.length ? { ...inputs.metadata, heads: JSON.stringify(heads.map((head) => head.box)) } : inputs.metadata;
   return submitImageJob(
     {
       prompt,
@@ -425,7 +447,8 @@ export async function submitInking(inputs: InkInputs): Promise<string> {
       temperature: INK_TEMPERATURE,
     },
     `inking ${inputs.category}${inputs.corrections ? ' (corrected)' : ''}`,
-    inputs.metadata,
+    metadata,
+    closeUps,
   );
 }
 
@@ -452,13 +475,17 @@ export class ReframeNeeded extends Error {}
  * (ReframeNeeded); on the second attempt it is lined up as well as can be.
  */
 export async function collectInked(inkJob: string, category: CategoryId, { redo = false } = {}): Promise<Buffer> {
-  const inked = await readImageJob(inkJob, `inking ${category}`, { count: true });
-  const grey = await sharp(Buffer.from(inked.bytes)).flatten({ background: '#ffffff' }).greyscale().png().toBuffer();
+  const [inked, kept] = await Promise.all([readImageJob(inkJob, `inking ${category}`, { count: true }), loadInkInputs(inkJob).catch(() => null)]);
+  const drawn = await sharp(Buffer.from(inked.bytes)).flatten({ background: '#ffffff' }).greyscale().png().toBuffer();
+  const heads = inked.metadata?.heads;
+  const grey = heads ? await layFaces(drawn, (JSON.parse(heads) as Region[]).map((box) => ({ box })), inked.extras) : drawn;
+  // Dots on the faces checked against the photo, while the drawing is still in the photo's framing.
+  const check = (image: Buffer) => (kept?.faces?.length ? checkMarks(image, kept.photo, kept.faces) : image);
   const head = inked.metadata?.head;
-  if (!head) return grey;
+  if (!head) return check(grey);
   const aligned = await alignDrawing(grey, head);
   if (aligned !== ALIGNED && redo) throw new ReframeNeeded('The drawing came back out of frame.');
-  const clipped = await clipToHead(grey, head, aligned);
+  const clipped = await clipToHead(aligned === ALIGNED ? await check(grey) : grey, head, aligned);
   const jaw = inked.metadata?.jaw;
   return jaw ? clipBelowJaw(clipped, alignJaw(JSON.parse(jaw) as Jawline, aligned)) : clipped;
 }

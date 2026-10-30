@@ -65,5 +65,7 @@ export async function loadInkInputs(job: string): Promise<InkInputs | null> {
     facts: typeof rest.facts === 'string' ? rest.facts : '',
     corrections: typeof rest.corrections === 'string' ? rest.corrections : '',
     metadata: rest.metadata,
+    heads: rest.heads,
+    faces: rest.faces,
   };
 }
