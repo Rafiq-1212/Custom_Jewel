@@ -234,6 +234,7 @@
       send(context());
     } else if (data.type === 'session') {
       store(KEY, data.session || null);
+      prefillCheckout();
     } else if (data.type === 'pending') {
       store(PENDING, data.pending || null);
       worker = working(data.pending);
@@ -277,6 +278,21 @@
       close();
     }
   });
+
+  // Razorpay's checkout fills in the phone from this saved form entry when
+  // Shopify gives it none, so the number the customer verified here is put
+  // in it (anything else kept there stays).
+  // ponytail: not a documented Razorpay option; if their plugin stops reading it, ask Razorpay for a prefill hook.
+  function prefillCheckout() {
+    var session = read(KEY);
+    var digits = session && String(session.phone).replace(/\D/g, '').slice(-10);
+    if (!digits || digits.length !== 10) return;
+    var saved = read('growlytics-form-data') || {};
+    if (saved.mobile === '+91' + digits) return;
+    saved.mobile = '+91' + digits;
+    store('growlytics-form-data', saved);
+  }
+  prefillCheckout();
 
   // In the cart (drawer or page), a line with a design shows the customer's
   // pendant instead of the product's own picture. The picture needs their
