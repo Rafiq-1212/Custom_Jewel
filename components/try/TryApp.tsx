@@ -19,7 +19,7 @@
  */
 
 import * as React from 'react';
-import { setCustomerToken } from '@/lib/api-auth';
+import { authHeaders, setCustomerToken } from '@/lib/api-auth';
 import { metalOf, PICKABLE, SHOP_PRODUCTS, type ShopProduct } from '@/lib/shop-products';
 import { SketchError } from '@/lib/sketch-client';
 import { Feedback } from './Feedback';
@@ -237,9 +237,15 @@ export function TryApp() {
     void run(pending, file, session);
   };
 
-  const buy = (design: Design, then: 'cart' | 'buy') => {
+  const buy = async (design: Design, then: 'cart' | 'buy') => {
     if (!session) return;
-    tellShop({ type: 'use-design', job: design.job, ref: design.ref, phone: session.phone, metal: design.metal ?? metal, then });
+    const chosen = design.metal ?? metal;
+    // A link to the design's picture for the cart line, which shows it without the customer's sign-in.
+    const answer = await fetch(`/api/try/picture-key?job=${encodeURIComponent(design.job)}`, { headers: authHeaders() })
+      .then((r) => (r.ok ? (r.json() as Promise<{ key?: string }>) : null))
+      .catch(() => null);
+    const picture = answer?.key ? `${location.origin}/api/try/image?job=${encodeURIComponent(design.job)}&kind=photo&metal=${chosen}&key=${answer.key}` : undefined;
+    tellShop({ type: 'use-design', job: design.job, ref: design.ref, phone: session.phone, metal: chosen, picture, then });
   };
 
   const imageOf = (design: Design, kind: 'photo' | 'sketch') =>
@@ -326,10 +332,10 @@ export function TryApp() {
                 </button>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => buy(result, 'cart')} className={primary}>
+                  <button type="button" onClick={() => void buy(result, 'cart')} className={primary}>
                     Add to cart
                   </button>
-                  <button type="button" onClick={() => buy(result, 'buy')} className={secondary}>
+                  <button type="button" onClick={() => void buy(result, 'buy')} className={secondary}>
                     Buy now
                   </button>
                 </div>

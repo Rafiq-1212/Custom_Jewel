@@ -155,6 +155,12 @@ export async function folderOf(phone: string, job: string): Promise<string | nul
   return row?.folder ?? null;
 }
 
+/** A design's folder, whoever made it: for its picture link on a cart line (key checked by the caller). */
+export async function folderOfJob(job: string): Promise<string | null> {
+  const [row] = await db()`select folder from generations where id = ${job} and folder is not null`;
+  return row?.folder ?? null;
+}
+
 /** The saved file of one of a design's pictures: its sketch, or its newest product photo in a metal. */
 export async function pictureOf(folder: string, kind: 'sketch' | 'photo', metal: 'gold' | 'silver'): Promise<string | null> {
   const [row] =

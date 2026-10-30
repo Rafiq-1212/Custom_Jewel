@@ -52,6 +52,11 @@ export function customerOf(request: Request): string | null {
   return header.startsWith('Bearer ') ? phoneFromToken(header.slice(7).trim()) : null;
 }
 
+/** The key in a design's picture link on the shop's cart line: shows that design's pictures, nothing else, to whoever has the cart. */
+export function pictureKey(job: string): string {
+  return createHmac('sha256', secret()).update(`picture:${job}`).digest('base64url').slice(0, 32);
+}
+
 /** A keyed hash, for sign-in codes: never stored as they are. */
 export function keyedHash(value: string): string {
   return createHmac('sha256', secret()).update(`otp:${value}`).digest('hex');

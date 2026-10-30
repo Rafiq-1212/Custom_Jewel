@@ -248,6 +248,7 @@
       field('_tt_design', data.job);
       field('_tt_phone', data.phone);
       if (data.metal) field('_tt_metal', data.metal);
+      if (typeof data.picture === 'string' && data.picture.indexOf(TOOL + '/api/try/image?') === 0) field('_tt_picture', data.picture);
       if (data.ref) field('Design', data.ref);
       // On the cart too, for the order and for checkout.
       fetch('/cart/update.js', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attributes: { 'Mobile (design)': data.phone } }) }).catch(function () {});
@@ -294,44 +295,62 @@
   }
   prefillCheckout();
 
-  // In the cart (drawer or page), a line with a design shows the customer's
-  // pendant instead of the product's own picture. The picture needs their
-  // sign-in, so in another browser the product picture stays.
+  // In the cart (drawer or page), a line with a design shows the pendant's
+  // picture where its "Design: TT-…" reference was. The picture link is kept
+  // on the line (_tt_picture), so it shows in any browser; older lines fall
+  // back to the customer's sign-in on this browser.
   var picturing = 0;
   var cartKeys = null;
   var designs = {};
+  // The innermost part of a cart line that shows its design reference.
+  function refHolder(item, ref) {
+    var found = null;
+    item.querySelectorAll('div, p, span, dd, li').forEach(function (el) {
+      if (el.textContent.indexOf(ref) >= 0 && (!found || found.contains(el))) found = el;
+    });
+    return found && found.closest('.premium-selected-design') || found;
+  }
   function showPictures() {
     document.querySelectorAll('[data-item-key]').forEach(function (line) {
-      var src = designs[line.getAttribute('data-item-key')];
-      var item = src && line.closest('.premium-cart-item, .cart-item, tr');
-      var img = item && item.querySelector('img');
-      if (!img || img.getAttribute('data-tt-src') === src) return;
-      var own = img.getAttribute('src');
-      img.setAttribute('data-tt-src', src);
-      img.removeAttribute('srcset');
-      // No photo in this metal (the design was made in the other): its drawing, as in the window; then the product's own.
+      var design = designs[line.getAttribute('data-item-key')];
+      var item = design && line.closest('.premium-cart-item, .cart-item, tr');
+      var holder = item && (item.querySelector('[data-tt-picture]') || refHolder(item, design.ref));
+      if (!holder || holder.getAttribute('data-tt-picture') === design.src) return;
+      var text = holder.getAttribute('data-tt-picture') ? holder.getAttribute('data-tt-text') : holder.innerHTML;
+      holder.setAttribute('data-tt-picture', design.src);
+      holder.setAttribute('data-tt-text', text);
+      var img = el('img', 'tt-cart-picture');
+      img.style.cssText = 'display:block;width:96px;height:96px;object-fit:contain;margin:4px 0;border:1px solid #e7e0f0;border-radius:10px;background:#faf8f5;';
+      img.alt = 'Your pendant, design ' + design.ref;
+      img.title = 'Design ' + design.ref;
+      // No photo in this metal (the design was made in the other): its drawing, as in the window; then the reference again.
       img.onerror = function () {
-        img.onerror = function () { img.onerror = null; img.src = own; };
-        img.src = src.replace('kind=photo', 'kind=sketch');
+        img.onerror = function () { holder.innerHTML = text; };
+        img.src = design.src.replace('kind=photo', 'kind=sketch');
       };
-      img.src = src;
+      img.src = design.src;
+      holder.textContent = '';
+      holder.appendChild(img);
     });
   }
   function cartPictures() {
-    var session = read(KEY);
     var lines = document.querySelectorAll('[data-item-key]');
-    if (!session || !lines.length) return;
+    if (!lines.length) return;
     var keys = Array.prototype.map.call(lines, function (l) { return l.getAttribute('data-item-key'); }).join();
     // The same lines redrawn: no need to ask the cart again.
     if (keys === cartKeys) return showPictures();
     cartKeys = keys;
+    var session = read(KEY);
     fetch('/cart.js').then(function (r) { return r.json(); }).then(function (cart) {
       designs = {};
       cart.items.forEach(function (item) {
-        var job = item.properties && item.properties._tt_design;
-        if (!job) return;
-        var metal = item.properties._tt_metal || (/gold/i.test(item.variant_title || '') ? 'gold' : 'silver');
-        designs[item.key] = TOOL + '/api/try/image?job=' + encodeURIComponent(job) + '&kind=photo&metal=' + metal + '&token=' + encodeURIComponent(session.token);
+        var p = item.properties || {};
+        if (!p._tt_design || !p.Design) return;
+        var metal = p._tt_metal || (/gold/i.test(item.variant_title || '') ? 'gold' : 'silver');
+        var src = String(p._tt_picture || '').indexOf(TOOL + '/api/try/image?') === 0 ? p._tt_picture
+          : session ? TOOL + '/api/try/image?job=' + encodeURIComponent(p._tt_design) + '&kind=photo&metal=' + metal + '&token=' + encodeURIComponent(session.token)
+          : null;
+        if (src) designs[item.key] = { src: src, ref: p.Design };
       });
       showPictures();
     }).catch(function () { cartKeys = null; });
