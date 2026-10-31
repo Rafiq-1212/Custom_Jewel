@@ -34,6 +34,7 @@ import { correctionsFrom } from '@/lib/feedback';
 import { feedbackFor, linkRedraw } from '@/lib/feedback-store';
 import { loadInkInputs, saveInkInputs } from '@/lib/ink-inputs';
 import { collectInked, ReframeNeeded, startSketch, submitInking } from '@/lib/sketch-pipeline';
+import { collectWhenLeft } from '@/lib/sketch-finish';
 import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchFolder, trackSketchStarted, type Who } from '@/lib/tracking';
 import { validateImageBytes } from '@/lib/validation';
 import { markRedoPending, ownsJob, refundTry, takeTry, takeRedo } from '@/lib/customers';
@@ -171,6 +172,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         charged = true;
       }
     }
+    const began = Date.now();
     try {
       return await withCostLog(`sketch ${category}`, async () => {
         let started: Awaited<ReturnType<typeof startSketch>>;
@@ -182,8 +184,12 @@ export async function POST(request: globalThis.Request): Promise<Response> {
           throw error;
         }
         await trackSketchStarted(started.job, category, costSoFar(), who);
-        // Kept so the drawing can be redone from feedback without a second photo edit.
-        after(() => saveInkInputs(started.job, started.inputs));
+        // Kept so the drawing can be redone from feedback without a second photo edit;
+        // then the drawing is waited for here too, and collected if its page has gone (lib/sketch-finish.ts).
+        after(async () => {
+          await saveInkInputs(started.job, started.inputs);
+          await collectWhenLeft(started.job, began + (maxDuration - 15) * 1000);
+        });
         return Response.json({ success: true, stage: 'inking', inkJob: started.job });
       });
     } catch (error) {
