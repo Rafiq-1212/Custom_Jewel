@@ -1,21 +1,18 @@
 import { requireScreen } from '@/lib/auth';
-import { amount, percent, rupees, when } from '@/lib/format';
+import { amount, percent, when } from '@/lib/format';
 import Link from 'next/link';
 import { toRange, totals } from '@/lib/queries';
 import { revenue } from '@/lib/shop-queries';
 import { Card, Empty, PageTitle, RangePicker, Stat, td, th } from '@/lib/ui';
 
-const INR_PER_USD = Number(process.env.INR_PER_USD) || 95.6;
-
 export default async function RevenuePage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   await requireScreen('revenue');
   const range = toRange((await searchParams).range);
   const [sales, t] = await Promise.all([revenue(range), totals(range)]);
-  const spend = t.spendUsd * INR_PER_USD;
 
   return (
     <>
-      <PageTitle title="Revenue" hint="What the generated pictures turned into: orders, money in, and money spent making them.">
+      <PageTitle title="Revenue" hint="What the generated pictures turned into: orders and money in.">
         <RangePicker path="/revenue" range={range} />
       </PageTitle>
 
@@ -23,7 +20,7 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
         <Stat label="Paid orders" value={String(sales.count)} note={`${sales.fromGenerations} linked to a generated picture`} />
         <Stat label="Sketches that became orders" value={percent(sales.fromGenerations, t.done)} note={`${t.done} finished sketches`} />
         <Stat label="Revenue" value={amount(sales.total)} />
-        <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={sales.count ? `${amount(spend / sales.count)} per order` : 'no orders yet'} />
+        <Stat label="Average order" value={sales.count ? amount(sales.total / sales.count) : '—'} note={sales.count ? `${sales.count} paid orders` : 'no orders yet'} />
       </div>
 
       <div className="mt-6">

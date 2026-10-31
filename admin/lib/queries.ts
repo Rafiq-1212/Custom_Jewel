@@ -24,7 +24,10 @@ export interface Totals {
   done: number;
   failed: number;
   running: number;
+  /** Left while it was being drawn. */
   abandoned: number;
+  /** A shop customer's drawing that was finished, but they left before its pendant photo was made. */
+  leftBeforePhoto: number;
   failedBeforeStart: number;
   redone: number;
   photos: number;
@@ -39,8 +42,11 @@ export async function totals(range: Range): Promise<Totals> {
       (select count(*) from generations where created_at >= ${from})::int as tried,
       (select count(*) from generations where created_at >= ${from} and status = 'done')::int as done,
       (select count(*) from generations where created_at >= ${from} and status = 'failed')::int as failed,
-      (select count(*) from generations where created_at >= ${from} and status = 'running' and created_at >= now() - interval '1 hour')::int as running,
-      (select count(*) from generations where created_at >= ${from} and status = 'running' and created_at < now() - interval '1 hour')::int as abandoned,
+      (select count(*) from generations where created_at >= ${from} and status = 'running' and created_at >= now() - interval '30 minutes')::int as running,
+      (select count(*) from generations where created_at >= ${from} and status = 'running' and created_at < now() - interval '30 minutes')::int as abandoned,
+      (select count(*) from generations g where g.created_at >= ${from} and g.status = 'done' and g.phone is not null
+         and coalesce(g.finished_at, g.created_at) < now() - interval '30 minutes'
+         and not exists (select 1 from events e where e.kind = 'product_photo' and g.folder is not null and right(e.folder, 10) = right(g.folder, 10)))::int as left_before_photo,
       (select count(*) from events where created_at >= ${from} and kind = 'sketch_failed' and generation_id is null)::int as failed_before_start,
       (select count(*) from events where created_at >= ${from} and kind = 'sketch_redo')::int as redone,
       (select count(*) from events where created_at >= ${from} and kind = 'product_photo')::int as photos,
@@ -52,6 +58,7 @@ export async function totals(range: Range): Promise<Totals> {
     failed: row.failed,
     running: row.running,
     abandoned: row.abandoned,
+    leftBeforePhoto: row.left_before_photo,
     failedBeforeStart: row.failed_before_start,
     redone: row.redone,
     photos: row.photos,
@@ -128,7 +135,9 @@ export interface Generation {
   photos: number;
   files: number;
   sketchFile: string | null;
-  /** The team member who made it, by name; null for what was made before the tool needed a login. */
+  /** Its newest pendant photo, in either metal: the picture the customer was shown. */
+  photoFile: string | null;
+  /** The team member who made it, by name, or "Customer" and their number; null for what was made before the tool needed a login. */
   madeBy: string | null;
   madeById: string | null;
   /** The drawing this one redraws, from feedback; null for a first drawing. */
@@ -144,25 +153,30 @@ export interface Generation {
 /**
  * A drawing is collected two to four minutes after it starts, by the browser
  * that started it. One still running after this long was left: the tab was
- * closed, and nobody will come back for it.
+ * closed, and nobody will come back for it. The same wait for a shop
+ * customer's pendant photo, made just after the drawing: none by then, and
+ * they left before seeing their pendant.
  */
-const ABANDONED_AFTER_MS = 60 * 60 * 1000;
+const ABANDONED_AFTER_MS = 30 * 60 * 1000;
 
 function toGeneration(r: Record<string, unknown>): Generation {
-  const left = r.status === 'running' && Date.now() - new Date(r.created_at as string).getTime() > ABANDONED_AFTER_MS;
+  const old = (at: unknown) => Date.now() - new Date(at as string).getTime() > ABANDONED_AFTER_MS;
+  const left = r.status === 'running' && old(r.created_at);
+  const noPhoto = r.status === 'done' && r.phone != null && Number(r.photos) === 0 && old(r.finished_at ?? r.created_at);
   return {
     id: r.id as string,
     createdAt: r.created_at as string,
     finishedAt: r.finished_at as string | null,
     phone: r.phone as string | null,
     category: r.category as string,
-    status: left ? 'abandoned' : (r.status as string),
+    status: left ? 'abandoned' : noPhoto ? 'left_before_photo' : (r.status as string),
     folder: r.folder as string | null,
     error: r.error as string | null,
     costUsd: Number(r.cost_usd),
     photos: Number(r.photos),
     files: Number(r.files),
     sketchFile: r.sketch_file as string | null,
+    photoFile: (r.photo_file as string | null) ?? null,
     madeBy: (r.made_by as string | null) ?? null,
     madeById: (r.created_by as string | null) ?? null,
     parentId: (r.parent_id as string | null) ?? null,
@@ -176,7 +190,7 @@ function toGeneration(r: Record<string, unknown>): Generation {
 /** The newest generations, each with what it has cost so far, what was made from it, and who made it; only `by`'s when given. */
 export async function generations(limit = 200, by: string | null = null, phone: string | null = null): Promise<Generation[]> {
   const rows = await db()`
-    select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Shop customer' end) as made_by
+    select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, p.file as photo_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Customer ' || g.phone end) as made_by
     from generations g
     left join "user" u on u.id = g.created_by
     left join lateral (
@@ -189,6 +203,9 @@ export async function generations(limit = 200, by: string | null = null, phone: 
     left join lateral (
       select file from events e where e.generation_id = g.id and e.kind = 'sketch_done' and e.file is not null order by e.id desc limit 1
     ) s on true
+    left join lateral (
+      select file from events e where e.kind = 'product_photo' and e.file is not null and g.folder is not null and right(e.folder, 10) = right(g.folder, 10) order by e.id desc limit 1
+    ) p on true
     left join lateral (
       select count(*) filter (where f.rating = 'good')::int as liked, count(*) filter (where f.rating = 'bad')::int as disliked
       from feedback f where f.generation_id = g.id and f.stage = 'sketch'

@@ -8,7 +8,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">
       <h1 className="text-xl font-semibold text-slate-900">True Tribute — Admin</h1>
-      <p className="mb-6 mt-1 text-sm text-slate-500">Sign in to see what has been made and what it cost.</p>
+      <p className="mb-6 mt-1 text-sm text-slate-500">Sign in to see what has been made, and by whom.</p>
       {changed && (
         <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
           Password changed. Sign in with your new password.

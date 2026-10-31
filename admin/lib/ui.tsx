@@ -43,6 +43,7 @@ const STATUS_STYLES: Record<string, string> = {
   failed: 'bg-rose-50 text-rose-700',
   running: 'bg-amber-50 text-amber-700',
   abandoned: 'bg-slate-100 text-slate-600',
+  left_before_photo: 'bg-slate-100 text-slate-600',
   redo_pending: 'bg-amber-50 text-amber-700',
   redone: 'bg-slate-100 text-slate-600',
 };
@@ -51,7 +52,8 @@ const STATUS_LABELS: Record<string, string> = {
   done: 'Finished',
   failed: 'Failed',
   running: 'In progress',
-  abandoned: 'Abandoned',
+  abandoned: 'Abandoned while drawing',
+  left_before_photo: 'Left before the pendant photo',
   redo_pending: 'Drawing again',
   redone: 'Drawn again (out of frame)',
 };

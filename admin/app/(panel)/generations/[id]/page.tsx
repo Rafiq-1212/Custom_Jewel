@@ -3,7 +3,7 @@ import { BASE_PATH } from '@/lib/base-path';
 import { notFound } from 'next/navigation';
 import { list } from '@vercel/blob';
 import { requireScreen } from '@/lib/auth';
-import { rupees, stepName, when } from '@/lib/format';
+import { stepName, when } from '@/lib/format';
 import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
 import { feedbackOnDesign, generation, redrawsOf } from '@/lib/queries';
 import { ordersOf } from '@/lib/shop-queries';
@@ -41,8 +41,7 @@ function caption(name: string): string {
 }
 
 export default async function GenerationPage({ params }: { params: Promise<{ id: string }> }) {
-  // What the design cost is for owners only.
-  const showCost = (await requireScreen('designs')).role === 'owner';
+  await requireScreen('designs');
   const { id } = await params;
   const found = await generation(`batches/${id}`);
   if (!found) notFound();
@@ -51,7 +50,6 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
   const [files, feedback, redraws, orders] = await Promise.all([savedFiles(folders), feedbackOnDesign(g.id), redrawsOf(g.id), ordersOf(g.id)]);
   const pictures = files.filter((f) => isPicture(f.name));
   const downloads = files.filter((f) => !isPicture(f.name));
-  const total = steps.reduce((sum, s) => sum + s.costUsd, 0);
 
   return (
     <>
@@ -71,8 +69,8 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
           </div>
           {g.error && <div className="mt-2 break-words text-xs text-rose-600">{g.error}</div>}
         </div>
-        <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone ? `for ${g.phone}` : undefined} />
-        {showCost ? <Stat label="Total cost" value={rupees(total)} note={`${steps.length} steps`} /> : <Stat label="Steps" value={String(steps.length)} />}
+        <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone && g.madeById ? `for ${g.phone}` : undefined} />
+        <Stat label="Steps" value={String(steps.length)} />
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
 
@@ -196,7 +194,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
       </div>
 
       <div className="mt-6">
-        <Card title={showCost ? 'Every step, and what it cost' : 'Every step'}>
+        <Card title="Every step">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -205,7 +203,6 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                   <th className={th}>Step</th>
                   <th className={th}>By</th>
                   <th className={th}>Detail</th>
-                  {showCost && <th className={th}>Cost</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -215,7 +212,6 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                     <td className={`${td} font-medium text-slate-900`}>{stepName(s.kind)}</td>
                     <td className={`${td} whitespace-nowrap`}>{s.by ?? '—'}</td>
                     <td className={`${td} break-words`}>{s.detail ?? '—'}</td>
-                    {showCost && <td className={`${td} tabular-nums`}>{rupees(s.costUsd)}</td>}
                   </tr>
                 ))}
               </tbody>

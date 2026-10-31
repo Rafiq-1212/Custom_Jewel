@@ -4,7 +4,8 @@
  * The shop customer's page, in the "Upload your photo" window on a product
  * page of shoptruetribute.com: sign in with a mobile number once, choose gold
  * or silver, upload a photo, watch it being made, and see their pendant as a
- * product photo. Add to Cart and Buy Now hand it to the shop page, which
+ * product photo — only ever the product photo, never the drawing behind it
+ * (the shop's wish, 31 Oct). Add to Cart and Buy Now hand it to the shop page, which
  * attaches it to the product form and presses the shop's own button, so the
  * shop's pricing and checkout carry on as usual.
  *
@@ -38,9 +39,8 @@ interface Design {
   job: string;
   ref: string;
   createdAt?: string;
-  /** Made on this page: the pictures as data URLs. Otherwise they are read through /api/try/image. */
+  /** Made on this page: the product photo as a data URL. Otherwise it is read through /api/try/image. */
   photo?: string;
-  sketch?: string;
   /** False when the product photo could not be made. */
   hasPhoto?: boolean;
   metal?: Metal;
@@ -75,6 +75,8 @@ export function TryApp() {
   const [result, setResult] = React.useState<Design | null>(null);
   const [past, setPast] = React.useState<Design[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  /** "job:metal" of a design whose product photo could not be loaded. */
+  const [missing, setMissing] = React.useState<string | null>(null);
   const runRef = React.useRef(0);
   const runningRef = React.useRef<string | null>(null);
   const refreshRef = React.useRef(0);
@@ -167,7 +169,7 @@ export function TryApp() {
         });
         if (!done || !live()) return;
         void dropPhoto(start.id);
-        setResult({ ...fromPending(done.pending), photo: done.photo, sketch: done.sketch });
+        setResult({ ...fromPending(done.pending), photo: done.photo });
         setStage('done');
       } catch (e) {
         if (!live()) return;
@@ -250,8 +252,25 @@ export function TryApp() {
     tellShop({ type: 'use-design', job: design.job, ref: design.ref, phone: session.phone, metal: chosen, picture, then });
   };
 
-  const imageOf = (design: Design, kind: 'photo' | 'sketch') =>
-    session ? `/api/try/image?job=${encodeURIComponent(design.job)}&kind=${kind}&metal=${design.metal ?? metal}&token=${encodeURIComponent(session.token)}` : '';
+  const photoOf = (design: Design) =>
+    session ? `/api/try/image?job=${encodeURIComponent(design.job)}&kind=photo&metal=${design.metal ?? metal}&token=${encodeURIComponent(session.token)}` : '';
+
+  // A design with no product photo in this metal yet: its photo made now (the drawing is never shown instead).
+  const makePhoto = (design: Design) => {
+    if (!session || !product) return;
+    const pending: Pending = {
+      id: crypto.randomUUID(),
+      product,
+      handle: design.handle ?? context.product?.handle ?? null,
+      title: design.title ?? context.product?.title ?? null,
+      url: design.url ?? context.url,
+      metal: design.metal ?? metal,
+      step: 'photo',
+      job: design.job,
+      ref: design.ref,
+    };
+    void run(pending, null, session);
+  };
 
   const working = stage !== null && stage !== 'done';
   const noneLeft = Boolean(session && me && me.left <= 0 && !working);
@@ -308,20 +327,24 @@ export function TryApp() {
 
           {result && !working && (
             <section className="flex flex-col gap-3">
-              {/* eslint-disable-next-line @next/next/no-img-element -- a data URL made here, or the customer's own picture through a signed-in route */}
-              <img
-                src={result.photo ?? (result.hasPhoto === false ? (result.sketch ?? imageOf(result, 'sketch')) : imageOf(result, 'photo'))}
-                onError={(e) => {
-                  const img = e.currentTarget;
-                  if (!img.dataset.fallback) {
-                    img.dataset.fallback = '1';
-                    img.src = result.sketch ?? imageOf(result, 'sketch');
-                  }
-                }}
-                alt="Your pendant"
-                className="aspect-square w-full rounded-2xl border border-slate-200 object-contain"
-              />
-              {result.hasPhoto === false && <p className="text-xs text-slate-500">The product photo couldn&apos;t be made just now; this is your design&apos;s drawing.</p>}
+              {!result.photo && (result.hasPhoto === false || missing === `${result.job}:${result.metal ?? metal}`) ? (
+                <div className="flex aspect-square w-full flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center">
+                  <p className="text-sm text-slate-600">The {(result.metal ?? metal) === 'gold' ? 'gold' : 'silver'} photo of this pendant isn&apos;t ready yet.</p>
+                  {product && (
+                    <button type="button" onClick={() => makePhoto(result)} className={secondary}>
+                      Make the pendant photo
+                    </button>
+                  )}
+                </div>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element -- a data URL made here, or the customer's own picture through a signed-in route
+                <img
+                  src={result.photo ?? photoOf(result)}
+                  onError={() => setMissing(`${result.job}:${result.metal ?? metal}`)}
+                  alt="Your pendant"
+                  className="aspect-square w-full rounded-2xl border border-slate-200 object-contain"
+                />
+              )}
               {result.ref && (
                 <p className="text-center text-sm text-slate-500">
                   Design {result.ref}
@@ -342,7 +365,7 @@ export function TryApp() {
                   </button>
                 </div>
               )}
-              <Feedback key={result.job} job={result.job} stage={result.hasPhoto === false ? 'sketch' : 'product_photo'} />
+              {result.hasPhoto !== false && <Feedback key={result.job} job={result.job} stage="product_photo" />}
             </section>
           )}
 
@@ -426,17 +449,14 @@ export function TryApp() {
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element -- the customer's own picture, through a signed-in route */}
                       <img
-                        src={imageOf(d, 'photo')}
+                        src={photoOf(d)}
                         onError={(e) => {
-                          const img = e.currentTarget;
-                          if (!img.dataset.fallback) {
-                            img.dataset.fallback = '1';
-                            img.src = imageOf(d, 'sketch');
-                          }
+                          // No product photo in this metal yet: an empty tile, never the drawing.
+                          e.currentTarget.style.visibility = 'hidden';
                         }}
                         alt={`Design ${d.ref}`}
                         loading="lazy"
-                        className="aspect-square w-full rounded-lg object-contain"
+                        className="aspect-square w-full rounded-lg bg-slate-50 object-contain"
                       />
                       <span className="text-[11px] text-slate-500">{d.ref}</span>
                     </button>

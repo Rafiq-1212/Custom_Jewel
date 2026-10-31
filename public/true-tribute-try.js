@@ -323,11 +323,8 @@
       img.style.cssText = 'display:block;width:96px;height:96px;object-fit:contain;margin:4px 0;border:1px solid #e7e0f0;border-radius:10px;background:#faf8f5;';
       img.alt = 'Your pendant, design ' + design.ref;
       img.title = 'Design ' + design.ref;
-      // No photo in this metal (the design was made in the other): its drawing, as in the window; then the reference again.
-      img.onerror = function () {
-        img.onerror = function () { holder.innerHTML = text; };
-        img.src = design.src.replace('kind=photo', 'kind=sketch');
-      };
+      // No photo in this metal: the design's reference again. Customers never see the drawing.
+      img.onerror = function () { holder.innerHTML = text; };
       img.src = design.src;
       holder.textContent = '';
       holder.appendChild(img);
