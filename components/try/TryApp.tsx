@@ -365,7 +365,9 @@ export function TryApp() {
                   </button>
                 </div>
               )}
-              {result.hasPhoto !== false && <Feedback key={result.job} job={result.job} stage="product_photo" />}
+              {(result.photo || (result.hasPhoto !== false && missing !== `${result.job}:${result.metal ?? metal}`)) && (
+                <Feedback key={result.job} job={result.job} stage="product_photo" />
+              )}
             </section>
           )}
 
@@ -451,8 +453,13 @@ export function TryApp() {
                       <img
                         src={photoOf(d)}
                         onError={(e) => {
-                          // No product photo in this metal yet: an empty tile, never the drawing.
-                          e.currentTarget.style.visibility = 'hidden';
+                          // No product photo in this metal: the other metal's, then an empty tile — never the drawing.
+                          const img = e.currentTarget;
+                          if (img.dataset.other) img.style.visibility = 'hidden';
+                          else {
+                            img.dataset.other = '1';
+                            img.src = photoOf({ ...d, metal: (d.metal ?? metal) === 'gold' ? 'silver' : 'gold' });
+                          }
                         }}
                         alt={`Design ${d.ref}`}
                         loading="lazy"
