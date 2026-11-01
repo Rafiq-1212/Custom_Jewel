@@ -34,7 +34,8 @@ import { correctionsFrom } from '@/lib/feedback';
 import { feedbackFor, linkRedraw } from '@/lib/feedback-store';
 import { loadInkInputs, saveInkInputs } from '@/lib/ink-inputs';
 import { collectInked, ReframeNeeded, startSketch, submitInking } from '@/lib/sketch-pipeline';
-import { collectWhenLeft } from '@/lib/sketch-finish';
+import { collectWhenLeft, uploadOf } from '@/lib/sketch-finish';
+import { get } from '@vercel/blob';
 import { trackEvent, trackSketchDone, trackSketchFailed, trackSketchFolder, trackSketchStarted, type Who } from '@/lib/tracking';
 import { validateImageBytes } from '@/lib/validation';
 import { markRedoPending, ownsJob, refundTry, takeTry, takeRedo } from '@/lib/customers';
@@ -243,6 +244,35 @@ export async function POST(request: globalThis.Request): Promise<Response> {
       });
     } catch (error) {
       return failFromGemini(error, 'redraw');
+    }
+  }
+
+  // A design made again from the photo it was uploaded with (admin panel,
+  // Designs): for one that failed, was left, or came out wrong. It is made for
+  // the same customer, at no cost to them, and collected here: nobody's page
+  // waits for it.
+  if (action === 'remake') {
+    if (caller.kind !== 'staff') return fail('That design can\'t be made again.', 403);
+    const from = readJobName(formData, 'from');
+    const source = from ? await uploadOf(from) : null;
+    if (!from || !source || !isCategoryId(source.category)) return fail('That design has no uploaded photo to make it from.', 404);
+    const file = await get(source.upload, { access: 'private' }).catch(() => null);
+    if (!file || file.statusCode !== 200) return fail('The uploaded photo could not be found.', 404);
+    const imageBytes = new Uint8Array(await new Response(file.stream).arrayBuffer());
+    const made: Who = { userId: caller.staff.id, phone: source.phone };
+    const began = Date.now();
+    try {
+      return await withCostLog(`remake ${source.category}`, async () => {
+        const started = await startSketch({ category: source.category as CategoryId, imageBytes, mimeType: file.blob.contentType });
+        await trackSketchStarted(started.job, source.category, costSoFar(), made, { parent: from, corrections: '' }, source.upload);
+        after(async () => {
+          await saveInkInputs(started.job, started.inputs);
+          await collectWhenLeft(started.job, began + (maxDuration - 15) * 1000, 0);
+        });
+        return Response.json({ success: true, job: started.job });
+      });
+    } catch (error) {
+      return failFromGemini(error, 'remake');
     }
   }
 

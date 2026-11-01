@@ -81,7 +81,7 @@ export async function trackSketchStarted(
 ): Promise<void> {
   await write('a sketch start', (sql) =>
     sql`insert into generations (id, category, created_by, phone, parent_id, corrections)
-        values (${generationId}, ${category}, ${who.userId}, ${who.phone}, ${redraw?.parent ?? null}, ${redraw?.corrections ?? null})
+        values (${generationId}, ${category}, ${who.userId}, ${who.phone}, ${redraw?.parent ?? null}, ${redraw?.corrections || null})
         on conflict (id) do nothing`,
   );
   await trackEvent({ kind: 'sketch_start', generationId, detail: category, costUsd, file: upload, ...who });

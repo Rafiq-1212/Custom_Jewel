@@ -7,6 +7,7 @@ import { stepName, when } from '@/lib/format';
 import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
 import { feedbackOnDesign, generation, redrawsOf } from '@/lib/queries';
 import { ordersOf } from '@/lib/shop-queries';
+import { RemakeButton } from './remake';
 import { Card, Empty, PageTitle, Stat, Status, td, th } from '@/lib/ui';
 
 interface Saved {
@@ -74,6 +75,16 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
         <Stat label="Steps" value={String(steps.length)} />
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
+
+      {g.uploadFile && (
+        <div className="mt-6">
+          <Card title="Make it again">
+            <div className="p-4">
+              <RemakeButton job={g.id} category={g.category} forCustomer={g.phone !== null} />
+            </div>
+          </Card>
+        </div>
+      )}
 
       {orders.length > 0 && (
         <div className="mt-6">

@@ -69,7 +69,8 @@ export async function collectLeftDrawing(job: string): Promise<'done' | 'failed'
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.error(`[sketch finish] ${job}: could not collect it: ${reason}`);
-      if (who.phone) await refundTry(who.phone);
+      // A customer's own design is given back; one the team made for them (a remake) never cost them one.
+      if (who.phone && !who.userId) await refundTry(who.phone);
       await trackSketchFailed(job, reason.slice(0, 500), costSoFar(), who);
       return 'failed';
     }
@@ -82,13 +83,13 @@ export async function collectLeftDrawing(job: string): Promise<'done' | 'failed'
  * the page did not. Stops at `deadline` (the request's time limit); a drawing
  * still unfinished then is collected when its customer comes back.
  */
-export async function collectWhenLeft(job: string, deadline: number): Promise<void> {
+export async function collectWhenLeft(job: string, deadline: number, grace = PAGE_GRACE_MS): Promise<void> {
   try {
     while (Date.now() + POLL_MS < deadline) {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       if ((await readJobState(job)) === 'running') continue;
-      if (Date.now() + PAGE_GRACE_MS + 20_000 > deadline) return;
-      await new Promise((resolve) => setTimeout(resolve, PAGE_GRACE_MS));
+      if (Date.now() + grace + 20_000 > deadline) return;
+      await new Promise((resolve) => setTimeout(resolve, grace));
       await collectLeftDrawing(job);
       return;
     }
@@ -104,4 +105,13 @@ export async function collectLeftDrawings(phone: string): Promise<void> {
     where phone = ${phone} and status = 'running' and created_at < now() - interval '3 minutes' and created_at > now() - interval '14 days'
     order by created_at limit 3`;
   for (const row of rows) await collectLeftDrawing(row.id).catch(() => undefined);
+}
+
+/** What a design was made from, for making it again: the photo as uploaded, its style, and the customer it was for. */
+export async function uploadOf(job: string): Promise<{ upload: string; category: string; phone: string | null } | null> {
+  const [row] = await db()`
+    select e.file, g.category, g.phone from generations g
+    join events e on e.generation_id = g.id and e.kind = 'sketch_start' and e.file is not null
+    where g.id = ${job} order by e.id limit 1`;
+  return row ? { upload: row.file, category: row.category, phone: row.phone ?? null } : null;
 }
