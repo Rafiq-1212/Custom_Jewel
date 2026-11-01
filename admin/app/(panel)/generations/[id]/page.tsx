@@ -32,6 +32,7 @@ function size(bytes: number): string {
 const isPicture = (name: string) => /\.(png|jpe?g|webp)$/i.test(name);
 
 function caption(name: string): string {
+  if (name.includes('upload.')) return 'Photo as uploaded';
   if (name.includes('photo.')) return 'Customer\'s photo';
   if (name.includes('sketch')) return 'Sketch';
   if (name.includes('product-gold')) return 'Product photo, gold';

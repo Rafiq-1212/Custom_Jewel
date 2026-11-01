@@ -76,13 +76,15 @@ export async function trackSketchStarted(
   who: Who,
   /** For a redraw: the drawing it corrects, and the corrections it was given. */
   redraw?: { parent: string; corrections: string },
+  /** Where the photo was saved as uploaded (app/api/sketch, action=start). */
+  upload: string | null = null,
 ): Promise<void> {
   await write('a sketch start', (sql) =>
     sql`insert into generations (id, category, created_by, phone, parent_id, corrections)
         values (${generationId}, ${category}, ${who.userId}, ${who.phone}, ${redraw?.parent ?? null}, ${redraw?.corrections ?? null})
         on conflict (id) do nothing`,
   );
-  await trackEvent({ kind: 'sketch_start', generationId, detail: category, costUsd, ...who });
+  await trackEvent({ kind: 'sketch_start', generationId, detail: category, costUsd, file: upload, ...who });
 }
 
 /**

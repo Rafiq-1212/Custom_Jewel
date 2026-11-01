@@ -142,6 +142,26 @@ async function readPhoto(formData: FormData): Promise<{ bytes: Uint8Array; type:
   return { bytes, type: file.type };
 }
 
+const extensionOf = (type: string | undefined) => (type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg');
+
+/**
+ * The photo exactly as uploaded, saved before anything is made from it, in
+ * a folder of its own (named from its bytes): a design that fails, or one
+ * the customer had no designs left for, can still be made from it later and
+ * sent to them. Null if it could not be saved.
+ */
+function keepUpload(photo: { bytes: Uint8Array; type: string }): Promise<string | null> {
+  return archive(orderFolder(photo.bytes), `upload.${extensionOf(photo.type)}`, photo.bytes, photo.type || 'image/jpeg');
+}
+
+/** A design that never reached the drawing, kept in the admin panel with its upload and who sent it. */
+async function trackUploadOnly(upload: string | null, category: CategoryId, reason: string, who: Who): Promise<void> {
+  if (!upload) return trackSketchFailed(undefined, reason, costSoFar(), who);
+  const id = `batches/upload-${upload.split('/')[2]}`;
+  await trackSketchStarted(id, category, 0, who, undefined, upload);
+  await trackSketchFailed(id, reason, costSoFar(), who);
+}
+
 export async function POST(request: globalThis.Request): Promise<Response> {
   const caller = await callerOf(request);
   if (caller instanceof Response) return caller;
@@ -160,6 +180,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
   if (action === 'start') {
     const photo = await readPhoto(formData);
     if (photo instanceof Response) return photo;
+    const upload = keepUpload(photo);
     // A shop customer spends one of their designs, unless this is the free
     // second go at a drawing that came back out of frame.
     let charged = false;
@@ -167,6 +188,7 @@ export async function POST(request: globalThis.Request): Promise<Response> {
       const previous = formData.get('attempt') === '2' ? readJobName(formData, 'previousJob') : null;
       if (!(previous && (await takeRedo(caller.phone, previous)))) {
         if (!(await takeTry(caller.phone))) {
+          after(async () => trackUploadOnly(await upload, category, 'The customer had no designs left.', who));
           return Response.json({ success: false, outOfTries: true, error: 'You have used all your designs.' }, { status: 429 });
         }
         charged = true;
@@ -180,10 +202,10 @@ export async function POST(request: globalThis.Request): Promise<Response> {
           started = await startSketch({ category, imageBytes: photo.bytes, mimeType: photo.type });
         } catch (error) {
           if (charged && caller.kind === 'customer') await refundTry(caller.phone);
-          await trackSketchFailed(undefined, failureReason(error), costSoFar(), who);
+          await trackUploadOnly(await upload, category, failureReason(error), who);
           throw error;
         }
-        await trackSketchStarted(started.job, category, costSoFar(), who);
+        await trackSketchStarted(started.job, category, costSoFar(), who, undefined, await upload);
         // Kept so the drawing can be redone from feedback without a second photo edit;
         // then the drawing is waited for here too, and collected if its page has gone (lib/sketch-finish.ts).
         after(async () => {
@@ -257,9 +279,8 @@ export async function POST(request: globalThis.Request): Promise<Response> {
         await trackSketchFolder(inkJob, folder);
         const spent = costSoFar();
         after(async () => {
-          const extension = photo?.type === 'image/png' ? 'png' : photo?.type === 'image/webp' ? 'webp' : 'jpg';
           const [, saved] = await Promise.all([
-            photo ? archive(folder, `photo.${extension}`, photo.bytes, photo.type || 'image/jpeg') : null,
+            photo ? archive(folder, `photo.${extensionOf(photo.type)}`, photo.bytes, photo.type || 'image/jpeg') : null,
             archive(folder, 'sketch.png', master.buffer, 'image/png'),
           ]);
           await trackSketchDone(inkJob, folder, spent, saved, who);

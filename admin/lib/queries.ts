@@ -135,6 +135,8 @@ export interface Generation {
   photos: number;
   files: number;
   sketchFile: string | null;
+  /** The photo as the customer or team member uploaded it; null for designs made before uploads were kept (1 Nov 2026). */
+  uploadFile: string | null;
   /** Its newest pendant photo, in either metal: the picture the customer was shown. */
   photoFile: string | null;
   /** The team member who made it, by name, or "Customer" and their number; null for what was made before the tool needed a login. */
@@ -176,6 +178,7 @@ function toGeneration(r: Record<string, unknown>): Generation {
     photos: Number(r.photos),
     files: Number(r.files),
     sketchFile: r.sketch_file as string | null,
+    uploadFile: (r.upload_file as string | null) ?? null,
     photoFile: (r.photo_file as string | null) ?? null,
     madeBy: (r.made_by as string | null) ?? null,
     madeById: (r.created_by as string | null) ?? null,
@@ -190,7 +193,7 @@ function toGeneration(r: Record<string, unknown>): Generation {
 /** The newest generations, each with what it has cost so far, what was made from it, and who made it; only `by`'s when given. */
 export async function generations(limit = 200, by: string | null = null, phone: string | null = null): Promise<Generation[]> {
   const rows = await db()`
-    select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, p.file as photo_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Customer ' || g.phone end) as made_by
+    select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, up.file as upload_file, p.file as photo_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Customer ' || g.phone end) as made_by
     from generations g
     left join "user" u on u.id = g.created_by
     left join lateral (
@@ -203,6 +206,9 @@ export async function generations(limit = 200, by: string | null = null, phone: 
     left join lateral (
       select file from events e where e.generation_id = g.id and e.kind = 'sketch_done' and e.file is not null order by e.id desc limit 1
     ) s on true
+    left join lateral (
+      select file from events e where e.generation_id = g.id and e.kind = 'sketch_start' and e.file is not null order by e.id limit 1
+    ) up on true
     left join lateral (
       select file from events e where e.kind = 'product_photo' and e.file is not null and g.folder is not null and right(e.folder, 10) = right(g.folder, 10) order by e.id desc limit 1
     ) p on true

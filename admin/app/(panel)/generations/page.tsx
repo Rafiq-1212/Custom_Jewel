@@ -45,6 +45,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
             <table className="w-full">
               <thead>
                 <tr>
+                  <th className={th}>Uploaded photo</th>
                   <th className={th}>Pendant photo</th>
                   <th className={th}>Sketch</th>
                   <th className={th}>Started</th>
@@ -62,6 +63,14 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                   const href = `/generations/${g.id.replace('batches/', '')}`;
                   return (
                     <tr key={g.id} className="hover:bg-slate-50">
+                      <td className={td}>
+                        <Link href={href} className="block h-14 w-14 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                          {g.uploadFile ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- served by our own signed-in route, not a public URL
+                            <img src={`${BASE_PATH}/api/file?path=${encodeURIComponent(g.uploadFile)}&w=160`} alt="Uploaded photo" loading="lazy" className="h-full w-full object-cover" />
+                          ) : null}
+                        </Link>
+                      </td>
                       <td className={td}>
                         <Link href={href} className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white text-[10px] text-slate-400">
                           {g.photoFile ? (
