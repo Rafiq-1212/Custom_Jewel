@@ -8,7 +8,7 @@ import { useState } from 'react';
  * tool (app/api/sketch, action=remake) starts it and saves it when it is
  * drawn, a few minutes later; a customer's finds it under "Your designs".
  */
-export function RemakeButton({ job, category, forCustomer }: { job: string; category: string; forCustomer: boolean }) {
+export function RemakeButton({ job, category, forCustomer, compact = false }: { job: string; category: string; forCustomer: boolean; compact?: boolean }) {
   const [state, setState] = useState<{ pending?: boolean; error?: string; started?: string }>({});
 
   async function remake() {
@@ -24,6 +24,13 @@ export function RemakeButton({ job, category, forCustomer }: { job: string; cate
   }
 
   if (state.started) {
+    if (compact) {
+      return (
+        <Link href={`/generations/${state.started.replace('batches/', '')}`} className="whitespace-nowrap text-xs text-emerald-700 underline">
+          Started, open it
+        </Link>
+      );
+    }
     return (
       <p className="text-sm text-emerald-700">
         Started. It is drawn and saved in about 3 to 5 minutes{forCustomer ? ', and the customer finds it under “Your designs”' : ''}.{' '}
@@ -39,12 +46,12 @@ export function RemakeButton({ job, category, forCustomer }: { job: string; cate
         type="button"
         onClick={remake}
         disabled={state.pending}
-        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+        className={`rounded-lg bg-slate-900 font-medium text-white hover:bg-slate-800 disabled:opacity-60 ${compact ? 'whitespace-nowrap px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'}`}
       >
-        {state.pending ? 'Starting…' : 'Generate from the uploaded photo'}
+        {state.pending ? 'Starting…' : compact ? 'Generate again' : 'Generate from the uploaded photo'}
       </button>
       {state.error && (
-        <p role="alert" className="text-sm text-rose-600">
+        <p role="alert" className={compact ? 'text-xs text-rose-600' : 'text-sm text-rose-600'}>
           {state.error}
         </p>
       )}

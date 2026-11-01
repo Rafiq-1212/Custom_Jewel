@@ -3,6 +3,7 @@ import { BASE_PATH } from '@/lib/base-path';
 import { requireScreen } from '@/lib/auth';
 import { when } from '@/lib/format';
 import { generations, makers } from '@/lib/queries';
+import { RemakeButton } from './[id]/remake';
 import { Card, Empty, PageTitle, Status, td, th } from '@/lib/ui';
 
 const ABANDONED = new Set(['abandoned', 'left_before_photo']);
@@ -56,6 +57,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                   <th className={th}>Feedback</th>
                   <th className={th}>Photos</th>
                   <th className={th}>Files</th>
+                  <th className={th}>Make it again</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -113,6 +115,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                       </td>
                       <td className={`${td} tabular-nums`}>{g.photos}</td>
                       <td className={`${td} tabular-nums`}>{g.files}</td>
+                      <td className={td}>{g.uploadFile && <RemakeButton job={g.id} category={g.category} forCustomer={g.phone !== null} compact />}</td>
                     </tr>
                   );
                 })}
