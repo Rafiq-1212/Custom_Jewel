@@ -2,18 +2,19 @@ import Link from 'next/link';
 import { ROLES, canSee } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { BASE_PATH } from '@/lib/base-path';
-import { percent, when } from '@/lib/format';
-import { activityByMember, byDay, feedbackTotals, generations, recentFailures, toRange, totals } from '@/lib/queries';
+import { percent, rupees, stepName, when } from '@/lib/format';
+import { activityByMember, byDay, feedbackTotals, generations, recentFailures, spendByStep, toRange, totals } from '@/lib/queries';
 import { shopTotals } from '@/lib/shop-queries';
 import { Card, Empty, PageTitle, RangePicker, Stat, Status, td, th } from '@/lib/ui';
 
-/** The dashboard: what has been made, by whom, and what was left unfinished. */
+/** The dashboard: what has been made, by whom, what it cost, and what was left unfinished. */
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const me = await requireScreen('overview');
   const range = toRange((await searchParams).range);
-  const [t, days, failures, members, latest, fb, shop] = await Promise.all([
+  const [t, days, steps, failures, members, latest, fb, shop] = await Promise.all([
     totals(range),
     byDay(),
+    spendByStep(range),
     recentFailures(),
     activityByMember(range),
     generations(8),
@@ -24,10 +25,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const seeDesigns = canSee(me, 'designs');
   const attempts = t.tried + t.failedBeforeStart;
   const allFailed = t.failed + t.failedBeforeStart;
+  const busiest = Math.max(1, ...days.map((d) => d.spendUsd));
 
   return (
     <>
-      <PageTitle title="Dashboard" hint="What has been made, by whom, how much of it came out, and what was left unfinished.">
+      <PageTitle title="Dashboard" hint="What has been made, by whom, how much of it came out, what Gemini charged for it, and what was left unfinished.">
         <RangePicker path="/" range={range} />
       </PageTitle>
 
@@ -42,10 +44,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         />
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Shop customers" value={String(shop.customers)} note="signed in with their number" />
-        <Stat label="Designs by customers" value={String(shop.customerDesigns)} note={`${shop.orders} became orders`} />
-        <Stat label="Sign-in texts" value={String(shop.codes)} note="sent by 2Factor" />
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={t.done ? `${rupees(t.spendUsd / t.done)} per finished sketch, all steps` : 'no finished sketches yet'} />
+        <Stat label="Sign-in texts" value={String(shop.codes)} note={`${rupees(shop.codeSpendUsd)} on 2Factor`} />
         <Stat label="Customer conversion" value={percent(shop.orders, shop.customerDesigns)} note="designs that were bought" />
       </div>
 
@@ -117,6 +118,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                     <th className={th}>Finished</th>
                     <th className={th}>Product photos</th>
                     <th className={th}>Production files</th>
+                    <th className={th}>Spent</th>
                     <th className={th}>Last active</th>
                   </tr>
                 </thead>
@@ -137,6 +139,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                       <td className={`${td} tabular-nums`}>{m.finished}</td>
                       <td className={`${td} tabular-nums`}>{m.photos}</td>
                       <td className={`${td} tabular-nums`}>{m.files}</td>
+                      <td className={`${td} tabular-nums font-medium text-slate-900`}>{rupees(m.spendUsd)}</td>
                       <td className={`${td} whitespace-nowrap`}>{when(m.lastAt)}</td>
                     </tr>
                   ))}
@@ -163,6 +166,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                       <th className={th}>Failed</th>
                       <th className={th}>Photos</th>
                       <th className={th}>Files</th>
+                      <th className={th}>Spent</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -174,6 +178,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                         <td className={`${td} tabular-nums ${d.failed ? 'text-rose-600' : ''}`}>{d.failed}</td>
                         <td className={`${td} tabular-nums`}>{d.photos}</td>
                         <td className={`${td} tabular-nums`}>{d.files}</td>
+                        <td className={td}>
+                          <div className="flex items-center gap-2">
+                            <span className="w-20 shrink-0 tabular-nums">{rupees(d.spendUsd)}</span>
+                            <span className="h-2 rounded bg-slate-800" style={{ width: `${Math.max(2, (80 * d.spendUsd) / busiest)}px` }} />
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -184,6 +194,23 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
 
         <div className="space-y-6">
+          <Card title="Where the money went">
+            {steps.length === 0 ? (
+              <Empty>No spending in this period.</Empty>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {steps.map((s) => (
+                  <li key={s.kind} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                    <span className="text-slate-700">
+                      {stepName(s.kind)} <span className="text-slate-400">× {s.count}</span>
+                    </span>
+                    <span className="tabular-nums font-medium text-slate-900">{rupees(s.spendUsd)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
           <Card title="Latest failures">
             {failures.length === 0 ? (
               <Empty>No failed sketches.</Empty>
