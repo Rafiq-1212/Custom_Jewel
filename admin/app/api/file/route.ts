@@ -11,8 +11,9 @@
 import { get } from '@vercel/blob';
 import sharp from 'sharp';
 import { headers } from 'next/headers';
-import { canSee, toRole, toScreens } from '@/lib/access';
+import { canSee, toRole, toScreens, viewerOf } from '@/lib/access';
 import { auth } from '@/lib/auth';
+import { maySeeFile } from '@/lib/queries';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,8 @@ export async function GET(request: Request): Promise<Response> {
   const params = new URL(request.url).searchParams;
   const path = params.get('path') ?? '';
   if (!SAVED_FILE.test(path)) return new Response('Not found', { status: 404 });
+  // Anyone but an owner: only their own designs and ordered ones (lib/access.ts).
+  if (!(await maySeeFile(path, viewerOf({ id: user.id, role: member.role })))) return new Response('Not found', { status: 404 });
   const width = Number(params.get('w'));
   try {
     const file = await get(path, { access: 'private' });

@@ -256,6 +256,8 @@ export async function POST(request: globalThis.Request): Promise<Response> {
     const from = readJobName(formData, 'from');
     const source = from ? await uploadOf(from) : null;
     if (!from || !source || !isCategoryId(source.category)) return fail('That design has no uploaded photo to make it from.', 404);
+    // Anyone but an owner remakes only their own designs and ordered ones, as the panel shows them (admin/lib/access.ts).
+    if (caller.staff.role !== 'owner' && source.createdBy !== caller.staff.id && !source.ordered) return fail('That design has no uploaded photo to make it from.', 404);
     const file = await get(source.upload, { access: 'private' }).catch(() => null);
     if (!file || file.statusCode !== 200) return fail('The uploaded photo could not be found.', 404);
     const imageBytes = new Uint8Array(await new Response(file.stream).arrayBuffer());

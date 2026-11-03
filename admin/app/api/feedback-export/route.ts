@@ -7,7 +7,7 @@
 
 import { get, list } from '@vercel/blob';
 import { headers } from 'next/headers';
-import { canSee, toRole, toScreens } from '@/lib/access';
+import { canSee, toRole, toScreens, viewerOf } from '@/lib/access';
 import { auth } from '@/lib/auth';
 import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
 import { when } from '@/lib/format';
@@ -41,7 +41,7 @@ export async function GET(request: Request): Promise<Response> {
   const stage = params.get('stage');
   if (!issue || !stage || !STAGE_LABELS[stage]) return new Response('Not found', { status: 404 });
 
-  const items = (await feedbackList({ issue, stage, rating: 'bad' }, MOST)).filter((f) => f.generationId);
+  const items = (await feedbackList({ issue, stage, rating: 'bad', viewer: viewerOf({ id: user.id, role: toRole(user.role) }) }, MOST)).filter((f) => f.generationId);
   const folders = await db()`select id, folder from generations where id = any(${items.map((f) => f.generationId)})`;
   const folderOf = new Map(folders.map((r) => [r.id as string, r.folder as string | null]));
 

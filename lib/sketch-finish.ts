@@ -108,10 +108,10 @@ export async function collectLeftDrawings(phone: string): Promise<void> {
 }
 
 /** What a design was made from, for making it again: the photo as uploaded, its style, and the customer it was for. */
-export async function uploadOf(job: string): Promise<{ upload: string; category: string; phone: string | null } | null> {
+export async function uploadOf(job: string): Promise<{ upload: string; category: string; phone: string | null; createdBy: string | null; ordered: boolean } | null> {
   const [row] = await db()`
-    select e.file, g.category, g.phone from generations g
+    select e.file, g.category, g.phone, g.created_by, exists (select 1 from orders o where o.generation_id = g.id) as ordered from generations g
     join events e on e.generation_id = g.id and e.kind = 'sketch_start' and e.file is not null
     where g.id = ${job} order by e.id limit 1`;
-  return row ? { upload: row.file, category: row.category, phone: row.phone ?? null } : null;
+  return row ? { upload: row.file, category: row.category, phone: row.phone ?? null, createdBy: row.created_by ?? null, ordered: row.ordered === true } : null;
 }

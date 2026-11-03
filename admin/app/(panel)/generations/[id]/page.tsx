@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { BASE_PATH } from '@/lib/base-path';
 import { notFound } from 'next/navigation';
 import { list } from '@vercel/blob';
+import { viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { stepName, when } from '@/lib/format';
 import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
@@ -43,9 +44,9 @@ function caption(name: string): string {
 }
 
 export default async function GenerationPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireScreen('designs');
+  const me = await requireScreen('designs');
   const { id } = await params;
-  const found = await generation(`batches/${id}`);
+  const found = await generation(`batches/${id}`, viewerOf(me));
   if (!found) notFound();
   const { generation: g, steps } = found;
   const folders = [...new Set([g.folder, ...steps.map((s) => (s.file ? s.file.slice(0, s.file.lastIndexOf('/')) : null))].filter((f): f is string => Boolean(f)))];

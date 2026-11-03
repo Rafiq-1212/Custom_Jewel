@@ -115,10 +115,11 @@ export interface Failure {
   generationId: string | null;
 }
 
-export async function recentFailures(): Promise<Failure[]> {
+/** `viewer`: see viewerOf in ./access.ts; null for every design. */
+export async function recentFailures(viewer: string | null = null): Promise<Failure[]> {
   const rows = await db()`
-    select created_at, detail, generation_id from events
-    where kind = 'sketch_failed' order by id desc limit 8`;
+    select e.created_at, e.detail, e.generation_id from events e left join generations g on g.id = e.generation_id
+    where e.kind = 'sketch_failed' and (${viewer}::text is null or g.created_by = ${viewer} or exists (select 1 from orders o where o.generation_id = g.id)) order by e.id desc limit 8`;
   return rows.map((r) => ({ createdAt: r.created_at, detail: r.detail, generationId: r.generation_id }));
 }
 
@@ -190,8 +191,12 @@ function toGeneration(r: Record<string, unknown>): Generation {
   };
 }
 
-/** The newest generations, each with what it has cost so far, what was made from it, and who made it; only `by`'s when given. */
-export async function generations(limit = 200, by: string | null = null, phone: string | null = null): Promise<Generation[]> {
+/**
+ * The newest generations, each with what it has cost so far, what was made
+ * from it, and who made it; only `by`'s when given. `viewer` (viewerOf in
+ * ./access.ts) leaves out what that login may not see.
+ */
+export async function generations(limit = 200, by: string | null = null, phone: string | null = null, viewer: string | null = null): Promise<Generation[]> {
   const rows = await db()`
     select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, up.file as upload_file, p.file as photo_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Customer ' || g.phone end) as made_by
     from generations g
@@ -217,6 +222,7 @@ export async function generations(limit = 200, by: string | null = null, phone: 
       from feedback f where f.generation_id = g.id and f.stage = 'sketch'
     ) fb on true
     where (${by}::text is null or g.created_by = ${by}) and (${phone}::text is null or g.phone = ${phone})
+      and (${viewer}::text is null or g.created_by = ${viewer} or exists (select 1 from orders o where o.generation_id = g.id))
     order by g.created_at desc
     limit ${limit}`;
   return rows.map(toGeneration);
@@ -233,9 +239,9 @@ export interface Step {
   by: string | null;
 }
 
-/** One generation and every step that belongs to it, oldest first. */
-export async function generation(id: string): Promise<{ generation: Generation; steps: Step[] } | null> {
-  const found = (await generations(1000)).find((g) => g.id === id);
+/** One generation and every step that belongs to it, oldest first; null when `viewer` may not see it. */
+export async function generation(id: string, viewer: string | null = null): Promise<{ generation: Generation; steps: Step[] } | null> {
+  const found = (await generations(1000, null, null, viewer)).find((g) => g.id === id);
   if (!found) return null;
   const order = found.folder ? found.folder.slice(-10) : '';
   const rows = await db()`
@@ -382,6 +388,8 @@ export interface FeedbackFilter {
   status?: string | null;
   rating?: string | null;
   by?: string | null;
+  /** viewerOf in ./access.ts: only feedback on designs this login may see. */
+  viewer?: string | null;
 }
 
 /** Feedback, newest first, with the sketch it is about and who gave it. */
@@ -400,6 +408,7 @@ export async function feedbackList(filter: FeedbackFilter = {}, limit = 300): Pr
       and (${filter.status ?? null}::text is null or f.status = ${filter.status ?? null})
       and (${filter.rating ?? null}::text is null or f.rating = ${filter.rating ?? null})
       and (${filter.by ?? null}::text is null or f.user_id = ${filter.by ?? null})
+      and (${filter.viewer ?? null}::text is null or g.created_by = ${filter.viewer ?? null} or exists (select 1 from orders o where o.generation_id = f.generation_id))
     order by f.created_at desc
     limit ${limit}`;
   return rows.map(toFeedback);
@@ -462,6 +471,21 @@ export async function feedbackTotals(range: Range): Promise<FeedbackTotals> {
       (select count(distinct g.id) from generations g join feedback f on f.generation_id = g.id and f.stage = 'sketch' and f.rating = 'good'
         where g.parent_id is not null and g.created_at >= ${from})::int as redraws_liked`;
   return { rated: row.rated, good: row.good, open: row.open, redraws: row.redraws, redrawsLiked: row.redraws_liked };
+}
+
+/**
+ * Whether `viewer` may open a saved file, by its folder's id: it belongs to a
+ * design they may see (its own folder, or its upload's).
+ */
+export async function maySeeFile(path: string, viewer: string | null): Promise<boolean> {
+  if (viewer === null) return true;
+  const id = path.split('/')[2] ?? '';
+  const [row] = await db()`
+    select 1 from generations g
+    where (${viewer}::text is null or g.created_by = ${viewer} or exists (select 1 from orders o where o.generation_id = g.id))
+      and (right(g.folder, 10) = ${id} or exists (select 1 from events e where e.generation_id = g.id and split_part(e.file, '/', 3) = ${id}))
+    limit 1`;
+  return Boolean(row);
 }
 
 /** The drawings made by redrawing this one. */

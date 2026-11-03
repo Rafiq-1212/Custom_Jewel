@@ -57,6 +57,15 @@ export function canSee(member: Pick<Member, 'role' | 'screens'>, screen: Screen)
   return member.screens.includes(screen);
 }
 
+/**
+ * Whose designs a login sees: an owner every one (null); anyone else only
+ * what they made themselves and designs that became a shop order, never a
+ * shop customer's own unbought tries.
+ */
+export function viewerOf(member: Pick<Member, 'id' | 'role'>): string | null {
+  return member.role === 'owner' ? null : member.id;
+}
+
 export function canEdit(member: Pick<Member, 'role'>): boolean {
   return member.role !== 'viewer';
 }

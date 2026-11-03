@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ROLES, canSee } from '@/lib/access';
+import { ROLES, canSee, viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { BASE_PATH } from '@/lib/base-path';
 import { percent, rupees, stepName, when } from '@/lib/format';
@@ -15,9 +15,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     totals(range),
     byDay(),
     spendByStep(range),
-    recentFailures(),
+    recentFailures(viewerOf(me)),
     activityByMember(range),
-    generations(8),
+    generations(8, null, null, viewerOf(me)),
     feedbackTotals(range),
     shopTotals(range),
   ]);

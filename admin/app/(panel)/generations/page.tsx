@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { BASE_PATH } from '@/lib/base-path';
+import { viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { when } from '@/lib/format';
 import { generations, makers } from '@/lib/queries';
@@ -9,12 +10,12 @@ import { Card, Empty, PageTitle, Status, td, th } from '@/lib/ui';
 const ABANDONED = new Set(['abandoned', 'left_before_photo']);
 
 export default async function DesignsPage({ searchParams }: { searchParams: Promise<{ by?: string; phone?: string; status?: string }> }) {
-  await requireScreen('designs');
+  const me = await requireScreen('designs');
   const params = await searchParams;
   const by = params.by || null;
   const phone = params.phone || null;
   const abandonedOnly = params.status === 'abandoned';
-  const [all, people] = await Promise.all([generations(200, by, phone), makers()]);
+  const [all, people] = await Promise.all([generations(200, by, phone, viewerOf(me)), makers()]);
   const rows = abandonedOnly ? all.filter((g) => ABANDONED.has(g.status)) : all;
   const chip = (active: boolean) =>
     `rounded-full border px-3 py-1 text-sm ${active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`;

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { canEdit } from '@/lib/access';
+import { canEdit, viewerOf } from '@/lib/access';
 import { setFeedbackStatus } from '@/lib/actions';
 import { requireScreen } from '@/lib/auth';
 import { BASE_PATH } from '@/lib/base-path';
@@ -27,7 +27,7 @@ export default async function FeedbackPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   const status = params.status ?? 'open';
   const [items, counts, givers] = await Promise.all([
-    feedbackList({ stage: params.stage, issue: params.issue, status: status === 'all' ? null : status, rating: params.rating ?? (status === 'all' ? null : 'bad'), by: params.by }),
+    feedbackList({ stage: params.stage, issue: params.issue, status: status === 'all' ? null : status, rating: params.rating ?? (status === 'all' ? null : 'bad'), by: params.by, viewer: viewerOf(me) }),
     issueCounts(),
     feedbackGivers(),
   ]);
