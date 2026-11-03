@@ -9,6 +9,7 @@
  *            pendant tool, which spends money on every sketch.
  *
  * and, for editors and viewers, a list of SCREENS. Account is everyone's.
+ * Customers and tries (shop customers' numbers) is for owners only.
  * The pendant tool (../lib/signed-in.ts at the repo root) applies the same
  * rule for Create a pendant.
  */
@@ -53,6 +54,7 @@ export function toScreens(value: unknown): Screen[] {
 
 export function canSee(member: Pick<Member, 'role' | 'screens'>, screen: Screen): boolean {
   if (member.role === 'owner') return true;
+  if (screen === 'customers') return false;
   if (screen === 'generate' && member.role === 'viewer') return false;
   return member.screens.includes(screen);
 }

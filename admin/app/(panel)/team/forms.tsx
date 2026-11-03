@@ -49,12 +49,13 @@ function Access({ role, screens, onRole }: { role: Role; screens: string[]; onRo
         ) : (
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
             {SCREENS.map((s) => {
-              const off = role === 'viewer' && s.key === 'generate';
+              const ownersOnly = s.key === 'customers';
+              const off = ownersOnly || (role === 'viewer' && s.key === 'generate');
               return (
                 <label key={s.key} className={`flex items-center gap-2 text-sm ${off ? 'text-slate-400' : 'text-slate-700'}`}>
                   <input type="checkbox" name="screens" value={s.key} defaultChecked={!off && screens.includes(s.key)} disabled={off} />
                   {s.label}
-                  {off && <span className="text-xs">(editors only)</span>}
+                  {off && <span className="text-xs">{ownersOnly ? '(owners only)' : '(editors only)'}</span>}
                 </label>
               );
             })}
