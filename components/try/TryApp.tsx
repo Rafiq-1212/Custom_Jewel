@@ -3,7 +3,7 @@
 /**
  * The shop customer's page, in the "Upload your photo" window on a product
  * page of shoptruetribute.com: sign in with a mobile number once, choose gold
- * or silver, upload a photo, watch it being made, and see their pendant as a
+ * or silver, upload a photo and box the part to draw, watch it being made, and see their pendant as a
  * product photo — only ever the product photo, never the drawing behind it
  * (the shop's wish, 31 Oct). Add to Cart and Buy Now hand it to the shop page, which
  * attaches it to the product form and presses the shop's own button, so the
@@ -22,6 +22,8 @@
 import * as React from 'react';
 import { authHeaders, setCustomerToken } from '@/lib/api-auth';
 import { metalOf, PICKABLE, SHOP_PRODUCTS, type ShopProduct } from '@/lib/shop-products';
+import { PhotoCropper } from '@/components/PhotoCropper';
+import { FULL_CROP, cropImageFile, type CropRect } from '@/lib/photo-crop';
 import { SketchError } from '@/lib/sketch-client';
 import { Feedback } from './Feedback';
 import { dropPhoto, keepPhoto, runDesign, takePhoto, type Metal, type Pending } from './pipeline';
@@ -75,6 +77,9 @@ export function TryApp() {
   const [result, setResult] = React.useState<Design | null>(null);
   const [past, setPast] = React.useState<Design[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  /** The photo picked, shown with a crop box until "Create my design": nothing is spent before that. */
+  const [chosen, setChosen] = React.useState<{ file: File; url: string } | null>(null);
+  const [crop, setCrop] = React.useState<CropRect>(FULL_CROP);
   /** "job:metal" of a design whose product photo could not be loaded. */
   const [missing, setMissing] = React.useState<string | null>(null);
   const runRef = React.useRef(0);
@@ -222,11 +227,40 @@ export function TryApp() {
     void refresh(null);
   };
 
-  const make = async (file: File) => {
-    if (!session || !product) return;
+  /** A photo picked: checked, then shown with the crop box over it. */
+  const pick = (file: File) => {
     setError(null);
     if (!ACCEPTED.includes(file.type)) return setError('Please choose a JPG, PNG or WEBP photo.');
     if (file.size > MAX_BYTES) return setError('That photo is over 8 MB. Please choose a smaller one.');
+    setChosen((current) => {
+      if (current) URL.revokeObjectURL(current.url);
+      return { file, url: URL.createObjectURL(file) };
+    });
+    setCrop(FULL_CROP);
+  };
+
+  const unpick = () =>
+    setChosen((current) => {
+      if (current) URL.revokeObjectURL(current.url);
+      return null;
+    });
+
+  /** Only the boxed part of the photo is drawn (lib/photo-crop.ts); the whole photo when the box was left as it is. */
+  const create = async () => {
+    if (!chosen) return;
+    let file: File;
+    try {
+      file = await cropImageFile(chosen.file, crop);
+    } catch {
+      return setError('We couldn\'t crop this photo. Please try another one.');
+    }
+    unpick();
+    await make(file);
+  };
+
+  const make = async (file: File) => {
+    if (!session || !product) return;
+    setError(null);
     if (context.pending) void dropPhoto(context.pending.id);
     const pending: Pending = {
       id: crypto.randomUUID(),
@@ -391,21 +425,37 @@ export function TryApp() {
                 </fieldset>
               )}
               {bothMetals && pickMetal}
-              <label className={`${result ? secondary : primary} cursor-pointer text-center ${product ? '' : 'pointer-events-none opacity-50'}`}>
-                {result ? 'Try another photo' : 'Upload your photo'}
-                <input
-                  type="file"
-                  accept={ACCEPTED.join(',')}
-                  className="sr-only"
-                  disabled={!product}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = '';
-                    if (file) void make(file);
-                  }}
-                />
-              </label>
-              {!result && <p className="text-center text-xs text-slate-500">A clear photo of the face, or faces, works best. JPG, PNG or WEBP, up to 8 MB.</p>}
+              {chosen ? (
+                <>
+                  <div className="mx-auto w-full max-w-sm">
+                    <PhotoCropper src={chosen.url} crop={crop} onChange={setCrop} />
+                  </div>
+                  <button type="button" onClick={() => void create()} disabled={!product} className={primary}>
+                    Create my design
+                  </button>
+                  <button type="button" onClick={unpick} className={secondary}>
+                    Choose another photo
+                  </button>
+                </>
+              ) : (
+                <>
+                  <label className={`${result ? secondary : primary} cursor-pointer text-center ${product ? '' : 'pointer-events-none opacity-50'}`}>
+                    {result ? 'Try another photo' : 'Upload your photo'}
+                    <input
+                      type="file"
+                      accept={ACCEPTED.join(',')}
+                      className="sr-only"
+                      disabled={!product}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (file) pick(file);
+                      }}
+                    />
+                  </label>
+                  {!result && <p className="text-center text-xs text-slate-500">A clear photo of the face, or faces, works best. JPG, PNG or WEBP, up to 8 MB.</p>}
+                </>
+              )}
             </section>
           )}
 
