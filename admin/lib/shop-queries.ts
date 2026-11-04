@@ -16,6 +16,8 @@ export interface Customer {
   lastSeenAt: string;
   designs: number;
   orders: number;
+  /** What their orders came to, in rupees. */
+  paid: number;
   marketingConsent: boolean;
   source: string | null;
   codesSent: number;
@@ -30,6 +32,7 @@ export async function customers(search: string | null = null): Promise<Customer[
     select c.*,
       (select count(*) from generations g where g.phone = c.phone)::int as designs,
       (select count(*) from orders o where o.phone = c.phone)::int as orders,
+      (select coalesce(sum(t), 0) from (select coalesce(max(o.order_total), sum(o.amount)) as t from orders o where o.phone = c.phone group by split_part(o.id, ':', 1)) p)::float as paid,
       (select count(*) from otp_requests r where r.phone = c.phone)::int as codes_sent,
       given.detail as given_detail, given.created_at as given_at, given.by as given_by
     from customers c
@@ -47,6 +50,7 @@ export async function customers(search: string | null = null): Promise<Customer[
     lastSeenAt: r.last_seen_at,
     designs: r.designs,
     orders: r.orders,
+    paid: Number(r.paid ?? 0),
     marketingConsent: r.marketing_consent === true,
     source: r.source,
     codesSent: r.codes_sent,
@@ -63,29 +67,41 @@ export interface Order {
   orderName: string | null;
   product: string | null;
   variant: string | null;
+  /** The design's own line, after its discounts. */
   amount: number;
+  /** What the customer paid for the whole order, extras such as Priority Dispatch included; null for orders saved before 4 Nov 2026 were filled in. */
+  orderTotal: number | null;
   currency: string;
+}
+
+/** An order line as stored (../db/schema.sql). */
+function toOrder(r: Record<string, unknown>): Order {
+  return {
+    id: r.id as string,
+    createdAt: r.created_at as string,
+    phone: r.phone as string | null,
+    folder: r.folder as string | null,
+    generationId: r.generation_id as string | null,
+    orderName: r.order_name as string | null,
+    product: r.product as string | null,
+    variant: r.variant as string | null,
+    amount: Number(r.amount),
+    orderTotal: r.order_total == null ? null : Number(r.order_total),
+    currency: r.currency as string,
+  };
 }
 
 export async function revenue(range: Range): Promise<{ orders: Order[]; total: number; count: number; fromGenerations: number }> {
   const from = since(range);
   const rows = await db()`select * from orders where created_at >= ${from} order by created_at desc limit 200`;
   const [sum] = await db()`
-    select coalesce(sum(amount), 0)::float as total, count(*)::int as count, count(generation_id)::int as from_generations
-    from orders where created_at >= ${from}`;
+    select coalesce(sum(paid), 0)::float as total, count(*)::int as count, count(*) filter (where designed)::int as from_generations
+    from (
+      select coalesce(max(order_total), sum(amount)) as paid, bool_or(generation_id is not null) as designed
+      from orders where created_at >= ${from} group by split_part(id, ':', 1)
+    ) o`;
   return {
-    orders: rows.map((r) => ({
-      id: r.id,
-      createdAt: r.created_at,
-      phone: r.phone,
-      folder: r.folder,
-      generationId: r.generation_id,
-      orderName: r.order_name,
-      product: r.product,
-      variant: r.variant,
-      amount: Number(r.amount),
-      currency: r.currency,
-    })),
+    orders: rows.map(toOrder),
     total: sum.total,
     count: sum.count,
     fromGenerations: sum.from_generations,
@@ -127,16 +143,5 @@ export async function shopTotals(range: Range): Promise<ShopTotals> {
 /** The paid orders made from one design. */
 export async function ordersOf(generationId: string): Promise<Order[]> {
   const rows = await db()`select * from orders where generation_id = ${generationId} order by created_at`;
-  return rows.map((r) => ({
-    id: r.id,
-    createdAt: r.created_at,
-    phone: r.phone,
-    folder: r.folder,
-    generationId: r.generation_id,
-    orderName: r.order_name,
-    product: r.product,
-    variant: r.variant,
-    amount: Number(r.amount),
-    currency: r.currency,
-  }));
+  return rows.map(toOrder);
 }

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { canEdit } from '@/lib/access';
 import { addTries, refillTries } from '@/lib/actions';
 import { requireScreen } from '@/lib/auth';
-import { when } from '@/lib/format';
+import { amount, when } from '@/lib/format';
 import { customers, shopSettings } from '@/lib/shop-queries';
 import { Card, Empty, PageTitle, td, th } from '@/lib/ui';
 import { ShopSettingsForm } from './settings-form';
@@ -75,7 +75,10 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                           0
                         )}
                       </td>
-                      <td className={`${td} tabular-nums`}>{c.orders}</td>
+                      <td className={`${td} whitespace-nowrap tabular-nums`}>
+                        {c.orders}
+                        {c.orders > 0 && <span className="ml-1 font-medium text-emerald-700">· {amount(c.paid)}</span>}
+                      </td>
                       <td className={td}>{c.marketingConsent ? 'Yes' : '—'}</td>
                       <td className={`${td} text-xs`}>{c.source ?? '—'}</td>
                       <td className={`${td} whitespace-nowrap`}>{when(c.lastSeenAt)}</td>

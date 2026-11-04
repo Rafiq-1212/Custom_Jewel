@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { BASE_PATH } from '@/lib/base-path';
 import { viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
-import { when } from '@/lib/format';
+import { amount, rupees, when } from '@/lib/format';
 import { generations, makers } from '@/lib/queries';
 import { RemakeButton } from './[id]/remake';
 import { Card, Empty, PageTitle, Status, td, th } from '@/lib/ui';
@@ -58,6 +58,8 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                   <th className={th}>Feedback</th>
                   <th className={th}>Photos</th>
                   <th className={th}>Files</th>
+                  <th className={th}>Gemini cost</th>
+                  <th className={th}>Order amount</th>
                   <th className={th}>Make it again</th>
                 </tr>
               </thead>
@@ -116,6 +118,8 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                       </td>
                       <td className={`${td} tabular-nums`}>{g.photos}</td>
                       <td className={`${td} tabular-nums`}>{g.files}</td>
+                      <td className={`${td} whitespace-nowrap tabular-nums font-medium text-slate-900`}>{rupees(g.costUsd)}</td>
+                      <td className={`${td} whitespace-nowrap tabular-nums`}>{g.ordered > 0 ? <span className="font-medium text-emerald-700">{amount(g.paid)}</span> : <span className="text-slate-300">—</span>}</td>
                       <td className={td}>{g.uploadFile && <RemakeButton job={g.id} category={g.category} forCustomer={g.phone !== null} compact />}</td>
                     </tr>
                   );

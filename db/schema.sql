@@ -121,6 +121,10 @@ alter table orders add column if not exists order_name text;      -- e.g. #1042
 alter table orders add column if not exists product text;
 alter table orders add column if not exists variant text;
 create index if not exists orders_generation on orders (generation_id);
+-- What the customer paid for the whole order (Shopify's total_price: after
+-- discounts, with extras such as Priority Dispatch, shipping and tax); `amount`
+-- is the design's own line.
+alter table orders add column if not exists order_total numeric(12, 2);
 
 -- Shop settings the admin panel can change without a deploy: the support
 -- number shown when a customer has used their designs, and how many designs

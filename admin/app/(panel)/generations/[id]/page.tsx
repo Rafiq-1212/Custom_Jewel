@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import { list } from '@vercel/blob';
 import { viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
-import { stepName, when } from '@/lib/format';
+import { amount, rupees, stepName, when } from '@/lib/format';
 import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
 import { feedbackOnDesign, generation, redrawsOf } from '@/lib/queries';
 import { ordersOf } from '@/lib/shop-queries';
@@ -73,7 +73,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
           {g.error && <div className="mt-2 break-words text-xs text-rose-600">{g.error}</div>}
         </div>
         <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone && g.madeById ? `for ${g.phone}` : undefined} />
-        <Stat label="Steps" value={String(steps.length)} />
+        <Stat label="Gemini cost" value={rupees(steps.reduce((sum, s) => sum + s.costUsd, 0))} note={g.ordered > 0 ? `Ordered for ${amount(g.paid)}` : `${steps.length} steps`} />
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
 
@@ -98,7 +98,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                     {o.variant ? ` · ${o.variant}` : ''}
                   </span>
                   <span className="text-slate-500">
-                    {o.phone ?? ''} · {when(o.createdAt)}
+                    {o.phone ?? ''} · {when(o.createdAt)} · <span className="font-medium text-emerald-700">{amount(o.orderTotal ?? o.amount, o.currency)} paid</span>
                   </span>
                 </li>
               ))}
@@ -207,7 +207,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
       </div>
 
       <div className="mt-6">
-        <Card title="Every step">
+        <Card title="Every step, and what it cost">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -216,6 +216,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                   <th className={th}>Step</th>
                   <th className={th}>By</th>
                   <th className={th}>Detail</th>
+                  <th className={th}>Cost</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -225,6 +226,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                     <td className={`${td} font-medium text-slate-900`}>{stepName(s.kind)}</td>
                     <td className={`${td} whitespace-nowrap`}>{s.by ?? '—'}</td>
                     <td className={`${td} break-words`}>{s.detail ?? '—'}</td>
+                    <td className={`${td} whitespace-nowrap tabular-nums`}>{rupees(s.costUsd)}</td>
                   </tr>
                 ))}
               </tbody>

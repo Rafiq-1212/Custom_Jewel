@@ -27,6 +27,7 @@ interface LineItem {
   variant_title?: string | null;
   price?: string;
   quantity?: number;
+  discount_allocations?: { amount?: string }[];
   properties?: { name?: string; value?: string }[] | Record<string, string> | null;
 }
 
@@ -48,6 +49,7 @@ export async function POST(request: Request): Promise<Response> {
     id?: number | string;
     name?: string;
     currency?: string;
+    total_price?: string;
     created_at?: string;
     phone?: string | null;
     customer?: { phone?: string | null } | null;
@@ -62,13 +64,16 @@ export async function POST(request: Request): Promise<Response> {
     const job = props._tt_design;
     if (!job || !JOB_NAME.test(job)) continue;
     const phone = normalisePhone(props._tt_phone ?? '') ?? orderPhone;
-    const amount = Number(line.price ?? 0) * Number(line.quantity ?? 1);
+    // The design's line after its discounts; the whole order's payment goes in order_total.
+    const discount = (line.discount_allocations ?? []).reduce((sum, d) => sum + Number(d.amount ?? 0), 0);
+    const amount = Number(line.price ?? 0) * Number(line.quantity ?? 1) - discount;
+    const orderTotal = order.total_price != null ? Number(order.total_price) : null;
     await sql`
-      insert into orders (id, created_at, phone, folder, amount, currency, generation_id, order_name, product, variant)
+      insert into orders (id, created_at, phone, folder, amount, currency, generation_id, order_name, product, variant, order_total)
       values (${`${order.id}:${line.id}`}, ${order.created_at ?? new Date().toISOString()}, ${phone},
               (select folder from generations where id = ${job}), ${amount}, ${order.currency ?? 'INR'}, ${job},
-              ${order.name ?? null}, ${line.title ?? null}, ${line.variant_title ?? null})
-      on conflict (id) do update set phone = excluded.phone, amount = excluded.amount, order_name = excluded.order_name`;
+              ${order.name ?? null}, ${line.title ?? null}, ${line.variant_title ?? null}, ${orderTotal})
+      on conflict (id) do update set phone = excluded.phone, amount = excluded.amount, order_name = excluded.order_name, order_total = excluded.order_total`;
     saved++;
   }
   console.info(`[shopify] order ${order.name ?? order.id}: ${saved} designed line(s) saved`);

@@ -37,7 +37,8 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
                     <th className={th}>Product</th>
                     <th className={th}>Customer</th>
                     <th className={th}>Design</th>
-                    <th className={th}>Amount</th>
+                    <th className={th}>Pendant</th>
+                    <th className={th}>Paid</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -60,6 +61,7 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
                         )}
                       </td>
                       <td className={`${td} tabular-nums`}>{amount(o.amount, o.currency)}</td>
+                      <td className={`${td} tabular-nums font-medium text-emerald-700`}>{o.orderTotal == null ? '—' : amount(o.orderTotal, o.currency)}</td>
                     </tr>
                   ))}
                 </tbody>
