@@ -10,12 +10,16 @@ import { Card, Empty, PageTitle, Stat, Status, td, th } from '@/lib/ui';
 
 const ABANDONED = new Set(['abandoned', 'left_before_photo']);
 
-export default async function DesignsPage({ searchParams }: { searchParams: Promise<{ by?: string; phone?: string; status?: string }> }) {
+export default async function DesignsPage({ searchParams }: { searchParams: Promise<{ by?: string; phone?: string; status?: string; from?: string }> }) {
   const me = await requireScreen('designs');
   const params = await searchParams;
   const by = params.by || null;
   const phone = params.phone || null;
   const abandonedOnly = params.status === 'abandoned';
+  // Back goes where this list was opened from: Customers, or Designs.
+  const fromCustomers = params.from === 'customers';
+  // A design opened from here comes back to this same list.
+  const listQuery = new URLSearchParams(Object.entries({ by, phone, status: params.status, from: fromCustomers ? 'customers' : null }).filter((e): e is [string, string] => Boolean(e[1]))).toString();
   // One customer's designs: every one, not just the latest 200 of the shop.
   const [all, people, found] = await Promise.all([
     generations(phone ? 1000 : 200, by, phone, viewerOf(me)),
@@ -30,8 +34,8 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
     <>
       {phone ? (
         <>
-          <Link href="/customers" className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-            <span aria-hidden>←</span> Back to customers
+          <Link href={fromCustomers ? '/customers' : '/generations'} className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+            <span aria-hidden>←</span> {fromCustomers ? 'Back to customers' : 'Back to designs'}
           </Link>
           <PageTitle title={`Customer ${phone}`} hint="Every design this customer made, newest first, with the photo they uploaded. Open one to see all its pictures and files, or make it again from the uploaded photo." />
           <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -85,7 +89,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((g) => {
-                  const href = `/generations/${g.id.replace('batches/', '')}`;
+                  const href = `/generations/${g.id.replace('batches/', '')}${listQuery ? `?${listQuery}` : ''}`;
                   return (
                     <tr key={g.id} className="hover:bg-slate-50">
                       <td className={td}>

@@ -43,9 +43,12 @@ function caption(name: string): string {
   return name;
 }
 
-export default async function GenerationPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function GenerationPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ by?: string; phone?: string; status?: string; from?: string }> }) {
   const me = await requireScreen('designs');
   const { id } = await params;
+  // Back to the list this design was opened from (a customer's, a team member's, or all designs).
+  const list = await searchParams;
+  const backQuery = new URLSearchParams(Object.entries(list).filter((e): e is [string, string] => ['by', 'phone', 'status', 'from'].includes(e[0]) && typeof e[1] === 'string' && e[1] !== '')).toString();
   const found = await generation(`batches/${id}`, viewerOf(me));
   if (!found) notFound();
   const { generation: g, steps } = found;
@@ -57,10 +60,10 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
   return (
     <>
       <Link
-        href={g.phone ? `/generations?phone=${encodeURIComponent(g.phone)}` : g.madeById ? `/generations?by=${g.madeById}` : '/generations'}
+        href={`/generations${backQuery ? `?${backQuery}` : ''}`}
         className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
       >
-        <span aria-hidden>←</span> {g.phone ? `Back to customer ${g.phone}` : 'Back to designs'}
+        <span aria-hidden>←</span> {list.phone ? `Back to customer ${list.phone}` : 'Back to designs'}
       </Link>
       <PageTitle title={`${g.category[0].toUpperCase()}${g.category.slice(1)} pendant`} hint={`Started ${when(g.createdAt)}`} />
 

@@ -58,7 +58,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                   return (
                     <tr key={c.phone}>
                       <td className={`${td} whitespace-nowrap`}>
-                        <Link href={`/generations?phone=${encodeURIComponent(c.phone)}`} className="font-medium text-slate-900 underline underline-offset-2 hover:text-slate-600" title="See every design this customer made">
+                        <Link href={`/generations?phone=${encodeURIComponent(c.phone)}&from=customers`} className="font-medium text-slate-900 underline underline-offset-2 hover:text-slate-600" title="See every design this customer made">
                           {c.phone}
                         </Link>
                       </td>
@@ -73,7 +73,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
                       </td>
                       <td className={`${td} tabular-nums`}>
                         {c.designs > 0 ? (
-                          <Link href={`/generations?phone=${encodeURIComponent(c.phone)}`} className="underline">
+                          <Link href={`/generations?phone=${encodeURIComponent(c.phone)}&from=customers`} className="underline">
                             {c.designs}
                           </Link>
                         ) : (
