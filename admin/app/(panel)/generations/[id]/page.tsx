@@ -57,10 +57,10 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
   return (
     <>
       <Link
-        href={g.madeById ? `/generations?by=${g.madeById}` : '/generations'}
+        href={g.phone ? `/generations?phone=${encodeURIComponent(g.phone)}` : g.madeById ? `/generations?by=${g.madeById}` : '/generations'}
         className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
       >
-        <span aria-hidden>←</span> Back to designs
+        <span aria-hidden>←</span> {g.phone ? `Back to customer ${g.phone}` : 'Back to designs'}
       </Link>
       <PageTitle title={`${g.category[0].toUpperCase()}${g.category.slice(1)} pendant`} hint={`Started ${when(g.createdAt)}`} />
 
@@ -73,7 +73,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
           {g.error && <div className="mt-2 break-words text-xs text-rose-600">{g.error}</div>}
         </div>
         <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone && g.madeById ? `for ${g.phone}` : undefined} />
-        <Stat label="Gemini cost" value={rupees(steps.reduce((sum, s) => sum + s.costUsd, 0))} note={g.ordered > 0 ? `Ordered for ${amount(g.paid)}` : `${steps.length} steps`} />
+        <Stat label="Gemini cost" value={rupees(steps.reduce((sum, s) => sum + s.costUsd, 0))} note={`${steps.length} steps`} />
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
 
@@ -98,7 +98,7 @@ export default async function GenerationPage({ params }: { params: Promise<{ id:
                     {o.variant ? ` · ${o.variant}` : ''}
                   </span>
                   <span className="text-slate-500">
-                    {o.phone ?? ''} · {when(o.createdAt)} · <span className="font-medium text-emerald-700">{amount(o.orderTotal ?? o.amount, o.currency)} paid</span>
+                    {o.phone ?? ''} · {when(o.createdAt)} · <span className="font-medium text-emerald-700">{amount(o.orderTotal ?? o.amount, o.currency)}</span>
                   </span>
                 </li>
               ))}

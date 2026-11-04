@@ -151,8 +151,6 @@ export interface Generation {
   disliked: number;
   /** Paid orders on the shop made from it. */
   ordered: number;
-  /** What the customers paid for those orders, in rupees, extras such as Priority Dispatch included. */
-  paid: number;
 }
 
 /**
@@ -190,7 +188,6 @@ function toGeneration(r: Record<string, unknown>): Generation {
     liked: Number(r.liked ?? 0),
     disliked: Number(r.disliked ?? 0),
     ordered: Number(r.ordered ?? 0),
-    paid: Number(r.paid ?? 0),
   };
 }
 
@@ -201,7 +198,7 @@ function toGeneration(r: Record<string, unknown>): Generation {
  */
 export async function generations(limit = 200, by: string | null = null, phone: string | null = null, viewer: string | null = null): Promise<Generation[]> {
   const rows = await db()`
-    select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, (select coalesce(sum(t), 0) from (select coalesce(max(o.order_total), sum(o.amount)) as t from orders o where o.generation_id = g.id group by split_part(o.id, ':', 1)) p)::float as paid, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, up.file as upload_file, p.file as photo_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Customer ' || g.phone end) as made_by
+    select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, up.file as upload_file, p.file as photo_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Customer ' || g.phone end) as made_by
     from generations g
     left join "user" u on u.id = g.created_by
     left join lateral (

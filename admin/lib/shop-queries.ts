@@ -16,8 +16,8 @@ export interface Customer {
   lastSeenAt: string;
   designs: number;
   orders: number;
-  /** What their orders came to, in rupees. */
-  paid: number;
+  /** What making their designs cost on Gemini, in dollars (remakes by the team for them included). */
+  costUsd: number;
   marketingConsent: boolean;
   source: string | null;
   codesSent: number;
@@ -32,7 +32,7 @@ export async function customers(search: string | null = null): Promise<Customer[
     select c.*,
       (select count(*) from generations g where g.phone = c.phone)::int as designs,
       (select count(*) from orders o where o.phone = c.phone)::int as orders,
-      (select coalesce(sum(t), 0) from (select coalesce(max(o.order_total), sum(o.amount)) as t from orders o where o.phone = c.phone group by split_part(o.id, ':', 1)) p)::float as paid,
+      (select coalesce(sum(e.cost_usd), 0) from events e where e.phone = c.phone and e.kind <> 'otp_sent')::float as cost_usd,
       (select count(*) from otp_requests r where r.phone = c.phone)::int as codes_sent,
       given.detail as given_detail, given.created_at as given_at, given.by as given_by
     from customers c
@@ -50,7 +50,7 @@ export async function customers(search: string | null = null): Promise<Customer[
     lastSeenAt: r.last_seen_at,
     designs: r.designs,
     orders: r.orders,
-    paid: Number(r.paid ?? 0),
+    costUsd: Number(r.cost_usd ?? 0),
     marketingConsent: r.marketing_consent === true,
     source: r.source,
     codesSent: r.codes_sent,
