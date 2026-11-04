@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { BASE_PATH } from '@/lib/base-path';
-import { viewerOf } from '@/lib/access';
+import { canSeeCosts, viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { rupees, when } from '@/lib/format';
 import { generations, makers } from '@/lib/queries';
@@ -16,6 +16,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
   const by = params.by || null;
   const phone = params.phone || null;
   const abandonedOnly = params.status === 'abandoned';
+  const costs = canSeeCosts(me);
   // Back goes where this list was opened from: Customers, or Designs.
   const fromCustomers = params.from === 'customers';
   // A design opened from here comes back to this same list.
@@ -41,7 +42,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
           <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Stat label="Designs" value={String(all.length)} note={`${all.filter((g) => g.status === 'done' || g.status === 'left_before_photo').length} finished · ${all.filter((g) => g.status === 'failed').length} failed`} />
             <Stat label="Designs used" value={customer ? `${customer.triesUsed} of ${customer.triesLimit}` : '—'} note={customer ? `last seen ${when(customer.lastSeenAt)}` : undefined} />
-            <Stat label="Gemini cost" value={rupees(all.reduce((sum, g) => sum + g.costUsd, 0))} note="all their designs together" />
+            {costs && <Stat label="Gemini cost" value={rupees(all.reduce((sum, g) => sum + g.costUsd, 0))} note="all their designs together" />}
             <Stat label="Orders" value={String(all.reduce((sum, g) => sum + g.ordered, 0))} note={`${all.filter((g) => g.photos > 0).length} designs got a pendant photo`} />
           </div>
         </>
@@ -83,7 +84,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                   <th className={th}>Feedback</th>
                   <th className={th}>Photos</th>
                   <th className={th}>Files</th>
-                  <th className={th}>Gemini cost</th>
+                  {costs && <th className={th}>Gemini cost</th>}
                   <th className={th}>Make it again</th>
                 </tr>
               </thead>
@@ -154,7 +155,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
                       </td>
                       <td className={`${td} tabular-nums`}>{g.photos}</td>
                       <td className={`${td} tabular-nums`}>{g.files}</td>
-                      <td className={`${td} whitespace-nowrap tabular-nums font-medium text-slate-900`}>{rupees(g.costUsd)}</td>
+                      {costs && <td className={`${td} whitespace-nowrap tabular-nums font-medium text-slate-900`}>{rupees(g.costUsd)}</td>}
                       <td className={td}>{g.uploadFile && <RemakeButton job={g.id} category={g.category} forCustomer={g.phone !== null} compact />}</td>
                     </tr>
                   );

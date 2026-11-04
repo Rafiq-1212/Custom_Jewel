@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ROLES, canSee, viewerOf } from '@/lib/access';
+import { ROLES, canSee, canSeeCosts, viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { BASE_PATH } from '@/lib/base-path';
 import { percent, rupees, stepName, when } from '@/lib/format';
@@ -23,6 +23,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   ]);
   const seeFeedback = canSee(me, 'feedback');
   const seeDesigns = canSee(me, 'designs');
+  const costs = canSeeCosts(me);
   const attempts = t.tried + t.failedBeforeStart;
   const allFailed = t.failed + t.failedBeforeStart;
   const busiest = Math.max(1, ...days.map((d) => d.spendUsd));
@@ -44,9 +45,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         />
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={t.done ? `${rupees(t.spendUsd / t.done)} per finished sketch, all steps` : 'no finished sketches yet'} />
-        <Stat label="Sign-in texts" value={String(shop.codes)} note={`${rupees(shop.codeSpendUsd)} on 2Factor`} />
+      <div className={`mt-3 grid grid-cols-2 gap-3 ${costs ? 'lg:grid-cols-3' : ''}`}>
+        {costs && <Stat label="Spent on Gemini" value={rupees(t.spendUsd)} note={t.done ? `${rupees(t.spendUsd / t.done)} per finished sketch, all steps` : 'no finished sketches yet'} />}
+        <Stat label="Sign-in texts" value={String(shop.codes)} note={costs ? `${rupees(shop.codeSpendUsd)} on 2Factor` : 'sent by 2Factor'} />
         <Stat label="Customer conversion" value={percent(shop.orders, shop.customerDesigns)} note="designs that were bought" />
       </div>
 
@@ -118,7 +119,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                     <th className={th}>Finished</th>
                     <th className={th}>Product photos</th>
                     <th className={th}>Production files</th>
-                    <th className={th}>Spent</th>
+                    {costs && <th className={th}>Spent</th>}
                     <th className={th}>Last active</th>
                   </tr>
                 </thead>
@@ -139,7 +140,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                       <td className={`${td} tabular-nums`}>{m.finished}</td>
                       <td className={`${td} tabular-nums`}>{m.photos}</td>
                       <td className={`${td} tabular-nums`}>{m.files}</td>
-                      <td className={`${td} tabular-nums font-medium text-slate-900`}>{rupees(m.spendUsd)}</td>
+                      {costs && <td className={`${td} tabular-nums font-medium text-slate-900`}>{rupees(m.spendUsd)}</td>}
                       <td className={`${td} whitespace-nowrap`}>{when(m.lastAt)}</td>
                     </tr>
                   ))}
@@ -166,7 +167,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                       <th className={th}>Failed</th>
                       <th className={th}>Photos</th>
                       <th className={th}>Files</th>
-                      <th className={th}>Spent</th>
+                      {costs && <th className={th}>Spent</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -178,12 +179,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                         <td className={`${td} tabular-nums ${d.failed ? 'text-rose-600' : ''}`}>{d.failed}</td>
                         <td className={`${td} tabular-nums`}>{d.photos}</td>
                         <td className={`${td} tabular-nums`}>{d.files}</td>
-                        <td className={td}>
-                          <div className="flex items-center gap-2">
-                            <span className="w-20 shrink-0 tabular-nums">{rupees(d.spendUsd)}</span>
-                            <span className="h-2 rounded bg-slate-800" style={{ width: `${Math.max(2, (80 * d.spendUsd) / busiest)}px` }} />
-                          </div>
-                        </td>
+                        {costs && (
+                          <td className={td}>
+                            <div className="flex items-center gap-2">
+                              <span className="w-20 shrink-0 tabular-nums">{rupees(d.spendUsd)}</span>
+                              <span className="h-2 rounded bg-slate-800" style={{ width: `${Math.max(2, (80 * d.spendUsd) / busiest)}px` }} />
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -194,7 +197,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
 
         <div className="space-y-6">
-          <Card title="Where the money went">
+          {costs && <Card title="Where the money went">
             {steps.length === 0 ? (
               <Empty>No spending in this period.</Empty>
             ) : (
@@ -209,7 +212,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 ))}
               </ul>
             )}
-          </Card>
+          </Card>}
 
           <Card title="Latest failures">
             {failures.length === 0 ? (

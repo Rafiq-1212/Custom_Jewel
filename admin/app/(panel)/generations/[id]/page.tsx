@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { BASE_PATH } from '@/lib/base-path';
 import { notFound } from 'next/navigation';
 import { list } from '@vercel/blob';
-import { viewerOf } from '@/lib/access';
+import { canSeeCosts, viewerOf } from '@/lib/access';
 import { requireScreen } from '@/lib/auth';
 import { amount, rupees, stepName, when } from '@/lib/format';
 import { PERSON_LABELS, STAGE_LABELS } from '@/lib/feedback-labels';
@@ -76,7 +76,11 @@ export default async function GenerationPage({ params, searchParams }: { params:
           {g.error && <div className="mt-2 break-words text-xs text-rose-600">{g.error}</div>}
         </div>
         <Stat label="Made by" value={g.madeBy ?? 'Before team logins'} note={g.phone && g.madeById ? `for ${g.phone}` : undefined} />
-        <Stat label="Gemini cost" value={rupees(steps.reduce((sum, s) => sum + s.costUsd, 0))} note={`${steps.length} steps`} />
+        {canSeeCosts(me) ? (
+          <Stat label="Gemini cost" value={rupees(steps.reduce((sum, s) => sum + s.costUsd, 0))} note={`${steps.length} steps`} />
+        ) : (
+          <Stat label="Steps" value={String(steps.length)} />
+        )}
         <Stat label="Finished" value={g.finishedAt ? when(g.finishedAt) : '—'} />
       </div>
 
@@ -210,7 +214,7 @@ export default async function GenerationPage({ params, searchParams }: { params:
       </div>
 
       <div className="mt-6">
-        <Card title="Every step, and what it cost">
+        <Card title={canSeeCosts(me) ? 'Every step, and what it cost' : 'Every step'}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -219,7 +223,7 @@ export default async function GenerationPage({ params, searchParams }: { params:
                   <th className={th}>Step</th>
                   <th className={th}>By</th>
                   <th className={th}>Detail</th>
-                  <th className={th}>Cost</th>
+                  {canSeeCosts(me) && <th className={th}>Cost</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -229,7 +233,7 @@ export default async function GenerationPage({ params, searchParams }: { params:
                     <td className={`${td} font-medium text-slate-900`}>{stepName(s.kind)}</td>
                     <td className={`${td} whitespace-nowrap`}>{s.by ?? '—'}</td>
                     <td className={`${td} break-words`}>{s.detail ?? '—'}</td>
-                    <td className={`${td} whitespace-nowrap tabular-nums`}>{rupees(s.costUsd)}</td>
+                    {canSeeCosts(me) && <td className={`${td} whitespace-nowrap tabular-nums`}>{rupees(s.costUsd)}</td>}
                   </tr>
                 ))}
               </tbody>
