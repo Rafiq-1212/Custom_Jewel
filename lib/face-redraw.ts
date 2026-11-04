@@ -32,6 +32,16 @@ export interface Head {
 const CLOSE_UP_PX = 1024;
 /** At most this many close-ups per drawing: a large group's faces are each tiny, and every one costs a drawing. */
 const MAX_HEADS = 6;
+/** Longest side of the drawing the close-ups are laid over (2K, lib/sketch-pipeline.ts). */
+const DRAWING_PX = 2048;
+/**
+ * A face no wider than this in the drawing is drawn at 512 px, a third
+ * cheaper than 1K (747 output tokens, not 1,120): most of a family's faces
+ * are 300 to 500 px there, so nothing is lost. Tried on 4 Nov on a baby's
+ * face 711 px wide: 512 kept the face, with slightly lighter shading than 1K.
+ * Bigger faces stay at 1K.
+ */
+const SMALL_FACE_PX = 640;
 /** Sample size, in pixels, at which a close-up is first lined up with the drawing... */
 const SAMPLE = 96;
 /** ...and then finely. */
@@ -72,11 +82,13 @@ async function cut(image: Buffer, box: Region): Promise<Buffer> {
 
 /** The close-up drawing requests, one per head, to ride with the main drawing. */
 export async function closeUpRequests(heads: Head[], photo: Buffer, extra: (facts: string) => string): Promise<GenerateImageFromImageInput[]> {
+  const { width = 0, height = 0 } = heads.length ? await sharp(photo).metadata() : {};
+  const scale = DRAWING_PX / Math.max(1, width, height);
   return Promise.all(
     heads.map(async (head) => ({
       prompt: [FACE_PROMPT, extra(head.facts)].filter(Boolean).join('\n\n'),
       images: [{ bytes: await cut(photo, head.box), mimeType: 'image/png' }],
-      imageSize: '1K' as const,
+      imageSize: pixels(head.box, width, height).side * scale <= SMALL_FACE_PX ? ('512' as const) : ('1K' as const),
       temperature: 0.1,
     })),
   );

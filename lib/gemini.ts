@@ -105,11 +105,12 @@ export interface GenerateImageFromImageInput {
   /** One or more input images, sent in order after the prompt. */
   images: { bytes: Uint8Array; mimeType: string }[];
   /**
-   * Output size of the longest side: "1K" (the model default), "2K" or "4K".
-   * Larger sizes keep fine detail such as hair strands and eyelashes, at the
-   * cost of time.
+   * Output size of the longest side: "512", "1K" (the model default), "2K"
+   * or "4K". Larger sizes keep fine detail such as hair strands and
+   * eyelashes, at the cost of time and money (747, 1,120, 1,680 and 2,520
+   * output tokens).
    */
-  imageSize?: '1K' | '2K' | '4K';
+  imageSize?: '512' | '1K' | '2K' | '4K';
   /**
    * Sampling temperature; the model's default when omitted. Low values make
    * repeated runs on the same input come out alike (see INK_PROMPT's caller).
