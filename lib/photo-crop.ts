@@ -87,3 +87,45 @@ export async function cropImageFile(file: File, crop: CropRect): Promise<File> {
     URL.revokeObjectURL(url);
   }
 }
+
+/**
+ * A request to the server can carry at most 4.5 MB (Vercel's limit); a
+ * bigger photo is turned away before it arrives, and the customer saw only
+ * "Something went wrong making the sketch". Phone photos and crops of them
+ * are often 5 to 8 MB, so anything over this is scaled down here first.
+ */
+const MAX_SEND_BYTES = 3.8 * 1024 * 1024;
+/** Longest side of a scaled-down photo, then a smaller one if that is still too big. Far more than the drawing needs. */
+const SEND_EDGES = [3072, 2400, 1800];
+
+/** The photo as it is when small enough to send; otherwise scaled down and saved as a JPEG. */
+export async function fitForUpload(file: File): Promise<File> {
+  if (file.size <= MAX_SEND_BYTES) return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await decodeImage(url);
+    let smallest: Blob | null = null;
+    for (const edge of SEND_EDGES) {
+      const scale = Math.min(1, edge / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return file;
+      // A JPEG has no transparency: a see-through PNG goes on white, not black.
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      if (!blob) return file;
+      smallest = blob;
+      if (blob.size <= MAX_SEND_BYTES) break;
+    }
+    const baseName = file.name.replace(/\.[^.]+$/, '') || 'photo';
+    return smallest ? new File([smallest], `${baseName}.jpg`, { type: 'image/jpeg' }) : file;
+  } catch {
+    return file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

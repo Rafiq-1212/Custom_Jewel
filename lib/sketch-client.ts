@@ -1,6 +1,7 @@
 'use client';
 
 import { authHeaders } from './api-auth';
+import { fitForUpload } from './photo-crop';
 
 /**
  * Driving the sketch from the browser, because the server cannot wait for it.
@@ -38,6 +39,8 @@ class RedoSketch extends Error {
 
 async function post(body: FormData): Promise<Record<string, unknown>> {
   const response = await fetch('/api/sketch', { method: 'POST', body, headers: authHeaders() });
+  // Turned away before it reached the server, as a page and not as JSON.
+  if (response.status === 413) throw new SketchError('That photo is too big to send. Please choose a smaller one.');
   const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
   if (json?.redo === true) throw new RedoSketch(String(body.get('inkJob') ?? ''));
   if (!json || !response.ok || json.success !== true) {
@@ -110,6 +113,7 @@ export interface Sketch {
  */
 export async function runSketch(request: SketchRequest, attempt = 1, previousJob = ''): Promise<Sketch | null> {
   if (request.resume) ({ attempt, previousJob } = request.resume);
+  if (request.file) request = { ...request, file: await fitForUpload(request.file) };
   try {
     return await sketchOnce(request, attempt, previousJob);
   } catch (error) {
