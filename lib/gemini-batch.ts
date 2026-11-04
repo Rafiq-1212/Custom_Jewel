@@ -22,7 +22,7 @@
  */
 
 import { GoogleGenAI, Modality } from '@google/genai';
-import { GeminiGenerationError, MODEL_ID, classifyThrown, type GenerateImageFromImageInput, type GenerateImageResult } from './gemini';
+import { GeminiGenerationError, MODEL_ID, classifyThrown, sizeFor, type GenerateImageFromImageInput, type GenerateImageResult } from './gemini';
 import { priceImageCall, recordCall } from './cost';
 
 if (typeof window !== 'undefined') {
@@ -61,7 +61,7 @@ export async function submitImageJob(
     ],
     config: {
       responseModalities: [Modality.TEXT, Modality.IMAGE],
-      ...(input.imageSize ? { imageConfig: { imageSize: input.imageSize } } : {}),
+      ...(input.imageSize ? { imageConfig: { imageSize: sizeFor(input.model ?? MODEL_ID, input.imageSize) } } : {}),
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
     },
     // Comes back with the result (InlinedResponse.metadata), so a small
@@ -70,7 +70,7 @@ export async function submitImageJob(
   });
   try {
     const job = await ai.batches.create({
-      model: MODEL_ID,
+      model: input.model ?? MODEL_ID,
       src: [request(input, metadata), ...extras.map((extra) => request(extra))],
       config: { displayName: label },
     });
@@ -134,11 +134,13 @@ export async function readImageJob(
     throw new GeminiGenerationError('REQUEST_FAILED', `Batch job ${name} is ${state ?? 'unknown'}, not finished.`);
   }
 
+  // Priced at the model the job ran on (the product photo runs on a cheaper one).
+  const model = job.model ?? MODEL_ID;
   const results = ((job.dest as { inlinedResponses?: InlinedResult[] } | undefined)?.inlinedResponses ?? []) as InlinedResult[];
   // The extra requests (submitImageJob's `extras`), in order; null where one came back without an image.
   const extras = results.slice(1).map((extra) => {
     const data = extra.response?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
-    if (extra.response?.usageMetadata && options.count) recordCall(`batched ${label} (close-up)`, priceImageCall(extra.response.usageMetadata, { batch: true }));
+    if (extra.response?.usageMetadata && options.count) recordCall(`batched ${label} (close-up)`, priceImageCall(extra.response.usageMetadata, { batch: true, model }));
     return data ? Buffer.from(data, 'base64') : null;
   });
   const result = results[0];
@@ -149,7 +151,7 @@ export async function readImageJob(
 
   const usage = result.response?.usageMetadata;
   if (usage && options.count) {
-    const usd = priceImageCall(usage, { batch: true });
+    const usd = priceImageCall(usage, { batch: true, model });
     recordCall(`batched ${label}`, usd);
     console.info(`[batch] ${label} done: cost=$${usd.toFixed(4)} (half the interactive price)`);
   }

@@ -20,6 +20,7 @@
  */
 
 import sharp from 'sharp';
+import { PRODUCT_PHOTO_MODEL_ID } from './gemini';
 import { readImageJob, submitImageJob } from './gemini-batch';
 import { after } from 'next/server';
 import { archive, isOrderFolder, orderFolder } from './archive';
@@ -324,6 +325,7 @@ export async function startPendantMockup(request: DesignRequest): Promise<string
   return submitImageJob(
     {
       prompt: buildMockupPrompt(request),
+      model: PRODUCT_PHOTO_MODEL_ID,
       images: [
         { bytes: await onWideCanvas(composite, BACKGROUND), mimeType: 'image/png' },
         { bytes: await onWideCanvas(engraving, '#ffffff'), mimeType: 'image/png' },

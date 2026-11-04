@@ -5,7 +5,35 @@ if (typeof window !== 'undefined') {
   throw new Error('lib/gemini.ts was imported into a browser bundle. This module is server-only.');
 }
 
+/**
+ * Nano Banana 2: the touch-up, the drawing and the face close-ups.
+ *
+ * Its cheaper siblings were tried on 4 Nov 2026 on a real family, couple and
+ * face photo through the whole pipeline: Nano Banana 2 Lite and Nano Banana
+ * 2.1 cost about half, but cut the baby's body off, shrank or chopped the
+ * Face Pendant, drew in thin grey pencil, and 2.1 changed her face. Not for
+ * the drawing.
+ */
 export const MODEL_ID = 'gemini-3.1-flash-image';
+/**
+ * The product photo, from 4 Nov 2026 on Nano Banana 2 Lite at half the price
+ * (₹1.7 a photo, not ₹3.3): tried on a couple sketch, it kept the engraving
+ * line for line in a clean catalogue shot. To go back, set
+ * GEMINI_PRODUCT_PHOTO_MODEL=gemini-3.1-flash-image on Vercel and redeploy.
+ */
+export const PRODUCT_PHOTO_MODEL_ID = process.env.GEMINI_PRODUCT_PHOTO_MODEL || 'gemini-3.1-flash-lite-image';
+
+/**
+ * The size asked for, or the nearest one `model` draws: Nano Banana 2 Lite
+ * draws only 1K, and Nano Banana 2.1 nothing below 1K (Google's answer to
+ * anything else is "Image size … is not supported for this model").
+ */
+export function sizeFor(model: string, size: GenerateImageFromImageInput['imageSize']): GenerateImageFromImageInput['imageSize'] {
+  if (!size) return size;
+  if (model.includes('flash-lite-image')) return '1K';
+  if (model.includes('nano-banana-2.1') && size === '512') return '1K';
+  return size;
+}
 /**
  * Text model for questions about a photo whose answer is data, not a picture
  * (lib/jawline.ts). Thinking is switched off: measured on the jawline
@@ -111,6 +139,8 @@ export interface GenerateImageFromImageInput {
    * output tokens).
    */
   imageSize?: '512' | '1K' | '2K' | '4K';
+  /** The image model; MODEL_ID when omitted. */
+  model?: string;
   /**
    * Sampling temperature; the model's default when omitted. Low values make
    * repeated runs on the same input come out alike (see INK_PROMPT's caller).
@@ -131,7 +161,7 @@ export async function generateImageFromImage(
   let response;
   try {
     response = await ai.models.generateContent({
-      model: MODEL_ID,
+      model: input.model ?? MODEL_ID,
       contents: [
         {
           role: 'user',
@@ -145,7 +175,7 @@ export async function generateImageFromImage(
       ],
       config: {
         responseModalities: [Modality.TEXT, Modality.IMAGE],
-        ...(input.imageSize ? { imageConfig: { imageSize: input.imageSize } } : {}),
+        ...(input.imageSize ? { imageConfig: { imageSize: sizeFor(input.model ?? MODEL_ID, input.imageSize) } } : {}),
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         httpOptions: { timeout: REQUEST_TIMEOUT_MS },
       },
@@ -160,7 +190,7 @@ export async function generateImageFromImage(
   const usage = response.usageMetadata;
   if (usage) {
     const details = (usage.candidatesTokensDetails ?? []).map((d) => `${d.modality}=${d.tokenCount}`).join(' ');
-    const usd = priceImageCall(usage);
+    const usd = priceImageCall(usage, { model: input.model ?? MODEL_ID });
     recordCall(`image ${input.imageSize ?? '1K'}`, usd);
     console.info(
       `[gemini] usage input=${usage.promptTokenCount ?? 0} output=${usage.candidatesTokenCount ?? 0} (${details}) thinking=${usage.thoughtsTokenCount ?? 0} size=${input.imageSize ?? 'default'} cost=$${usd.toFixed(4)}`,

@@ -27,14 +27,22 @@ if (typeof window !== 'undefined') {
   throw new Error('lib/cost.ts was imported into a browser bundle. This module is server-only.');
 }
 
-/** US dollars per 1M tokens. */
-const IMAGE_MODEL = {
+/** US dollars per 1M tokens, Nano Banana 2 (gemini-3.1-flash-image). */
+const FLASH_IMAGE = {
   input: 0.5,
   /** Text and thinking that comes back alongside the picture. */
   outputText: 3,
   /** The big one: 93% of what this app spends is here. */
   outputImage: 60,
 };
+/** Nano Banana 2 Lite (gemini-3.1-flash-lite-image): half the price per picture, 1K only. */
+const LITE_IMAGE = { input: 0.25, outputText: 1.5, outputImage: 30 };
+/** Nano Banana 2.1 (gemini-nano-banana-2.1): half the price per picture, dearer input; 1K and up. */
+const NANO_21_IMAGE = { input: 1.5, outputText: 3, outputImage: 30 };
+/** The prices of an image model by its name (with or without "models/"). */
+function imageModel(model = '') {
+  return model.includes('flash-lite-image') ? LITE_IMAGE : model.includes('nano-banana-2.1') ? NANO_21_IMAGE : FLASH_IMAGE;
+}
 /** US dollars per 1M tokens, gemini-3.6-flash, until 31 December 2026. */
 const TEXT_MODEL = {
   input: 0.75,
@@ -77,11 +85,12 @@ const BATCH_DISCOUNT = 0.5;
  * is which is only visible in the per-modality breakdown, so the image tokens
  * are taken from there and everything else counts as text.
  */
-export function priceImageCall(usage: CallUsage, options: { batch?: boolean } = {}): number {
+export function priceImageCall(usage: CallUsage, options: { batch?: boolean; model?: string } = {}): number {
   const imageTokens = (usage.candidatesTokensDetails ?? [])
     .filter((detail) => detail.modality === 'IMAGE')
     .reduce((total, detail) => total + (detail.tokenCount ?? 0), 0);
   const textTokens = Math.max(0, (usage.candidatesTokenCount ?? 0) - imageTokens) + (usage.thoughtsTokenCount ?? 0);
+  const IMAGE_MODEL = imageModel(options.model);
   const usd =
     ((usage.promptTokenCount ?? 0) * IMAGE_MODEL.input +
       imageTokens * IMAGE_MODEL.outputImage +
