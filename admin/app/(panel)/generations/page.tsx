@@ -55,6 +55,9 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
           <Link href="/generations" className={chip(!by && !phone && !abandonedOnly)}>
             Everyone
           </Link>
+          <Link href="/generations?by=customers" className={chip(by === 'customers')}>
+            Customers
+          </Link>
           <Link href="/generations?status=abandoned" className={chip(abandonedOnly)}>
             Abandoned
           </Link>
@@ -67,7 +70,7 @@ export default async function DesignsPage({ searchParams }: { searchParams: Prom
       )}
       <Card>
         {rows.length === 0 ? (
-          <Empty>{phone ? 'This customer has not made a design yet.' : abandonedOnly ? 'Nothing abandoned among the latest designs.' : by ? 'Nothing made by this person yet.' : 'Nothing has been made since tracking was switched on.'}</Empty>
+          <Empty>{phone ? 'This customer has not made a design yet.' : abandonedOnly ? 'Nothing abandoned among the latest designs.' : by === 'customers' ? 'No customer designs among the latest.' : by ? 'Nothing made by this person yet.' : 'Nothing has been made since tracking was switched on.'}</Empty>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">

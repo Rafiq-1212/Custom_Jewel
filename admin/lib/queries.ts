@@ -196,6 +196,7 @@ function toGeneration(r: Record<string, unknown>): Generation {
  * from it, and who made it; only `by`'s when given. `viewer` (viewerOf in
  * ./access.ts) leaves out what that login may not see.
  */
+/** `by` is a login id, or 'customers' for designs shop customers made themselves. */
 export async function generations(limit = 200, by: string | null = null, phone: string | null = null, viewer: string | null = null): Promise<Generation[]> {
   const rows = await db()`
     select g.*, fb.liked, fb.disliked, (select count(*) from orders o where o.generation_id = g.id)::int as ordered, coalesce(c.cost_usd, 0)::float as cost_usd, coalesce(c.photos, 0)::int as photos, coalesce(c.files, 0)::int as files, s.file as sketch_file, up.file as upload_file, p.file as photo_file, coalesce(u.name, case when g.created_by is not null then 'Removed login' when g.phone is not null then 'Customer ' || g.phone end) as made_by
@@ -221,7 +222,7 @@ export async function generations(limit = 200, by: string | null = null, phone: 
       select count(*) filter (where f.rating = 'good')::int as liked, count(*) filter (where f.rating = 'bad')::int as disliked
       from feedback f where f.generation_id = g.id and f.stage = 'sketch'
     ) fb on true
-    where (${by}::text is null or g.created_by = ${by}) and (${phone}::text is null or g.phone = ${phone})
+    where (${by}::text is null or g.created_by = ${by} or (${by} = 'customers' and g.created_by is null and g.phone is not null)) and (${phone}::text is null or g.phone = ${phone})
       and (${viewer}::text is null or g.created_by = ${viewer} or exists (select 1 from orders o where o.generation_id = g.id))
     order by g.created_at desc
     limit ${limit}`;
