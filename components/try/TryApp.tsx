@@ -379,6 +379,9 @@ export function TryApp() {
                   className="aspect-square w-full rounded-2xl border border-slate-200 object-contain"
                 />
               )}
+              {(result.photo || (result.hasPhoto !== false && missing !== `${result.job}:${result.metal ?? metal}`)) && (
+                <p className="rounded-xl bg-amber-50 px-4 py-2 text-center text-sm text-amber-900">This is just a preview, not the final image. Your finished pendant may look slightly different.</p>
+              )}
               {result.ref && (
                 <p className="text-center text-sm text-slate-500">
                   Design {result.ref}
