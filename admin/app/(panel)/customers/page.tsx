@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { canEdit } from '@/lib/access';
 import { addTries, refillTries } from '@/lib/actions';
@@ -21,7 +22,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
         <ShopSettingsForm supportPhone={settings.supportPhone} triesLimit={settings.triesLimit} editable={editor} />
       </Card>
 
-      <form className="my-4 flex gap-2" action="/customers">
+      <Form className="my-4 flex gap-2" action="/customers">
         <input name="q" defaultValue={q} placeholder="Search a number" inputMode="numeric" className="w-64 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
         <button type="submit" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 hover:bg-slate-50">
           Search
@@ -31,7 +32,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
             Clear
           </Link>
         )}
-      </form>
+      </Form>
 
       <Card>
         {rows.length === 0 ? (
