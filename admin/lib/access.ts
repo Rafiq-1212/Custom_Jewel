@@ -68,9 +68,9 @@ export function viewerOf(member: Pick<Member, 'id' | 'role'>): string | null {
   return member.role === 'owner' ? null : member.id;
 }
 
-/** What the designs cost on Gemini and the sign-in texts on 2Factor: owners only, never the team. */
-export function canSeeCosts(member: Pick<Member, 'role'>): boolean {
-  return member.role === 'owner';
+/** What the designs cost on Gemini and the sign-in texts on 2Factor: every login sees it (from 9 Nov 2026), at the panel's fixed rate (lib/format.ts). */
+export function canSeeCosts(_member: Pick<Member, 'role'>): boolean {
+  return true;
 }
 
 export function canEdit(member: Pick<Member, 'role'>): boolean {
