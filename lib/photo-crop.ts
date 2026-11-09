@@ -54,6 +54,8 @@ function decodeImage(src: string): Promise<HTMLImageElement> {
  * (or PNG for PNG sources, to keep any transparency), which the server
  * re-validates by its actual bytes exactly like a direct upload.
  */
+const MAX_CROP_EDGE = 4000;
+
 export async function cropImageFile(file: File, crop: CropRect): Promise<File> {
   if (isFullCrop(crop)) return file;
 
@@ -65,12 +67,14 @@ export async function cropImageFile(file: File, crop: CropRect): Promise<File> {
     const sw = Math.max(1, Math.round(crop.width * image.naturalWidth));
     const sh = Math.max(1, Math.round(crop.height * image.naturalHeight));
 
+    // iPhones give up on a canvas over about 16 MP; the drawing needs far less.
+    const fit = Math.min(1, MAX_CROP_EDGE / Math.max(sw, sh));
     const canvas = document.createElement('canvas');
-    canvas.width = sw;
-    canvas.height = sh;
+    canvas.width = Math.max(1, Math.round(sw * fit));
+    canvas.height = Math.max(1, Math.round(sh * fit));
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas is not available in this browser.');
-    ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+    ctx.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
     const isPng = file.type === 'image/png';
     const mimeType = isPng ? 'image/png' : 'image/jpeg';

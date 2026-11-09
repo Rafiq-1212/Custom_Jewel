@@ -5,8 +5,11 @@ export type AcceptedImageType = (typeof ACCEPTED_IMAGE_TYPES)[number];
 export const ACCEPTED_IMAGE_EXTENSIONS = '.jpg,.jpeg,.png,.webp';
 export const ACCEPTED_IMAGE_LABEL = 'JPG, PNG or WEBP';
 
+/** What the server accepts. The browser scales a photo down to under 3.8 MB before sending (lib/photo-crop.ts fitForUpload). */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
-export const MAX_IMAGE_LABEL = '8MB';
+/** What a customer may pick: anything a phone camera takes; it is scaled down before it is sent. */
+export const MAX_PICK_BYTES = 50 * 1024 * 1024;
+export const MAX_IMAGE_LABEL = '50 MB';
 
 export type ValidationErrorCode = 'NO_FILE' | 'INVALID_TYPE' | 'TOO_LARGE';
 
@@ -39,7 +42,7 @@ export function quickValidate(file: File | null | undefined): ValidationResult {
   if (!isAcceptedType(file.type)) {
     return fail('INVALID_TYPE', `Unsupported image format. Please use ${ACCEPTED_IMAGE_LABEL}.`);
   }
-  if (file.size > MAX_IMAGE_BYTES) {
+  if (file.size > MAX_PICK_BYTES) {
     return fail('TOO_LARGE', `Image is too large. Please use a photo under ${MAX_IMAGE_LABEL}.`);
   }
   return { ok: true };
@@ -76,7 +79,7 @@ export function sniffImageType(bytes: Uint8Array): AcceptedImageType | null {
 /** The real check: declared size, then actual content by magic bytes. */
 export function validateImageBytes(bytes: Uint8Array, declaredSize: number): ValidationResult {
   if (declaredSize > MAX_IMAGE_BYTES || bytes.byteLength > MAX_IMAGE_BYTES) {
-    return fail('TOO_LARGE', `Image is too large. Please use a photo under ${MAX_IMAGE_LABEL}.`);
+    return fail('TOO_LARGE', 'That photo is too big to send. Please choose a smaller one.');
   }
   if (!sniffImageType(bytes)) {
     return fail('INVALID_TYPE', `Unsupported image format. Please use ${ACCEPTED_IMAGE_LABEL}.`);

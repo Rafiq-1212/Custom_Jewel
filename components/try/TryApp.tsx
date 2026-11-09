@@ -53,7 +53,8 @@ interface Design {
 }
 
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_BYTES = 8 * 1024 * 1024;
+/** Scaled down before it is sent (lib/photo-crop.ts), so any phone photo will do. */
+const MAX_BYTES = 50 * 1024 * 1024;
 const primary = 'w-full rounded-full bg-slate-900 px-5 py-3 text-base font-medium text-white hover:bg-slate-800 disabled:opacity-50';
 const secondary = 'w-full rounded-full border border-slate-300 bg-white px-5 py-3 text-base font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50';
 const STAGE_OF: Record<Pending['step'], Stage> = { drawing: 'inking', photo: 'photo', done: 'done', failed: 'done' };
@@ -231,7 +232,7 @@ export function TryApp() {
   const pick = (file: File) => {
     setError(null);
     if (!ACCEPTED.includes(file.type)) return setError('Please choose a JPG, PNG or WEBP photo.');
-    if (file.size > MAX_BYTES) return setError('That photo is over 8 MB. Please choose a smaller one.');
+    if (file.size > MAX_BYTES) return setError('That photo is over 50 MB. Please choose a smaller one.');
     setChosen((current) => {
       if (current) URL.revokeObjectURL(current.url);
       return { file, url: URL.createObjectURL(file) };
@@ -456,7 +457,7 @@ export function TryApp() {
                       }}
                     />
                   </label>
-                  {!result && <p className="text-center text-xs text-slate-500">A clear photo of the face, or faces, works best. JPG, PNG or WEBP, up to 8 MB.</p>}
+                  {!result && <p className="text-center text-xs text-slate-500">A clear photo of the face, or faces, works best. JPG, PNG or WEBP.</p>}
                 </>
               )}
             </section>

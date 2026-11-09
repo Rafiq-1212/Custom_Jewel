@@ -27,7 +27,7 @@ issue, not a bug.
 
 | Step | What you do | What happens |
 |---|---|---|
-| 1. Add a photo | Drop in or choose a JPG, PNG or WEBP (up to 8 MB). Drag the box around the people you want, leaving out stretched-out arms, other people and busy backgrounds | The photo is checked in the browser and again on the server. Only what's inside the box is sent |
+| 1. Add a photo | Drop in or choose a JPG, PNG or WEBP (up to 50 MB; anything over 3.8 MB is scaled down in the browser before it is sent). Drag the box around the people you want, leaving out stretched-out arms, other people and busy backgrounds | The photo is checked in the browser and again on the server. Only what's inside the box is sent |
 | 2. Pick a pendant style | Face, Half Size, Couple, Family or Pet | Tells Gemini how to frame the sketch. Face stops at the jaw; Couple keeps both people |
 | | Click **Create sketch** | **First AI call**, about 10 to 15 seconds |
 | 3. Your sketch | Check it, and click **Draw it again** if it's not right | The sketch is trimmed and its background made see-through |
