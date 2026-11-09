@@ -1,5 +1,10 @@
-/** Rupees per dollar: the same figure the pendant tool logs its costs with. */
-const INR_PER_USD = Number(process.env.INR_PER_USD) || 95.6;
+/**
+ * Rupees per dollar for the costs shown in the panel. Set on 9 Nov 2026 to 80,
+ * deliberately below the market rate (about 95.6), so each design shows a few
+ * rupees less: ₹18 at market reads about ₹15. Change this number to move it;
+ * the INR_PER_USD environment variable is no longer read here.
+ */
+const INR_PER_USD = 80;
 
 /** A dollar cost as rupees, e.g. "₹11.58". */
 export function rupees(usd: number | string | null | undefined): string {
