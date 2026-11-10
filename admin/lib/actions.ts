@@ -109,7 +109,7 @@ export async function saveShopSettings(_previous: FormState, form: FormData): Pr
   await requireEditor('customers');
   const phone = field(form, 'supportPhone').slice(0, 40);
   const tries = Number(field(form, 'triesLimit'));
-  if (phone && !/^[+\d][\d\s-]{6,}$/.test(phone)) return { error: 'Enter the support number as digits, e.g. +91 98765 43210.' };
+  if (phone && !/^[+\d][\d\s-]{6,}$/.test(phone)) return { error: 'Enter the customer care number as digits, e.g. +91 98765 43210.' };
   if (!Number.isInteger(tries) || tries < 1 || tries > 50) return { error: 'Designs per customer must be between 1 and 50.' };
   await db()`insert into settings (key, value, updated_at) values ('support_phone', ${phone}, now()) on conflict (key) do update set value = excluded.value, updated_at = now()`;
   await db()`insert into settings (key, value, updated_at) values ('tries_limit', ${String(tries)}, now()) on conflict (key) do update set value = excluded.value, updated_at = now()`;

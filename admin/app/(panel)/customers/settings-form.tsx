@@ -11,7 +11,7 @@ export function ShopSettingsForm({ supportPhone, triesLimit, editable }: { suppo
   return (
     <form action={action} className="grid gap-4 p-4 sm:grid-cols-[1fr_12rem_auto] sm:items-end">
       <label className="block">
-        <span className="text-sm font-medium text-slate-700">Support number (shown when a customer runs out)</span>
+        <span className="text-sm font-medium text-slate-700">Customer care number (shown to shop customers who run out of designs)</span>
         <input name="supportPhone" defaultValue={supportPhone} placeholder="+91 98765 43210" disabled={!editable} className={input} />
       </label>
       <label className="block">
@@ -29,7 +29,7 @@ export function ShopSettingsForm({ supportPhone, triesLimit, editable }: { suppo
         </p>
       )}
       {state.saved && !state.error && <p className="text-sm text-emerald-700 sm:col-span-3">Saved.</p>}
-      {!supportPhone && !state.saved && <p className="text-sm text-amber-700 sm:col-span-3">No support number yet: customers who run out are only asked to contact the shop.</p>}
+      {!supportPhone && !state.saved && <p className="text-sm text-amber-700 sm:col-span-3">No customer care number yet: customers who run out are only asked to contact the shop.</p>}
     </form>
   );
 }
