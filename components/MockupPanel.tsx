@@ -23,7 +23,7 @@
 import * as React from 'react';
 import { dataUrlToBlob, downloadFile, extensionForDataUrl } from '@/lib/download';
 import { FeedbackPanel } from './FeedbackPanel';
-import { MockupError, runMockup } from '@/lib/mockup-client';
+import { MockupError, PRODUCT_PHOTO_FROM, renderFinalPicture, runMockup } from '@/lib/mockup-client';
 import { PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import type { DesignType, SilhouetteContour } from '@/lib/pendant-geometry';
@@ -75,6 +75,31 @@ export function MockupPanel({
 
   const silhouettePending = designType === 'edge-cut' && !contour;
 
+  // 'preview' mode: the final gold and silver pictures are free and instant,
+  // so both are shown as soon as there is a design, and follow every change.
+  // They are only kept with the design (and counted) when saved below.
+  const live = PRODUCT_PHOTO_FROM === 'preview';
+  const [pictures, setPictures] = React.useState<{ key: string; urls: Partial<Record<MaterialId, string>> }>({ key: '', urls: {} });
+  React.useEffect(() => {
+    if (!live || silhouettePending) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const urls: Partial<Record<MaterialId, string>> = {};
+      for (const material of PENDANT_MATERIAL_LIST) {
+        try {
+          urls[material.id] = await renderFinalPicture({ sketch, shape, material: material.id, transform, category, designType, contour, rimColor });
+        } catch {
+          // Left out: the tile says so, and Save can still try again.
+        }
+      }
+      if (!cancelled) setPictures({ key: designKey, urls });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [live, silhouettePending, designKey, sketch, shape, transform, category, designType, contour, rimColor]);
+
   const render = async (material: MaterialId) => {
     const key = `${designKey}:${material}`;
     setMockups((m) => ({ ...m, [key]: { status: 'loading' } }));
@@ -101,14 +126,24 @@ export function MockupPanel({
 
   return (
     <div className="flex flex-col gap-5">
-      <p className="text-xs text-slate-500">
-        A realistic photo of this exact pendant, ready for your product page. Each one is queued at half price, so it
-        takes a few minutes — leave this page open while it comes back.
-      </p>
+      {PRODUCT_PHOTO_FROM === 'ai' ? (
+        <p className="text-xs text-slate-500">
+          A realistic photo of this exact pendant, ready for your product page. Each one is queued at half price, so it
+          takes a few minutes — leave this page open while it comes back.
+        </p>
+      ) : (
+        <p className="text-xs text-slate-500">
+          The final picture of this exact pendant in each metal, with its ring, made straight from the sketch at no cost.
+          It follows every change above. Save the one you want to keep it with this design.
+        </p>
+      )}
 
       <div className="grid gap-6 sm:grid-cols-2">
         {PENDANT_MATERIAL_LIST.map((material) => {
-          const state = mockups[`${designKey}:${material.id}`];
+          const saved = mockups[`${designKey}:${material.id}`];
+          const livePicture = live && pictures.key === designKey ? pictures.urls[material.id] : undefined;
+          // Shown like a finished photo, so the tile and Download work the same either way.
+          const state: MockupState | undefined = saved ?? (livePicture ? { status: 'done', dataUrl: livePicture } : undefined);
           return (
             <div key={material.id} className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
@@ -116,14 +151,20 @@ export function MockupPanel({
                 <button
                   type="button"
                   onClick={() => render(material.id)}
-                  disabled={state?.status === 'loading' || silhouettePending}
+                  disabled={state?.status === 'loading' || silhouettePending || (live && saved?.status === 'done')}
                   className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {state?.status === 'loading'
-                    ? 'Making photo…'
-                    : state?.status === 'done'
-                      ? 'Make another'
-                      : `Make ${material.label.toLowerCase()} photo`}
+                  {live
+                    ? saved?.status === 'loading'
+                      ? 'Saving…'
+                      : saved?.status === 'done'
+                        ? 'Saved'
+                        : `Save ${material.label.toLowerCase()} photo`
+                    : state?.status === 'loading'
+                      ? 'Making photo…'
+                      : state?.status === 'done'
+                        ? 'Make another'
+                        : `Make ${material.label.toLowerCase()} photo`}
                 </button>
               </div>
 
@@ -131,8 +172,10 @@ export function MockupPanel({
                 {state?.status === 'done' ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={state.dataUrl} alt={`${material.label} ${designLabel} product mockup`} className="h-full w-full object-contain" />
-                ) : state?.status === 'loading' ? (
-                  <span className="text-xs text-slate-400">Photographing the {material.label.toLowerCase()} pendant…</span>
+                ) : state?.status === 'loading' || live ? (
+                  <span className="text-xs text-slate-400">
+                    {live ? 'Drawing' : 'Photographing'} the {material.label.toLowerCase()} pendant…
+                  </span>
                 ) : (
                   <span className="px-6 text-center text-xs text-slate-400">No photo yet.</span>
                 )}

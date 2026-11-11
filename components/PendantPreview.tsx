@@ -49,6 +49,7 @@ import {
   type SilhouetteContour,
 } from '@/lib/pendant-geometry';
 import { PENDANT_SHAPES, PENDANT_VIEWBOX, type PendantTransform, type ShapeId } from '@/lib/pendant-shapes';
+import { BAIL_BOTTOM_HALF_WIDTH, BAIL_DROP, BAIL_HEIGHT, BAIL_TOP_HALF_WIDTH, bailPath } from '@/lib/bail';
 
 const GRADIENT_STOPS = [0, 0.24, 0.46, 0.68, 1] as const;
 
@@ -332,6 +333,10 @@ export interface RenderPendantPngOptions {
    * instead of filling the frame. See `zoomOut`.
    */
   zoomedOut?: boolean;
+  /** Fill behind the pendant (zoomed out only); transparent when left out. */
+  background?: string;
+  /** 'image/png' (default) or 'image/jpeg', which needs a background. */
+  mimeType?: 'image/png' | 'image/jpeg';
 }
 
 /**
@@ -373,15 +378,97 @@ export async function renderPendantPngBlob(options: RenderPendantPngOptions): Pr
     1,
   );
 
-  const output = options.zoomedOut ? zoomOut(canvas, geometry, options.material) : canvas;
+  const output = options.zoomedOut ? zoomOut(canvas, geometry, options.material, options.background) : canvas;
   return new Promise((resolve, reject) => {
-    output.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error('Canvas could not be exported to PNG.'));
-    }, 'image/png');
+    output.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('Canvas could not be exported to PNG.'));
+      },
+      options.mimeType ?? 'image/png',
+      0.92,
+    );
   });
 }
 
+/**
+ * The bail as polished metal, in viewBox units: a soft shadow under it, a
+ * rounded surface shaded across its width (dark edges, a bright band just
+ * left of centre, the same light direction as the plate's sheen), a narrow
+ * highlight streak down its length, a bevel on its edge, and its lower end
+ * dimming where it passes into the hole. `unit` is canvas pixels per unit.
+ */
+function drawBail(
+  o: CanvasRenderingContext2D,
+  hole: { cx: number; cy: number; r: number },
+  metal: PendantMaterial,
+  unit: number,
+): void {
+  const path = new Path2D(bailPath(hole.cx, hole.cy, hole.r));
+  const [light, mid, , , shadow] = metal.gradient;
+  const half = hole.r * BAIL_TOP_HALF_WIDTH;
+  const bottom = hole.cy + hole.r * BAIL_DROP;
+  const top = bottom - hole.r * BAIL_HEIGHT;
+
+  // Shadow on the plate and background, down and to the right.
+  o.save();
+  o.shadowColor = 'rgba(0,0,0,0.32)';
+  o.shadowBlur = 1.2 * unit;
+  o.shadowOffsetX = 0.35 * unit;
+  o.shadowOffsetY = 0.6 * unit;
+  o.fillStyle = mid;
+  o.fill(path);
+  o.restore();
+
+  o.save();
+  o.clip(path);
+  // A round bar of metal: shaded across, brightest a little left of centre.
+  const across = o.createLinearGradient(hole.cx - half, 0, hole.cx + half, 0);
+  across.addColorStop(0, shadow);
+  across.addColorStop(0.16, mid);
+  across.addColorStop(0.36, light);
+  across.addColorStop(0.5, '#ffffff');
+  across.addColorStop(0.62, light);
+  across.addColorStop(0.84, mid);
+  across.addColorStop(1, shadow);
+  o.fillStyle = across;
+  o.fillRect(hole.cx - half - 1, top - 1, half * 2 + 2, bottom - top + hole.r + 2);
+  // Lit from the top, falling into shade where it goes into the hole.
+  const down = o.createLinearGradient(0, top, 0, bottom + hole.r * 0.5);
+  down.addColorStop(0, 'rgba(255,255,255,0.28)');
+  down.addColorStop(0.35, 'rgba(255,255,255,0)');
+  down.addColorStop(0.8, 'rgba(0,0,0,0)');
+  down.addColorStop(1, 'rgba(0,0,0,0.38)');
+  o.fillStyle = down;
+  o.fillRect(hole.cx - half - 1, top - 1, half * 2 + 2, bottom - top + hole.r + 2);
+  // The highlight streak, following the taper.
+  o.beginPath();
+  o.moveTo(hole.cx - half * 0.32, top + half * 0.75);
+  o.lineTo(hole.cx - hole.r * BAIL_BOTTOM_HALF_WIDTH * 0.3, bottom - hole.r * 0.9);
+  o.strokeStyle = 'rgba(255,255,255,0.75)';
+  o.lineWidth = Math.max(0.12, half * 0.16);
+  o.lineCap = 'round';
+  o.filter = `blur(${Math.max(0.6, half * 0.12 * unit)}px)`;
+  o.stroke();
+  o.filter = 'none';
+  // Bevel: a dark rim just inside the edge, and a thin light line on the lit side.
+  o.lineWidth = half * 0.3;
+  o.strokeStyle = 'rgba(0,0,0,0.22)';
+  o.stroke(path);
+  o.translate(-half * 0.06, -half * 0.06);
+  o.lineWidth = half * 0.1;
+  o.strokeStyle = 'rgba(255,255,255,0.5)';
+  o.stroke(path);
+  o.restore();
+
+  // A crisp outline, so it reads as a solid piece against the cream.
+  o.lineWidth = Math.max(0.08, hole.r * 0.06);
+  o.strokeStyle = 'rgba(0,0,0,0.4)';
+  o.stroke(path);
+}
+
+/** The bail's hole radius, in viewBox units, on a catalogue shape with no hole of its own: the heart frame's (lib/pendant-shapes.ts). */
+const CATALOGUE_BAIL_HOLE = 2.4;
 /** The pendant's height as a fraction of the zoomed-out picture's; see zoomOut. */
 const WIDE_PENDANT_HEIGHT = 0.42;
 /** The zoomed-out picture's width to height. */
@@ -396,7 +483,7 @@ const WIDE_ASPECT = 0.85;
  * own ring. (It used to hang on a drawn chain; the client wanted the chain
  * gone and the distance kept.)
  */
-function zoomOut(pendant: HTMLCanvasElement, geometry: PendantGeometry, material: MaterialId): HTMLCanvasElement {
+function zoomOut(pendant: HTMLCanvasElement, geometry: PendantGeometry, material: MaterialId, background?: string): HTMLCanvasElement {
   const ctx = pendant.getContext('2d');
   if (!ctx) return pendant;
   const { width, height } = pendant;
@@ -414,15 +501,22 @@ function zoomOut(pendant: HTMLCanvasElement, geometry: PendantGeometry, material
   }
   if (maxX < 0) return pendant;
 
-  const bailRadius = width * 0.022;
-  let bail: { x: number; y: number } | null = null;
-  if (!geometry.hangingHole) {
+  // Every piece gets the workshop's bail (lib/bail.ts), the same as the
+  // product photo: threaded through its own hole on a cut-to-shape piece or
+  // the heart's tab, and standing on the top centre of a catalogue shape,
+  // sized like the heart's (lib/pendant-shapes.ts). The canvas is in viewBox
+  // units times `unit`.
+  const unit = width / PENDANT_VIEWBOX.width;
+  let hole = geometry.hangingHole;
+  if (!hole) {
     const centre = Math.round((minX + maxX) / 2);
     let top = minY;
     for (let y = minY; y <= maxY; y++) if (alpha[(y * width + centre) * 4 + 3] > 16) { top = y; break; }
-    bail = { x: centre, y: top - bailRadius * 0.6 };
-    minY = Math.min(minY, Math.floor(bail.y - bailRadius * 1.2));
+    const r = CATALOGUE_BAIL_HOLE;
+    hole = { cx: centre / unit, cy: top / unit + r * 0.9, r };
   }
+  const bailTop = (hole.cy + hole.r * BAIL_DROP - hole.r * BAIL_HEIGHT) * unit;
+  minY = Math.min(minY, Math.floor(bailTop - 2));
 
   const pendantHeight = maxY - minY + 1;
   const outHeight = Math.round(pendantHeight / WIDE_PENDANT_HEIGHT);
@@ -435,18 +529,16 @@ function zoomOut(pendant: HTMLCanvasElement, geometry: PendantGeometry, material
   out.height = outHeight;
   const o = out.getContext('2d');
   if (!o) return pendant;
+  if (background) {
+    o.fillStyle = background;
+    o.fillRect(0, 0, outWidth, outHeight);
+  }
   o.drawImage(pendant, offsetX, offsetY);
 
-  if (bail) {
-    o.beginPath();
-    o.arc(bail.x + offsetX, bail.y + offsetY, bailRadius, 0, Math.PI * 2);
-    o.lineWidth = bailRadius * 0.45;
-    o.strokeStyle = PENDANT_MATERIALS[material].flat;
-    o.stroke();
-    o.lineWidth = Math.max(0.8, bailRadius * 0.08);
-    o.strokeStyle = 'rgba(0,0,0,0.35)';
-    o.stroke();
-  }
+  o.setTransform(unit, 0, 0, unit, offsetX, offsetY);
+  drawBail(o, hole, PENDANT_MATERIALS[material], unit);
+  o.setTransform(1, 0, 0, 1, 0, 0);
+
   return out;
 }
 
