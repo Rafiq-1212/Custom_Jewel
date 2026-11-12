@@ -22,6 +22,8 @@ export const dynamic = 'force-dynamic';
 const SAVED_FILE = /^orders\/\d{4}-\d{2}-\d{2}\/[0-9a-f]{10}\/[A-Za-z0-9._-]{1,80}$/;
 const WIDTHS = new Set([160, 480]);
 const PICTURE = /\.(png|jpe?g|webp)$/;
+/** The tool's own product pictures, saved under a fixed name and replaced as the design changes (app/api/product-preview): never kept stale. */
+const REPLACED = /^product-(gold|silver)\.jpg$/;
 
 export async function GET(request: Request): Promise<Response> {
   const session = await auth().api.getSession({ headers: await headers() });
@@ -45,12 +47,13 @@ export async function GET(request: Request): Promise<Response> {
       const bytes = Buffer.from(await new Response(file.stream).arrayBuffer());
       // WebP keeps a sketch's transparent background.
       const small = await sharp(bytes).resize({ width, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
-      return new Response(new Uint8Array(small), { headers: { 'Content-Type': 'image/webp', 'Cache-Control': 'private, max-age=86400' } });
+      const cache = REPLACED.test(name) ? 'private, no-cache' : 'private, max-age=86400';
+      return new Response(new Uint8Array(small), { headers: { 'Content-Type': 'image/webp', 'Cache-Control': cache } });
     }
     return new Response(file.stream, {
       headers: {
         'Content-Type': file.blob.contentType,
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': REPLACED.test(name) ? 'private, no-cache' : 'private, max-age=300',
         ...(name.endsWith('.zip') ? { 'Content-Disposition': `attachment; filename="${name}"` } : {}),
       },
     });

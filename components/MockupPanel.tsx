@@ -23,7 +23,7 @@
 import * as React from 'react';
 import { dataUrlToBlob, downloadFile, extensionForDataUrl } from '@/lib/download';
 import { FeedbackPanel } from './FeedbackPanel';
-import { MockupError, PRODUCT_PHOTO_FROM, renderFinalPicture, runMockup } from '@/lib/mockup-client';
+import { finalPicture, MockupError, PRODUCT_PHOTO_FROM, runMockup } from '@/lib/mockup-client';
 import { PENDANT_MATERIAL_LIST, type MaterialId, type RimColorId } from '@/lib/materials';
 import { PENDANT_CATEGORIES, type CategoryId } from '@/lib/pendant-categories';
 import type { DesignType, SilhouetteContour } from '@/lib/pendant-geometry';
@@ -75,9 +75,10 @@ export function MockupPanel({
 
   const silhouettePending = designType === 'edge-cut' && !contour;
 
-  // 'preview' mode: the final gold and silver pictures are free and instant,
-  // so both are shown as soon as there is a design, and follow every change.
-  // They are only kept with the design (and counted) when saved below.
+  // 'preview' mode: the final gold and silver pictures cost nothing, so both
+  // are made as soon as there is a design, follow every change, and are saved
+  // with the design each time (one file per metal, replaced: see
+  // /api/product-preview). Nobody has to remember to save them.
   const live = PRODUCT_PHOTO_FROM === 'preview';
   const [pictures, setPictures] = React.useState<{ key: string; urls: Partial<Record<MaterialId, string>> }>({ key: '', urls: {} });
   React.useEffect(() => {
@@ -87,18 +88,18 @@ export function MockupPanel({
       const urls: Partial<Record<MaterialId, string>> = {};
       for (const material of PENDANT_MATERIAL_LIST) {
         try {
-          urls[material.id] = await renderFinalPicture({ sketch, shape, material: material.id, transform, category, designType, contour, rimColor });
+          urls[material.id] = await finalPicture({ sketch, shape, material: material.id, transform, engravingArea, designType, contour, rimColor, category }, true);
         } catch {
           // Left out: the tile says so, and Save can still try again.
         }
       }
       if (!cancelled) setPictures({ key: designKey, urls });
-    }, 250);
+    }, 1200);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [live, silhouettePending, designKey, sketch, shape, transform, category, designType, contour, rimColor]);
+  }, [live, silhouettePending, designKey, sketch, shape, transform, engravingArea, category, designType, contour, rimColor]);
 
   const render = async (material: MaterialId) => {
     const key = `${designKey}:${material}`;
@@ -134,7 +135,7 @@ export function MockupPanel({
       ) : (
         <p className="text-xs text-slate-500">
           The final picture of this exact pendant in each metal, with its ring, made straight from the sketch at no cost.
-          It follows every change above. Save the one you want to keep it with this design.
+          It follows every change above and is saved with this design by itself.
         </p>
       )}
 
@@ -148,24 +149,25 @@ export function MockupPanel({
             <div key={material.id} className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-800">{material.label}</span>
-                <button
-                  type="button"
-                  onClick={() => render(material.id)}
-                  disabled={state?.status === 'loading' || silhouettePending || (live && saved?.status === 'done')}
-                  className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {live
-                    ? saved?.status === 'loading'
-                      ? 'Saving…'
-                      : saved?.status === 'done'
-                        ? 'Saved'
-                        : `Save ${material.label.toLowerCase()} photo`
-                    : state?.status === 'loading'
+                {live ? (
+                  // Saved by itself whenever it is drawn (see the effect above).
+                  <span className={`text-xs ${livePicture || pictures.key !== designKey ? 'text-slate-500' : 'text-red-600'}`}>
+                    {livePicture ? 'Saved with this design' : pictures.key === designKey ? 'Not saved: change anything to try again' : 'Drawing…'}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => render(material.id)}
+                    disabled={state?.status === 'loading' || silhouettePending}
+                    className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {state?.status === 'loading'
                       ? 'Making photo…'
                       : state?.status === 'done'
                         ? 'Make another'
                         : `Make ${material.label.toLowerCase()} photo`}
-                </button>
+                  </button>
+                )}
               </div>
 
               <div className="flex aspect-square items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-[#f4efe6]">

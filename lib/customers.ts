@@ -122,6 +122,12 @@ export async function customerFolderJob(phone: string, folder: string): Promise<
   return row?.id ?? null;
 }
 
+/** Whether a product photo saved at this exact path is already in the ledger. */
+export async function photoRecorded(file: string): Promise<boolean> {
+  const [row] = await db()`select 1 from events where kind = 'product_photo' and file = ${file} limit 1`;
+  return Boolean(row);
+}
+
 /** Product photos already made from one design's folder. */
 export async function photosOf(folder: string): Promise<number> {
   const [row] = await db()`select count(*)::int as n from events where kind = 'product_photo' and right(folder, 10) = right(${folder}, 10)`;
